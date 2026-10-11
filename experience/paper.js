@@ -78,6 +78,7 @@ export function atlasCanvas(size = 1024, last = 100) {
     g.strokeStyle = 'rgba(0,0,0,0.10)'
     g.lineWidth = 2 * k
     g.strokeRect(-tile * 0.42, -tile * 0.42, tile * 0.84, tile * 0.84)
+    if (n < last) flowArrow(g, n, tile)
     if (n === last) {
       g.fillStyle = 'rgba(255,255,255,0.55)'
       star(g, 0, -tile * 0.06, tile * 0.36, tile * 0.16, 5)
@@ -105,6 +106,26 @@ export function atlasCanvas(size = 1024, last = 100) {
   label(244, 962, 476, 1022, 'DICE')
   return c
 }
+/**
+ * A faint chevron behind a cell's number, the way the pieces go on: along the tier (right on odd tiers,
+ * left on even ones) and up to the next tier from its last cell. Up the tile is towards the board's back.
+ */
+function flowArrow(g, n, tile) {
+  const t = Math.floor((n - 1) / 10)
+  const a = n % 10 === 0 ? -Math.PI / 2 : t % 2 === 0 ? 0 : Math.PI
+  g.save()
+  g.rotate(a)
+  g.strokeStyle = 'rgba(43,38,34,0.1)'
+  g.lineWidth = tile * 0.075
+  g.lineCap = 'round'; g.lineJoin = 'round'
+  for (const x of [-0.13, 0.11]) {
+    g.beginPath()
+    g.moveTo((x - 0.13) * tile, -0.25 * tile); g.lineTo((x + 0.12) * tile, 0); g.lineTo((x - 0.13) * tile, 0.25 * tile)
+    g.stroke()
+  }
+  g.restore()
+}
+
 /** UV rectangle of a cell's tile in the atlas (v flipped for three.js). */
 export function tileUV(n) {
   const col = (n - 1) % 10, row = Math.floor((n - 1) / 10)

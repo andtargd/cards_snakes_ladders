@@ -34,7 +34,7 @@ export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 
 // tgt: any (any player on the board, self included), other (another player), leader (automatic),
 // cell, cell2 (two cells), ladder, snake, board, none
 export const CARDS = [
-  { id: 'M1', name: 'Dash', cat: 'M', rar: 'C', tgt: 'any', text: 'Move any player 2 spaces forward.' },
+  { id: 'M1', name: 'Dash', cat: 'M', rar: 'C', tgt: 'any', text: 'Move any player 2 spaces forward, over any swamp.' },
   { id: 'M2', name: 'Setback', cat: 'M', rar: 'U', tgt: 'any', text: 'Move any player 3 spaces back.' },
   { id: 'M3', name: 'Swap Places', cat: 'M', rar: 'R', tgt: 'other', text: 'Swap places with another player.' },
   { id: 'M4', name: 'Dethrone', cat: 'M', rar: 'L', tgt: 'leader', text: 'The player closest to the finish moves 10 spaces back.' },
@@ -291,7 +291,7 @@ function beginTurn(s, ev) {
     if (s.ph === 'over') return
     const pi = s.cur, p = s.pl[pi]
     s.turnNo++
-    s.rolled = false; s.played = false; s.frozen = false; s.peek = null
+    s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.ph = 'main'
     ev.push({ e: 'turn', p: pi, round: s.round })
     if (p.fx.sk) {
       delete p.fx.sk
@@ -305,7 +305,6 @@ function beginTurn(s, ev) {
     const card = drawCard(s)
     p.h.push(card)
     ev.push({ e: 'draw', p: pi, card })
-    s.ph = p.h.length > CFG.hand ? 'disc' : 'main'
     return
   }
 }
@@ -335,6 +334,13 @@ function tickTimers(s, pi, ev) {
   if (board) ev.push(boardEvent(s, 'expire'))
 }
 const boardEvent = (s, why) => ({ e: 'board', why, els: effectiveElements(s), mk: s.mk.map(m => [m.k, m.c, m.t]), mods: s.mods.map(m => m.i) })
+
+/** The player is done: with more cards than the hand holds they discard first (one by one), then the turn ends. */
+function finishTurn(s, ev) {
+  const p = s.pl[s.cur]
+  if (!p.d && p.h.length > CFG.hand) { s.ph = 'disc'; s.peek = null; ev.push({ e: 'mustdisc', p: s.cur }); return }
+  endTurn(s, ev)
+}
 
 function endTurn(s, ev) {
   if (s.ph === 'over') return
@@ -533,18 +539,16 @@ function resolveLanding(s, pi, ev) {
 
 /**
  * Moves from cards (Dash, Setback, Dethrone): the piece jumps, then the cell it lands on works as after a
- * roll (ladder, snake, trampoline, portal). Going forward a swamp on the way stops it, as on a roll.
+ * roll (ladder, snake, trampoline, portal). A jump goes over swamps on the way; only landing in one stops it.
  */
 function jump(s, pi, to, ev, why) {
   const p = s.pl[pi], fx = p.fx
   const from = p.pos
-  let dest = Math.max(0, Math.min(s.n, to)), stopped = false
-  for (let c = from + 1; c < dest && c < s.n; c++) if (!fx.bo && markerAt(s, c, 'sw')) { dest = c; stopped = true; break }
-  p.pos = dest
+  p.pos = Math.max(0, Math.min(s.n, to))
   ev.push({ e: 'jump', p: pi, from, to: p.pos, why })
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (p.pos <= 0) return
-  if (stopped || (!fx.bo && markerAt(s, p.pos, 'sw'))) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+  if (!fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
   resolveLanding(s, pi, ev)
 }
 
@@ -601,7 +605,7 @@ export function targetsFor(s, pi, cardId) {
     case 'any': return live
     case 'other': {
       const others = live.filter(i => i !== pi)
-      if (cardId === 'C3') return others.filter(i => s.pl[i].h.length > 0)
+      if (cardId === 'C2' || cardId === 'C3') return others.filter(i => s.pl[i].h.length > 0)
       if (cardId === 'C4') return others.filter(i => s.pl[i].h.length > 0 || s.pl[pi].h.length > 1)
       return others
     }
@@ -648,7 +652,9 @@ export function whyNot(s, pi, cardId) {
 // ---------- actions ----------
 /**
  * a: { t: 'roll', v? } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i }
- * Returns { ok, err, ev }. The state is changed in place (clone it first to keep the old one).
+ * A turn: draw a card, roll once and play at most one card in either order, then (holding more than
+ * the hand's 3) discard down to 3 at the end. Returns { ok, err, ev }. The state is changed in place
+ * (clone it first to keep the old one).
  */
 export function apply(s, pi, a) {
   const ev = []
@@ -663,7 +669,7 @@ export function apply(s, pi, a) {
     if (i < 0 || i >= p.h.length) return fail('bad card')
     const [card] = p.h.splice(i, 1)
     ev.push({ e: 'discard', p: pi, card })
-    s.ph = 'main'
+    if (p.h.length <= CFG.hand) endTurn(s, ev)
   } else if (s.ph !== 'main') return fail('Choose a card to discard')
   else if (a.t === 'roll') {
     if (s.rolled) return fail('Already rolled')
@@ -672,7 +678,7 @@ export function apply(s, pi, a) {
     afterAction(s, pi, ev)
   } else if (a.t === 'end') {
     if (!s.rolled) return fail('Roll first')
-    endTurn(s, ev)
+    finishTurn(s, ev)
   } else if (a.t === 'play') {
     const i = a.i | 0
     const cardId = p.h[i]
@@ -690,7 +696,8 @@ export function apply(s, pi, a) {
 function afterAction(s, pi, ev) {
   if (s.ph === 'over') return
   if (s.pl[pi].d) { endTurn(s, ev); return } // finished mid-turn (Fool): the turn ends at once
-  if (s.rolled && (s.played || !hasPlayable(s, pi))) endTurn(s, ev)
+  // a peeked hand stays open until the player ends the turn
+  if (s.rolled && !s.peek && (s.played || !hasPlayable(s, pi))) finishTurn(s, ev)
 }
 
 function playCard(s, pi, i, tg, ev) {

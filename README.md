@@ -8,11 +8,11 @@ Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck
 
 - **Two modes:** *Champion* — the first to reach the last cell wins; *Fool* — whoever is left last on the board is the Fool.
 - **Bots and friends:** 2 to 6 on the board, any mix of players at one computer (pass-and-play) and bots of three levels.
-- **Cards:** extra and golden dice, swamps, trampolines and portals, snakes turned into ladders, shields, freezes, steals and swaps; one card per turn, played before or after the roll.
+- **Cards:** extra and golden dice, swamps, trampolines and portals, snakes turned into ladders, shields, freezes, steals and swaps; one card per turn, played before or after the roll. You keep up to 3: a 4th burns at the end of your turn.
 - **Online:** *Quick Match* sits you down with others who are looking for a game; *Create a Room* gives a code and a link for friends. The room's table has seats for up to 6 (players and bots); others can watch.
 - A 3D paper board with animated dice, sound effects, works on desktop and phones.
 
-Controls: click a card, then its target; Space rolls, 1–3 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
+Controls: click the dice tray when it lights up (or press Space) to roll; click a card, then its target; 1–4 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
 
 ## Running locally
 

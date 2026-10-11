@@ -230,7 +230,8 @@ class App {
     this.invSent = new Map() // id -> when I last invited them
     const v = this.view
     v.on('draw', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.4); this.ui.dirty = true })
-    for (const name of ['turn', 'discard', 'roll', 'redraw', 'steal', 'swaphands', 'peek', 'settled']) v.on(name, () => { this.ui.dirty = true })
+    for (const name of ['turn', 'mustdisc', 'roll', 'redraw', 'steal', 'swaphands', 'peek', 'settled']) v.on(name, () => { this.ui.dirty = true })
+    v.on('discard', e => { this.ui.burnDiscard(e); this.ui.dirty = true })
     v.on('log', text => this.ui.log(text))
     v.on('play', e => { this.ui.showPlayed(e); this.sfx('card', 0.6); this.ui.dirty = true })
     v.on('over', () => { this.ui.dirty = true })

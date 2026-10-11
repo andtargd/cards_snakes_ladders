@@ -10,6 +10,9 @@ const SLOTS = [[0, 0], [-0.24, -0.2], [0.24, -0.2], [-0.24, 0.22], [0.24, 0.22],
 const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 const easeOut = t => 1 - Math.pow(1 - t, 3)
 const TILT = 22 * Math.PI / 180
+const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
+// events that move a piece: who moved
+const MOVER = { move: e => e.p, ladder: e => e.p, snake: e => e.p, tramp: e => e.p, jump: e => e.p, portal: e => e.p, swap: e => e.a }
 
 export class View {
   constructor(p0) {
@@ -121,9 +124,11 @@ export class View {
     this.trayDice = [0, 1].map(() => { const m = new THREE.Mesh(this.dieGeo, this.mat.dice); m.visible = false; this.tray.add(m); return m })
     this.trayCam = new THREE.PerspectiveCamera(35, 1.4, 0.1, 50)
     this.trayCam.position.set(0, 2.5, 1.55)
-    this.trayCam.lookAt(0, 0, 0.1)
+    this.trayCam.lookAt(0, 0.2, -0.05)
     this.trayVisible = 0
     this.trayLabel = ''
+    this.trayPrompt = 0 // dice waiting in the tray for my click (the screen layer sets it every frame)
+    this.trayRolling = false
   }
 
   /** The paper tiers, the numbered cells and the arrows between tiers for a board of n cells. */
@@ -226,7 +231,7 @@ export class View {
       const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.2, 20).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.18, depthWrite: false }))
       shadow.position.y = 0.006
       group.add(shadow)
-      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.75, 8), new THREE.MeshBasicMaterial({ visible: false }))
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.75, 8), new THREE.MeshBasicMaterial({ visible: false }))
       hit.position.y = 0.37
       hit.userData.player = i
       group.add(hit)
@@ -333,10 +338,20 @@ export class View {
 
   // ---------- events ----------
   get busy() { return this.tasks.length > 0 }
-  /** Animates the rules' events, then shows `final` exactly. */
+  /** Animates the rules' events, then shows `final` exactly. Where a piece's move ends the camera rests on it a moment. */
   play(events, final, opts = {}) {
-    for (const e of events) this.queueEvent(e, opts)
+    let moved = null
+    for (const e of events) {
+      if (moved != null && (e.e === 'turn' || e.e === 'finish' || e.e === 'over')) { if (e.e === 'turn') this.holdTask(moved); moved = null }
+      this.queueEvent(e, opts)
+      if (MOVER[e.e]) moved = MOVER[e.e](e)
+    }
+    if (moved != null) this.holdTask(moved)
     this.tasks.push({ dur: 0, start: () => { this.setState(final, opts); this.emit('settled') } })
+  }
+  /** The camera stays on a piece that has just stopped, unless the player looks around themselves. */
+  holdTask(p) {
+    this.tasks.push({ dur: HOLD, start: () => this.focusOn(p), update: () => { const t = this.tokens[p]; if (t) this.follow(t.home || t.group.position) } })
   }
   wait(dur, update, start, end) { this.tasks.push({ dur, update, start, end }) }
 
@@ -347,7 +362,8 @@ export class View {
       case 'log': this.tasks.push({ dur: 0, start: () => this.emit('log', e.text) }); break
       case 'turn': this.tasks.push({ dur: 0.05, start: () => { this.manual = 0; this.focusOn(e.p); this.emit('turn', e) } }); break
       case 'draw': this.tasks.push({ dur: 0.35, start: () => this.emit('draw', e) }); break
-      case 'discard': this.tasks.push({ dur: 0.25, start: () => this.emit('discard', e) }); break
+      case 'discard': this.tasks.push({ dur: 0.5, start: () => this.emit('discard', e) }); break
+      case 'mustdisc': this.tasks.push({ dur: 0, start: () => this.emit('mustdisc', e) }); break
       case 'play': this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); if (typeof e.tg === 'number' && ['any', 'other', 'leader'].includes(CARD[e.card].tgt)) { this.focusOn(e.tg); this.pointAt(e.tg, 1.6); this.sfx('target', 0.5) } } }); break
       case 'roll': this.queueRoll(e); break
       case 'move': {
@@ -358,7 +374,7 @@ export class View {
           this.tasks.push({
             dur: 0.24,
             start: () => { const t = tok(e.p); t.anim = true; a = t.group.position.clone(); b = G.cellPos(c); this.sfx('hop', 0.3) },
-            update: k2 => { const t = tok(e.p); const up = b.y > a.y + 0.1 ? 0.55 : 0.32; t.group.position.lerpVectors(a, b, ease(k2)); t.group.position.y += Math.sin(k2 * Math.PI) * up; this.focusWant.copy(t.group.position) },
+            update: k2 => { const t = tok(e.p); const up = b.y > a.y + 0.1 ? 0.55 : 0.32; t.group.position.lerpVectors(a, b, ease(k2)); t.group.position.y += Math.sin(k2 * Math.PI) * up; this.follow(t.group.position) },
             end: () => { const t = tok(e.p); t.pos = c },
           })
         })
@@ -388,7 +404,7 @@ export class View {
             const f = (e.e === 'ladder' ? ease(k) : k * k * (3 - 2 * k)) * (path.length - 1)
             const i = Math.min(path.length - 2, Math.floor(f))
             t.group.position.lerpVectors(path[i], path[i + 1], f - i)
-            this.focusWant.copy(t.group.position)
+            this.follow(t.group.position)
           },
           end: () => { const t = tok(e.p); t.pos = e.to; t.anim = null; this.layoutTokens() },
         })
@@ -417,7 +433,7 @@ export class View {
     this.tasks.push({
       dur: 0.6,
       start: () => { const t = this.tokens[p]; t.anim = true; a = t.group.position.clone(); b = G.cellPos(to); this.focusOn(p); this.sfx(sound, 0.5) },
-      update: k => { const t = this.tokens[p]; t.group.position.lerpVectors(a, b, ease(k)); t.group.position.y += Math.sin(k * Math.PI) * h; this.focusWant.copy(t.group.position) },
+      update: k => { const t = this.tokens[p]; t.group.position.lerpVectors(a, b, ease(k)); t.group.position.y += Math.sin(k * Math.PI) * h; this.follow(t.group.position) },
       end: () => { const t = this.tokens[p]; t.pos = to; t.anim = null; this.layoutTokens() },
     })
   }
@@ -468,7 +484,7 @@ export class View {
         for (const m of changed) m.scale.set(1, 0.02, 1)
         if (changed.length && !quake && e.why !== 'expire') {
           const c = changed[0].userData.cell ?? (changed[0].userData.path ? null : null)
-          if (c) this.focusWant.copy(G.cellPos(c))
+          if (c) this.follow(G.cellPos(c))
         }
         void before
       },
@@ -480,19 +496,22 @@ export class View {
   queueRoll(e) {
     // the dice tumble in the tray in the corner, then rest on the board's pad
     const n = e.dice.length
-    let starts = []
+    let starts = [], tossed = false
     this.tasks.push({
       dur: e.chosen ? 0.7 : 1.05,
       start: () => {
+        // dice that waited in the tray for the click are tossed up from where they lie
+        tossed = this.trayPrompt > 0 && !e.chosen
+        this.trayRolling = true
         this.trayVisible = 3.2
         this.trayLabel = ''
         this.trayGold = e.chosen && e.dice[0] > 3
         starts = e.dice.map((v, i) => {
           const m = this.trayDice[i]
+          const end = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
+          const startPos = e.chosen ? end.clone().add(new THREE.Vector3(0, 0.35, 0)) : tossed ? (m.visible ? m.position.clone() : new THREE.Vector3(end.x * 0.6, 0.23, end.z)) : new THREE.Vector3(1.8, 1.2 + i * 0.2, 0.9 - i * 0.6)
           m.visible = true
           m.material = this.trayGold ? this.mat.gold : this.mat.dice
-          const end = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
-          const startPos = e.chosen ? end.clone().add(new THREE.Vector3(0, 0.35, 0)) : new THREE.Vector3(1.8, 1.2 + i * 0.2, 0.9 - i * 0.6)
           const qEnd = P.dieQuaternion(v, (Math.random() - 0.5) * 0.8)
           const axis = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.4, Math.random() - 0.5).normalize()
           return { m, end, startPos, qEnd, axis, spin: e.chosen ? Math.PI : 9 + Math.random() * 4 }
@@ -508,7 +527,9 @@ export class View {
           } else {
             d.m.position.x = d.startPos.x + (d.end.x - d.startPos.x) * easeOut(k)
             d.m.position.z = d.startPos.z + (d.end.z - d.startPos.z) * easeOut(k)
-            d.m.position.y = d.end.y + Math.abs(Math.cos(k * Math.PI * 2.5)) * (1 - k) * (1 - k) * 1.1
+            // tossed up from the tray, or thrown in from its corner
+            if (tossed) d.m.position.y = d.startPos.y + (d.end.y - d.startPos.y) * k + Math.abs(Math.sin(k * Math.PI * 2.5)) * Math.pow(1 - k, 1.6) * 0.75
+            else d.m.position.y = d.end.y + Math.abs(Math.cos(k * Math.PI * 2.5)) * (1 - k) * (1 - k) * 1.1
           }
           const q = new THREE.Quaternion().setFromAxisAngle(d.axis, d.spin * Math.pow(1 - k, 2))
           d.m.quaternion.copy(q.multiply(d.qEnd))
@@ -519,6 +540,7 @@ export class View {
         this.trayLabel = e.dice.length > 1 || e.slowed ? (e.slowed ? `${e.dice.reduce((a, b) => a + b, 0)} → ${total}` : `= ${total}`) : ''
         e.dice.forEach((v, i) => { this.padDice[i].visible = true; this.padDice[i].quaternion.copy(P.dieQuaternion(v, 0.3 + i)) })
         this.padDice[1].visible = e.dice.length > 1
+        this.trayRolling = false
       },
     })
     this.tasks.push({ dur: 0.25 })
@@ -549,10 +571,10 @@ export class View {
   // ---------- camera ----------
   focusOn(i) {
     const t = this.tokens[i]
-    if (!t) return
-    if (this.manual > 0) return
-    this.focusWant.copy(t.group.position)
+    if (t) this.follow(t.group.position)
   }
+  /** The camera goes after a point, unless the player is moving it about themselves. */
+  follow(p) { if (this.manual <= 0) this.focusWant.copy(p) }
   /** The whole board in view: its middle, from further away on a big board. */
   overview() {
     const fewer = 10 - G.B.tiers
@@ -595,12 +617,15 @@ export class View {
   }
 
   // ---------- picking and highlights ----------
-  /** What is under the pointer: { player }, { el } or { cell }. */
+  /**
+   * What is under the pointer: { player, players }, { el } or { cell }. Pieces sharing a cell overlap, so
+   * `players` lists every one under the pointer, nearest first, for a choice to skip those it can't take.
+   */
   pick(x, y) {
     const ray = new THREE.Raycaster()
     ray.setFromCamera(new THREE.Vector2(x / this.p0.width * 2 - 1, -(y / this.p0.height) * 2 + 1), this.p0.camera)
     const hits = ray.intersectObjects(this.tokens.filter(t => t.group.visible).map(t => t.hit), false)
-    if (hits.length) return { player: hits[0].object.userData.player }
+    if (hits.length) { const players = [...new Set(hits.map(h => h.object.userData.player))]; return { player: players[0], players } }
     const h = this.highlight
     if (h && (h.kind === 'ladder' || h.kind === 'snake')) {
       const eh = ray.intersectObjects(this.elMeshes, false)
@@ -709,12 +734,37 @@ export class View {
     this.confetti.instanceMatrix.needsUpdate = true
     if (this.manual > 0) this.manual -= dt
     this.trayVisible = Math.max(0, this.trayVisible - dt)
+    this.idleDice(dt)
     this.updateCamera(dt)
+  }
+
+  /** The dice lying in the tray while it waits for my click: now and then they hop, asking to be rolled. */
+  idleDice(dt) {
+    const n = this.trayPrompt
+    if (!n || this.trayRolling) { this.idleQ = null; return }
+    if (!this.idleQ) {
+      this.trayLabel = ''
+      this.idleQ = this.trayDice.map((m, i) => (m.visible ? m.quaternion.clone() : P.dieQuaternion(i ? 2 : 5, 0.35 - i * 0.7)))
+      this.idleT = 0
+    }
+    this.idleT += dt
+    this.trayDice.forEach((m, i) => {
+      if (i >= n) { m.visible = false; return }
+      if (!m.visible) { m.visible = true; m.position.set(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1) }
+      m.material = this.mat.dice
+      const rest = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
+      // a hop every 2.4 s, the second die a little later
+      const ph = (this.idleT + 1.6 - i * 0.18) % 2.4, k = ph < 0.55 ? ph / 0.55 : 0
+      const hop = Math.sin(k * Math.PI)
+      m.position.lerp(rest.setY(rest.y + hop * 0.32), 1 - Math.exp(-18 * dt))
+      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0.6).normalize(), hop * 0.5 * Math.sin(k * Math.PI * 2))
+      m.quaternion.copy(tilt.multiply(this.idleQ[i]))
+    })
   }
 
   /** Draws the dice tray into a corner rectangle (CSS px) after the main scene. */
   renderTray(renderer, rect) {
-    if (this.trayVisible <= 0 || !rect) return
+    if ((this.trayVisible <= 0 && !this.trayPrompt) || !rect) return
     const { x, y, w, h } = rect
     const H = this.p0.height
     renderer.setScissorTest(true)

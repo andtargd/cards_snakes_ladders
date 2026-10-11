@@ -8,7 +8,14 @@ import { T } from './strings.js'
 const CARD_VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 const CARD_FS = `
 uniform sampler2D map; uniform float time; uniform float legendary; uniform float dim; uniform float opacity; uniform float lift;
+uniform float burn; uniform float heat; uniform float seed;
 varying vec2 vUv;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), f.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) { return vnoise(p) * 0.55 + vnoise(p * 2.1 + 3.7) * 0.3 + vnoise(p * 4.3 + 7.1) * 0.15; }
 void main() {
   vec4 c = texture2D(map, vUv);
   if (legendary > 0.5) {
@@ -19,7 +26,50 @@ void main() {
   }
   c.rgb = mix(c.rgb, vec3(0.62), dim * 0.6);
   c.rgb += lift * 0.06;
-  gl_FragColor = vec4(c.rgb, c.a * opacity);
+  float a = c.a * opacity;
+  if (burn > 0.0 || heat > 0.0) {
+    // a discarded card smoulders away from its lower edge: charred paper, a glowing rim, then nothing
+    float n = fbm(vUv * vec2(5.0, 7.0) + seed) * 0.62 + vUv.y * 0.38;
+    float e = n - (burn * 1.25 - 0.12);
+    float on = step(0.001, burn);
+    c.rgb = mix(c.rgb, vec3(0.16, 0.09, 0.05), (1.0 - smoothstep(0.0, 0.1, e)) * 0.85 * on);
+    c.rgb += (1.0 - smoothstep(0.0, 0.045, e)) * vec3(1.0, 0.55, 0.12) * 1.4 * on;
+    a *= smoothstep(-0.012, 0.012, e);
+    // while a card may be discarded, embers flicker along its border
+    float edge = 1.0 - smoothstep(0.0, 0.06, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y) * 1.4));
+    c.rgb += heat * edge * (0.55 + 0.45 * sin(time * 5.0 + n * 14.0)) * vec3(1.0, 0.45, 0.1) * 0.6;
+  }
+  gl_FragColor = vec4(c.rgb, a);
+}`
+
+const BURN_SECS = 0.8
+
+// the gold frame round the dice tray when it is my roll: a shine runs round it and rings go out, asking for a click
+const FRAME_VS = CARD_VS
+const FRAME_FS = `
+uniform vec2 size; uniform vec2 inner; uniform float radius; uniform float bw; uniform float u;
+uniform float time; uniform float hover; uniform float opacity;
+varying vec2 vUv;
+float sdBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+void main() {
+  vec2 p = (vUv - 0.5) * size;
+  float d = sdBox(p, inner + radius * 0.3, radius);
+  float band = smoothstep(-1.0, 0.0, d) * (1.0 - smoothstep(bw - 0.75, bw + 0.75, d));
+  float m = clamp(d / bw, 0.0, 1.0);
+  vec3 gold = mix(vec3(1.0, 0.88, 0.5), vec3(0.78, 0.52, 0.06), smoothstep(0.2, 1.0, m));
+  float ang = atan(p.y / inner.y, p.x / inner.x);
+  gold += pow(max(0.0, cos(ang - time * 1.9)), 26.0) * 0.6;
+  gold *= 1.0 + hover * 0.15;
+  float rim = smoothstep(bw - 1.8 * u, bw - 0.6 * u, d);
+  gold = mix(gold, vec3(0.47, 0.3, 0.04), rim * 0.65);
+  float od = max(d - bw, 0.0);
+  float pulse = 0.5 + 0.5 * sin(time * 3.4);
+  float glow = exp(-od / ((4.0 + 5.0 * pulse) * u)) * (0.3 + 0.3 * pulse + 0.3 * hover);
+  float ph = fract(time * 0.62);
+  float ring = (1.0 - smoothstep(0.0, 2.2 * u, abs(od - ph * 17.0 * u))) * (1.0 - ph) * 0.75;
+  float ga = max(glow, ring) * step(bw, d);
+  vec3 col = mix(vec3(1.0, 0.8, 0.28), gold, band);
+  gl_FragColor = vec4(col, max(band, ga) * opacity);
 }`
 
 export class UI {
@@ -42,8 +92,12 @@ export class UI {
     this.selected = -1
     this.helpPage = 0
     this.picker = false // the Shared Table's invite list is open
+    this.rows = new Map() // the players panel: where each player's row stands now, sliding to its place
+    this.rowRect = []
+    this.promptN = 0 // dice waiting in the tray for my click
     this.resize()
     this.makeBanner()
+    this.makeTrayFrame()
   }
 
   // ---------- canvas layer ----------
@@ -82,7 +136,7 @@ export class UI {
   }
   makeCard(id) {
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: this.cardTexture(id) }, time: { value: 0 }, legendary: { value: id !== 'back' && CARD[id].rar === 'L' ? 1 : 0 }, dim: { value: 0 }, opacity: { value: 1 }, lift: { value: 0 } },
+      uniforms: { map: { value: this.cardTexture(id) }, time: { value: 0 }, legendary: { value: id !== 'back' && CARD[id].rar === 'L' ? 1 : 0 }, dim: { value: 0 }, opacity: { value: 1 }, lift: { value: 0 }, burn: { value: 0 }, heat: { value: 0 }, seed: { value: Math.random() * 50 } },
       vertexShader: CARD_VS, fragmentShader: CARD_FS, transparent: true, depthTest: false, depthWrite: false,
     })
     const mesh = new THREE.Mesh(this.cardGeo ||= new THREE.PlaneGeometry(1, 1.4), mat)
@@ -98,6 +152,45 @@ export class UI {
     a.position.set(-500, -500, 0); b.position.set(-500, -500, 0)
     renderer.compile(this.scene, this.cam)
     this.dropCard(a); this.dropCard(b)
+  }
+
+  // ---------- the dice tray's gold frame while it waits for my roll ----------
+  makeTrayFrame() {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { size: { value: new THREE.Vector2(1, 1) }, inner: { value: new THREE.Vector2(1, 1) }, radius: { value: 4 }, bw: { value: 6 }, u: { value: 1 }, time: { value: 0 }, hover: { value: 0 }, opacity: { value: 0 } },
+      vertexShader: FRAME_VS, fragmentShader: FRAME_FS, transparent: true, depthTest: false, depthWrite: false,
+    })
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat)
+    mesh.renderOrder = 2 // over the screen layer, under the banner and the cards
+    mesh.visible = false
+    this.scene.add(mesh)
+    this.trayFrame = mesh
+  }
+  updateTrayFrame(dt) {
+    const m = this.trayFrame, un = m.material.uniforms, r = this.trayRect
+    const want = this.promptN && r ? 1 : 0
+    un.opacity.value += (want - un.opacity.value) * (1 - Math.exp(-(want ? 8 : 14) * dt))
+    m.visible = un.opacity.value > 0.01 && !!r
+    if (!m.visible) return
+    const u = this.u, pad = 26 * u
+    m.position.set(r.x + r.w / 2, this.H - (r.y + r.h / 2), 2)
+    m.scale.set(r.w + pad * 2, r.h + pad * 2, 1)
+    un.size.value.set(r.w + pad * 2, r.h + pad * 2)
+    un.radius.value = 5 * u
+    un.inner.value.set(r.w / 2 - un.radius.value * 0.3, r.h / 2 - un.radius.value * 0.3)
+    un.bw.value = 7 * u
+    un.u.value = u
+    un.time.value = this.time
+    un.hover.value += ((this.hover === 'tray' ? 1 : 0) - un.hover.value) * (1 - Math.exp(-12 * dt))
+  }
+  /** How many dice wait in the tray for my click (0 when it is not my roll, or the roll is a chosen value). */
+  rollPrompt() {
+    const app = this.app, s = app.view.state, me = app.mySeat()
+    if (app.screen !== 'game' || !s || me < 0 || s.cur !== me || s.ph !== 'main' || s.rolled) return 0
+    // (it stays up while my roll is on its way to the table's host, so the dice are tossed from where they lie)
+    if (app.view.busy || app.curtain() >= 0 || app.menuOpen || app.invite) return 0
+    const fx = s.pl[me].fx
+    return fx.gd || fx.cf ? 0 : fx.x ? 2 : 1
   }
 
   // ---------- the soft message in the middle of the screen: "Your turn", "Choose any player" ----------
@@ -143,14 +236,16 @@ export class UI {
     }
     b.turn = Math.max(0, b.turn - dt)
     let text = null, sub = null
+    const discard = inGame && me >= 0 && s.cur === me && s.ph === 'disc' && app.curtain() < 0 && !app.view.busy
     if (inGame && this.target) { text = T.chooseWhat(CARD[this.target.card].tgt); sub = T.targetHint(this.target.kind) }
+    else if (discard) { text = T.discardTitle; sub = T.discardHint(s.pl[me].h.length - CFG.hand) }
     else if (inGame && b.turn > 0) text = b.turnText
     if (text && (text !== b.text || sub !== b.sub)) { this.drawBanner(text, sub); b.text = text; b.sub = sub; b.pop = 0 }
     const want = text ? 1 : 0
     b.op += (want - b.op) * (1 - Math.exp(-(want ? 12 : 5) * dt))
     b.pop = Math.min(1, b.pop + dt * 4)
     const k = this.u * 32 / 64 // the 64 px letters show about 32 px tall
-    const sc = 1024 * k * (0.9 + 0.1 * (1 - Math.pow(1 - b.pop, 3))) * (this.target ? 1 + 0.012 * Math.sin(this.time * 3) : 1)
+    const sc = 1024 * k * (0.9 + 0.1 * (1 - Math.pow(1 - b.pop, 3))) * (this.target || discard ? 1 + 0.012 * Math.sin(this.time * 3) : 1)
     b.mesh.scale.set(sc, sc, 1)
     b.mesh.position.set(this.W / 2, this.H * 0.64, 1)
     b.mesh.material.opacity = b.op * 0.95
@@ -447,20 +542,35 @@ export class UI {
     const busy = view.busy || app.waiting
     const hot = app.hotseat()
     const curtain = app.curtain()
-    // players panel
+    // players panel: the highest on the board at the top, the rows slide when places change
     const pw = this.narrow ? Math.min(W - 16 * u, 340 * u) : 236 * u
     const rowH = this.narrow ? 34 * u : 48 * u
     const cols = this.narrow ? 2 : 1
     const colW = (pw - (cols - 1) * 6 * u) / cols
     const px = 10 * u, py = 10 * u
     const tgtPlayers = this.target && this.target.kind === 'player' ? this.target.list : null
-    s.pl.forEach((p, i) => {
-      const cx = px + (i % cols) * (colW + 6 * u), cy = py + Math.floor(i / cols) * (rowH + 5 * u)
+    const { order, leader, last } = this.standing(s)
+    if (this.rowsGid !== s.gid || this.rowsCols !== cols) { this.rows.clear(); this.rowsGid = s.gid; this.rowsCols = cols }
+    order.forEach((i, k) => {
+      const want = [k % cols, Math.floor(k / cols)]
+      const at = this.rows.get(i)
+      if (!at) this.rows.set(i, { at: [...want], want })
+      else at.want = want
+    })
+    // rows that slide are drawn under the ones in place
+    const drawOrder = [...order].sort((a, b) => (this.rows.get(a).at[1] === this.rows.get(a).want[1] ? 1 : 0) - (this.rows.get(b).at[1] === this.rows.get(b).want[1] ? 1 : 0))
+    this.rowRect = []
+    drawOrder.forEach(i => {
+      const p = s.pl[i], at = this.rows.get(i).at
+      const cx = px + at[0] * (colW + 6 * u), cy = py + at[1] * (rowH + 5 * u)
+      this.rowRect[i] = { x: cx, y: cy, w: colW, h: rowH }
       const active = s.cur === i && s.ph !== 'over'
       const valid = tgtPlayers && tgtPlayers.includes(i)
       const sel = valid && this.target.sel === i
       this.panel(cx, cy, colW, rowH, { fill: sel ? '#fff1c4' : valid ? '#fffbe9' : p.d ? 'rgba(240,240,236,0.9)' : 'rgba(255,255,255,0.93)', stroke: active ? P.PLAYER_COLORS[p.c % 6] : valid ? '#e0a400' : 'rgba(43,38,34,0.16)', lw: active || valid ? 3 : 1.5, r: 10 })
       const g = this.g
+      if (i === leader) this.rowHalo(cx, cy, colW, rowH, 'gold')
+      else if (i === last) this.rowHalo(cx, cy, colW, rowH, 'gloom')
       g.fillStyle = P.PLAYER_COLORS[p.c % 6]
       g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
       this.text(p.n.slice(0, 1).toUpperCase(), cx + rowH / 2, cy + rowH / 2 + 1, { size: this.narrow ? 13 : 16, color: '#ffffff', align: 'center' })
@@ -513,9 +623,7 @@ export class UI {
     this.button('zin', '+', rx, zy, cb, cb, () => app.view.zoom(0.8), { size: 20 })
     this.button('zout', '−', rx, zy + cb + 6 * u, cb, cb, () => app.view.zoom(1.25), { size: 20 })
     this.button('zall', '⤢', rx, zy + 2 * (cb + 6 * u), cb, cb, () => app.view.overview(), { size: 18 })
-    // log
-    this.drawLog()
-    // action buttons
+    // action buttons (the roll is a click on the dice tray)
     const bw = this.narrow ? 132 * u : 170 * u, bh = 50 * u
     const bx = W - bw - 12 * u
     let by = H - bh - 12 * u
@@ -536,23 +644,37 @@ export class UI {
             const x0 = this.narrow ? W - total - 8 * u : bx + bw - total
             this.text(T.chooseValue, x0 + total / 2, by - 16 * u, { size: 14, align: 'center' })
             for (let v = 1; v <= n; v++) this.button('v' + v, String(v), x0 + (v - 1) * (w + 6 * u), by, w, bh, () => app.act({ t: 'roll', v }), { primary: true, disabled: busy, color: pmy.fx.gd ? '#c99400' : '#7b5ce0', size: 20 })
-          } else this.button('roll', T.roll, bx, by, bw, bh, () => app.act({ t: 'roll' }), { primary: true, disabled: busy, size: 19 })
+          }
         } else this.button('end', T.endTurn, bx, by, bw, bh, () => app.act({ t: 'end' }), { primary: true, color: '#2d3a6b', disabled: busy, size: 18 })
       }
     }
-    // the dice tray rectangle (the view draws the dice into it)
-    const tw = this.narrow ? 150 * u : 190 * u, th = tw * 0.66
-    const tx = this.narrow ? 10 * u : W - tw - 12 * u
-    const ty = this.narrow ? handTop - th - 10 * u : by - th - 34 * u
-    if (app.view.trayVisible > 0) {
-      this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: 'rgba(127,178,240,0.9)', r: 12 })
+    // the dice tray (the view draws the dice into it): it shows a roll, or waits for my click with a gold frame
+    const tw = this.narrow ? THREE.MathUtils.clamp(W * 0.47, 150, 240) : 236 * u, th = tw * 0.66
+    const tx = this.narrow ? 14 : W - tw - 12 * u
+    const ty = this.narrow ? handTop - th - 12 * u : by - th - 36 * u
+    const prompt = this.promptN > 0 && s.cur === me
+    this.trayTop = null
+    if (app.view.trayVisible > 0 || prompt) {
+      this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: prompt ? '#dcebfa' : 'rgba(127,178,240,0.9)', stroke: prompt ? null : undefined, r: 12 })
       this.trayRect = { x: tx, y: ty, w: tw, h: th }
-      if (app.view.trayLabel) this.text(app.view.trayLabel, tx + tw / 2, ty + th + 16 * u, { size: 16, align: 'center' })
+      // labels go under the tray, or over it on a phone where the hand is under it
+      const ly = this.narrow ? ty - 22 * u : ty + th + 18 * u
+      if (prompt) {
+        const label = this.narrow ? T.tapToRoll : T.clickToRoll
+        const lw = this.measure(label, 14) + 30 * u
+        this.panel(tx + tw / 2 - lw / 2, ly - 13 * u, lw, 26 * u, { fill: '#2d3a6b', stroke: null, r: 13 })
+        this.text(label, tx + tw / 2, ly + 1, { size: 14, align: 'center', color: '#ffffff' })
+        this.hits.push({ key: 'tray', x: tx - 10 * u, y: ty - 10 * u, w: tw + 20 * u, h: th + 20 * u, action: () => { if (this.target) this.cancelTarget(); app.act({ t: 'roll' }) } })
+      } else if (app.view.trayLabel) this.text(app.view.trayLabel, tx + tw / 2, ly, { size: 16, align: 'center' })
+      this.trayTop = this.narrow ? ly - 16 * u : ty - 6 * u
     }
+    // log
+    this.drawLog()
     if (this.peekRect) {
       const r = this.peekRect
       this.panel(r.x - 12 * u, r.y - 34 * u, r.w + 24 * u, r.h + 46 * u, { fill: 'rgba(255,253,248,0.92)' })
       this.text(T.handOf(s.pl[s.peek.tg].n), r.x + r.w / 2, r.y - 17 * u, { size: 14, align: 'center' })
+      if (r.empty) this.text(T.noCards, r.x + r.w / 2, r.y + r.h / 2, { size: 14, align: 'center', bold: false, color: '#5b544c' })
     }
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
     if (s.ph === 'over' && !busy) this.drawResults(s, me)
@@ -587,6 +709,51 @@ export class UI {
     this.button('reveal', T.showCards, x + 40 * u, y + ph - 62 * u, pw - 80 * u, 46 * u, () => this.app.reveal(), { primary: true, color, size: 18 })
   }
 
+  /** A soft frame round a player's row: gold for the Champion's leader, a gloomy one for whoever risks being the Fool. */
+  rowHalo(x, y, w, h, kind) {
+    const g = this.g, u = this.u, o = 3.5 * u
+    g.save()
+    if (kind === 'gold') {
+      const gr = g.createLinearGradient(x, y, x + w, y + h)
+      gr.addColorStop(0, '#ffe08a'); gr.addColorStop(0.45, '#d29a12'); gr.addColorStop(0.7, '#fff0b3'); gr.addColorStop(1, '#c58a0a')
+      g.shadowColor = 'rgba(255,190,40,0.85)'; g.shadowBlur = 12 * u
+      g.strokeStyle = gr; g.lineWidth = 3 * u
+    } else {
+      g.shadowColor = 'rgba(30,16,44,0.7)'; g.shadowBlur = 10 * u
+      g.strokeStyle = 'rgba(66,46,82,0.8)'; g.lineWidth = 2.2 * u
+    }
+    P.roundRect(g, x - o, y - o, w + 2 * o, h + 2 * o, 10 * u + o); g.stroke()
+    g.restore()
+  }
+  /**
+   * The players from the highest on the board down (in Fool those who finished first, by place). The
+   * Champion's leader is a single player furthest up; the Fool's candidate the single one lowest down.
+   */
+  standing(s) {
+    const key = i => (s.mode === 'fool' && s.pl[i].d ? 1000 - s.pl[i].d : s.pl[i].pos)
+    const order = s.pl.map((p, i) => i).sort((a, b) => key(b) - key(a) || a - b)
+    let leader = -1, last = -1
+    if (s.mode === 'champion' && key(order[0]) > 0 && key(order[0]) > key(order[1])) leader = order[0]
+    if (s.mode === 'fool') {
+      const live = order.filter(i => !s.pl[i].d)
+      const n = live.length
+      if (n === 1 || (n > 1 && key(live[n - 1]) < key(live[n - 2]))) last = live[n - 1]
+    }
+    return { order, leader, last }
+  }
+  /** Rows of the players panel slide to their new places. */
+  slideRows(dt) {
+    const f = 1 - Math.exp(-9 * dt)
+    for (const r of this.rows.values()) {
+      for (let k = 0; k < 2; k++) {
+        const d = r.want[k] - r.at[k]
+        if (!d) continue
+        r.at[k] = Math.abs(d) < 0.01 ? r.want[k] : r.at[k] + d * f
+        this.dirty = true
+      }
+    }
+  }
+
   measure(t, size) { this.g.font = this.font(size * this.u); return this.g.measureText(t).width }
   handHeight() { return this.cardW() * 1.4 * 0.86 + 14 * this.u }
   cardW() { return this.narrow ? Math.min(150, (this.W - 16) / 2.55) : 150 * this.u }
@@ -596,7 +763,7 @@ export class UI {
     const lines = this.logOpen ? this.logLines.slice(-16) : this.logLines.slice(-5)
     if (!lines.length) return
     if (this.narrow && !this.logOpen) {
-      this.button('log', T.log, 10 * u, H - this.handHeight() - 56 * u - (this.app.view.trayVisible > 0 ? 110 * u : 0), 70 * u, 34 * u, () => { this.logOpen = true; this.dirty = true }, { size: 13 })
+      this.button('log', T.log, 10 * u, (this.trayTop ?? H - this.handHeight() - 22 * u) - 40 * u, 70 * u, 34 * u, () => { this.logOpen = true; this.dirty = true }, { size: 13 })
       return
     }
     const w = this.narrow ? this.W - 20 * u : 330 * u
@@ -688,6 +855,7 @@ export class UI {
       const playable = myTurn && (s.ph === 'disc' || !whyNot(s, me, c.id))
       c.dim = myTurn && !playable && s.ph !== 'disc' ? 1 : 0
       c.lift = sel ? 1 : hov ? 0.6 : 0
+      c.heat = myTurn && s.ph === 'disc' && !app.view.busy ? (hov ? 1 : 0.35) : 0
     })
     const peek = this.cards.filter(c => c.kind === 'peek')
     if (peek.length) {
@@ -696,6 +864,8 @@ export class UI {
       const y = H * 0.38
       peek.forEach((c, k) => { c.tx = x0 + k * pw * 1.05; c.ty = y; c.ts = pw; c.rot = 0; c.dim = 0; c.lift = 0 })
       this.peekRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (peek.length - 1) * pw * 1.05 + pw, h: pw * 1.4 }
+    } else if (app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide) {
+      this.peekRect = { x: W / 2 - 90 * u, y: H * 0.38 - 12 * u, w: 180 * u, h: 24 * u, empty: true }
     }
     const cat = this.cards.filter(c => c.kind === 'catalog')
     if (cat.length) {
@@ -723,18 +893,26 @@ export class UI {
       const m = c.mesh.material.uniforms
       m.dim.value += (c.dim - m.dim.value) * f
       m.lift.value = c.lift
+      m.heat.value += ((c.heat || 0) - m.heat.value) * f
       m.time.value = this.time
     }
-    // cards flying to the middle of the screen when played
-    for (const fl of this.flyers.filter(f => f.drop)) {
+    // discarded cards burn where they are, rising a little
+    for (const fl of this.flyers.filter(f => f.burn)) {
       fl.t += dt
-      const k = Math.min(1, (fl.t - 1.0) / 0.25)
-      fl.mesh.position.set(fl.x0, H - (fl.y0 + k * 160 * u), 40)
-      fl.mesh.scale.set(fl.s0 * (1 - k * 0.3), fl.s0 * (1 - k * 0.3), 1)
-      fl.mesh.material.uniforms.opacity.value = 1 - k
+      const k = Math.min(1, fl.t / BURN_SECS)
+      const sc = fl.s0 * (1 + 0.06 * Math.sin(Math.min(1, k * 1.5) * Math.PI / 2))
+      fl.mesh.position.set(fl.x0, H - (fl.y0 - k * 26 * u), 40)
+      fl.mesh.scale.set(sc, sc, 1)
+      fl.mesh.rotation.z = fl.rot * (1 - k * 0.5)
+      fl.mesh.renderOrder = 40
+      const un = fl.mesh.material.uniforms
+      un.burn.value = k * (0.75 + 0.25 * k)
+      un.heat.value = 0
+      un.lift.value = 0
+      un.time.value = this.time
     }
     for (const fl of this.flyers) {
-      if (fl.drop) continue
+      if (fl.burn) continue
       fl.t += dt
       const k = Math.min(1, fl.t / 0.35)
       const big = Math.min(W * 0.42, 250 * u)
@@ -748,8 +926,35 @@ export class UI {
       u2.time.value = this.time
       u2.opacity.value = fl.t > 1.0 ? Math.max(0, 1 - (fl.t - 1.0) / 0.25) : 1
     }
-    for (const fl of this.flyers.filter(f => f.t > 1.25)) this.dropCard(fl.mesh)
-    this.flyers = this.flyers.filter(f => f.t <= 1.25)
+    const gone = f => f.t > (f.burn ? BURN_SECS + 0.05 : 1.25)
+    for (const fl of this.flyers.filter(gone)) this.dropCard(fl.mesh)
+    this.flyers = this.flyers.filter(f => !gone(f))
+  }
+
+  /** A card someone discarded burns away: mine from my hand (unless I already lit it), the others' backs by their row. */
+  burnDiscard(e) {
+    const me = this.app.mySeat(), u = this.u
+    if (e.p === me) {
+      if (this.lit && this.time - this.lit.at < 6 && this.lit.card === e.card) { this.lit = null; return }
+      const c = this.cards.find(k => k.kind === 'hand' && k.id === e.card)
+      if (c) { this.burnCard(c); return }
+    }
+    const r = this.rowRect[e.p]
+    const mesh = this.makeCard('back')
+    const s0 = (this.narrow ? 38 : 52) * u
+    this.flyers.push({ mesh, burn: true, t: 0, x0: r ? r.x + r.w + s0 * 0.7 : this.W / 2, y0: r ? r.y + r.h / 2 : this.H * 0.3, s0, rot: -0.12, card: 'back' })
+    this.app.sfx('fold', 0.3)
+  }
+  /** A card of my hand leaves it and burns where it is. */
+  burnCard(c) {
+    const s = this.app.view.state
+    this.hidden = { i: c.i, seq: s.seq }
+    this.cards = this.cards.filter(k => k !== c)
+    c.mesh.material.uniforms.dim.value = 0
+    const fl = { mesh: c.mesh, burn: true, t: 0, x0: c.x, y0: c.y, s0: c.s, rot: c.mesh.rotation.z, card: c.id }
+    this.flyers.push(fl)
+    this.app.sfx('fold', 0.4)
+    return fl
   }
 
   /** A card goes to the middle of the screen for everyone (my own already flew from my hand). */
@@ -757,7 +962,9 @@ export class UI {
     const me = this.app.mySeat()
     if (e.p === me && this.flyers.some(f => f.mine && f.card === e.card)) return
     let x0 = this.W / 2, y0 = -100 * this.u, s0 = 60 * this.u
+    const r = this.rowRect[e.p]
     if (e.p === me) { y0 = this.H - 80 * this.u; s0 = this.cardW() }
+    else if (r) { x0 = r.x + r.w / 2; y0 = r.y + r.h / 2 }
     else { x0 = 120 * this.u; y0 = 30 * this.u + e.p * 50 * this.u }
     this.flyers.push({ mesh: this.makeCard(e.card), t: 0, x0, y0, s0, card: e.card })
   }
@@ -770,11 +977,9 @@ export class UI {
     if (!myTurn) { this.selected = this.selected === c.i ? -1 : c.i; this.dirty = true; return }
     if (app.view.busy || app.waiting > 0) return
     if (s.ph === 'disc') {
-      this.hidden = { i: c.i, seq: s.seq }
-      this.cards = this.cards.filter(k => k !== c)
-      this.flyers.push({ mesh: c.mesh, t: 1.0, x0: c.x, y0: c.y, s0: c.s, card: c.id, drop: true })
-      app.sfx('fold', 0.4)
-      if (app.act({ t: 'disc', i: c.i }) === false) this.hidden = null
+      const fl = this.burnCard(c)
+      this.lit = { card: c.id, at: this.time }
+      if (app.act({ t: 'disc', i: c.i }) === false) { this.hidden = null; this.lit = null; this.dropCard(fl.mesh); this.flyers = this.flyers.filter(f => f !== fl) }
       this.selected = -1
       return
     }
@@ -841,7 +1046,7 @@ export class UI {
     const t = this.target
     if (!t) return
     if (t.kind === 'player') {
-      const i = panelPlayer ?? hit?.player ?? null
+      const i = panelPlayer ?? (hit?.players || []).find(i => t.list.includes(i)) ?? null
       this.app.view.pointAt(i != null && t.list.includes(i) ? i : null)
       return
     }
@@ -889,7 +1094,11 @@ export class UI {
   boardClick(hit) {
     const t = this.target
     if (!t || !hit) return false
-    if (hit.player != null && t.kind === 'player') return this.chooseTarget(hit.player)
+    if (hit.player != null && t.kind === 'player') {
+      // pieces on one cell overlap: take the nearest one the card can go to
+      const i = hit.players.find(i => t.list.includes(i))
+      return i != null && this.chooseTarget(i)
+    }
     if (hit.el != null && (t.kind === 'ladder' || t.kind === 'snake')) return this.chooseTarget(hit.el)
     if (hit.cell != null && (t.kind === 'cell' || t.kind === 'cell2')) return this.chooseTarget(hit.cell)
     return false
@@ -901,8 +1110,13 @@ export class UI {
     this.time += dt
     if (this.toast) { this.toast.t -= dt; if (this.toast.t <= 0) { this.toast = null; this.dirty = true } }
     if (this.p0.width !== this.W || this.p0.height !== this.H) this.resize()
+    const n = this.rollPrompt()
+    if (n !== this.promptN) { this.promptN = n; this.dirty = true }
+    this.slideRows(dt)
     this.layoutCards(dt)
     this.updateBanner(dt)
     if (this.dirty) this.draw()
+    this.app.view.trayPrompt = n && this.trayRect ? n : 0
+    this.updateTrayFrame(dt)
   }
 }
