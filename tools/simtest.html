@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rules tests</title>
+<pre id="out">running…</pre>
+<script type="module">
+import * as R from '../experience/rules.js'
+const out = []
+const say = (...a) => { out.push(a.join(' ')); document.getElementById('out').textContent = out.join('\n') }
+const q = new URLSearchParams(location.search)
+const boards = +(q.get('boards') || 2000), games = +(q.get('games') || 400)
+
+// 1. the board generator, for every size
+let t0
+for (const n of R.SIZES) {
+  t0 = performance.now()
+  let bad = 0, slow = 0
+  const means = [], bc = R.boardCfg(n)
+  for (let seed = 1; seed <= boards; seed++) {
+    const t1 = performance.now()
+    const b = R.generateBoard(seed, n)
+    if (performance.now() - t1 > 400) slow++
+    if (b.length !== bc.snakes + bc.ladders || R.boardProblems(b, null, n)) bad++
+    if (seed <= 200) means.push(R.simulateMean(b, 1000, R.mulberry32(seed), n))
+  }
+  say(`boards ${n}: ${boards} in ${Math.round(performance.now() - t0)} ms, bad ${bad}, slow ${slow}, mean rolls ${Math.min(...means).toFixed(1)}..${Math.max(...means).toFixed(1)}`)
+}
+
+// 2. bot games
+function play(seed, mode, levels, cells) {
+  const s = R.createGame({ seed, mode, cells, players: levels.map((b, i) => ({ n: 'Bot' + i, b })) })
+  let actions = 0
+  const cardsPlayed = {}
+  while (s.ph !== 'over' && actions < 20000) {
+    const pi = s.cur
+    const a = R.botAction(s, pi)
+    const before = s.pl[pi].h[a.i]
+    const r = R.apply(s, pi, a)
+    if (!r.ok) throw new Error(`seed ${seed}: ${r.err} ${JSON.stringify(a)} ph=${s.ph} rolled=${s.rolled}`)
+    if (a.t === 'play') cardsPlayed[before] = (cardsPlayed[before] || 0) + 1
+    actions++
+    const size = JSON.stringify(R.pack(s)).length
+    if (size > maxSize) maxSize = size
+  }
+  if (s.ph !== 'over') throw new Error('no end, seed ' + seed)
+  return { s, actions, cardsPlayed }
+}
+let maxSize = 0
+for (const [mode, levels, cells] of [['champion', [2, 2, 2, 2], 100], ['champion', [1, 2, 3, 2], 100], ['fool', [2, 2, 2, 2], 100], ['fool', [3, 1, 1], 100], ['champion', [3, 3], 100], ['fool', [2, 2, 2, 2, 2, 2], 100], ['champion', [2, 2, 2, 2], 50], ['fool', [2, 3, 1, 2], 50], ['champion', [2, 2, 2, 2], 70], ['fool', [2, 2, 2, 2, 2, 2], 70]]) {
+  t0 = performance.now()
+  const wins = new Array(levels.length).fill(0), byOrder = new Array(levels.length).fill(0)
+  let rounds = 0, limit = 0, errs = 0
+  const played = {}
+  for (let g = 0; g < games; g++) {
+    try {
+      const { s, cardsPlayed } = play(1000 + g, mode, levels, cells)
+      rounds += s.round
+      if (s.res.limit) limit++
+      const key = mode === 'champion' ? s.res.winner : s.res.fool
+      // s.pl is in turn order; the bot name says which level it was
+      byOrder[key]++
+      wins[+s.pl[key].n.slice(3)]++
+      for (const [c, n] of Object.entries(cardsPlayed)) played[c] = (played[c] || 0) + n
+    } catch (e) { errs++; if (errs < 4) say('ERROR', e.stack || e) }
+  }
+  say(`${cells} ${mode} levels ${levels.join(',')}: ${games} games ${Math.round(performance.now() - t0)} ms, avg rounds ${(rounds / games).toFixed(1)}, limit ${limit}, errors ${errs}`)
+  say(`   ${mode === 'champion' ? 'wins' : 'fools'} by seat ${wins.join(' ')} | by turn order ${byOrder.join(' ')}`)
+  say(`   cards played: ${Object.entries(played).sort().map(([c, n]) => c + ':' + n).join(' ')}`)
+}
+say('max packed state', maxSize, 'bytes')
+window.done = true
+</script>

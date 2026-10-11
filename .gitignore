@@ -1,0 +1,4 @@
+.claude/
+tmp/
+csl tasks.txt
+__pycache__/

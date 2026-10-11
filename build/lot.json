@@ -1,0 +1,11 @@
+{
+  "script": "build.js",
+  "materials": {
+    "Cards": {
+      "glow": 0
+    },
+    "Paper": {
+      "glow": 0
+    }
+  }
+}

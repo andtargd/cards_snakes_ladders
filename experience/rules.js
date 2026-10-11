@@ -1,0 +1,982 @@
+// Cards, Snakes & Ladders: the rules core. Pure JavaScript with no rendering: it takes a state and an
+// action, changes the state and returns the events the view animates. The same code runs a solo game
+// against bots and, on the session's host, the shared table. All randomness comes from the state's own
+// seeded generator, so a game replays exactly from its seed and its actions.
+
+export const CFG = {
+  cells: 100, tiers: 10, perTier: 10,
+  snakes: 8, ladders: 8,
+  hand: 3, fxTurns: 3, roundLimit: 150,
+  minLen: 8, maxLen: 60, maxEndsPerTier: 4, balance: 0.15,
+  simRuns: 1000, simMin: 25, simMax: 45,
+  // how snakes and ladders may cross: at most 2 crossings each, at 40 degrees or more
+  maxCrossings: 2, minCrossAngle: 40,
+}
+
+/** The board sizes a game can be played on (ten cells per tier). */
+export const SIZES = [50, 70, 100]
+/** Field settings for a board of n cells: fewer snakes and ladders, shorter cut-outs and races on small boards. */
+export function boardCfg(n = CFG.cells) {
+  if (n === 50) return { cells: 50, tiers: 5, snakes: 4, ladders: 4, maxLen: 30, simMin: 12, simMax: 23 }
+  if (n === 70) return { cells: 70, tiers: 7, snakes: 6, ladders: 6, maxLen: 42, simMin: 17, simMax: 32 }
+  return { cells: CFG.cells, tiers: CFG.tiers, snakes: CFG.snakes, ladders: CFG.ladders, maxLen: CFG.maxLen, simMin: CFG.simMin, simMax: CFG.simMax }
+}
+
+export const RARITY = {
+  C: { name: 'Common', weight: 55 },
+  U: { name: 'Uncommon', weight: 28 },
+  R: { name: 'Rare', weight: 13 },
+  L: { name: 'Legendary', weight: 4 },
+}
+
+export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 'Protection', C: 'Hand' }
+
+// tgt: any (any player on the board, self included), other (another player), leader (automatic),
+// cell, cell2 (two cells), ladder, snake, board, none
+export const CARDS = [
+  { id: 'M1', name: 'Dash', cat: 'M', rar: 'C', tgt: 'any', text: 'Move any player 2 spaces forward.' },
+  { id: 'M2', name: 'Setback', cat: 'M', rar: 'U', tgt: 'any', text: 'Move any player 3 spaces back.' },
+  { id: 'M3', name: 'Swap Places', cat: 'M', rar: 'R', tgt: 'other', text: 'Swap places with another player.' },
+  { id: 'M4', name: 'Dethrone', cat: 'M', rar: 'L', tgt: 'leader', text: 'The player closest to the finish moves 10 spaces back.' },
+  { id: 'M5', name: 'Double Move', cat: 'M', rar: 'L', tgt: 'any', text: 'Any player immediately rolls again and moves.' },
+  { id: 'D1', name: 'Extra Die', cat: 'D', rar: 'C', tgt: 'any', text: "A player's next roll uses 2 dice." },
+  { id: 'D2', name: 'Choose a Face', cat: 'D', rar: 'U', tgt: 'any', text: 'A player picks a value from 1 to 3 instead of rolling.' },
+  { id: 'D3', name: 'Heavy Die', cat: 'D', rar: 'R', tgt: 'any', text: "A player's next roll: no die shows less than 3." },
+  { id: 'D4', name: 'Golden Die', cat: 'D', rar: 'L', tgt: 'any', text: 'A player picks any value from 1 to 6 instead of rolling.' },
+  { id: 'B1', name: 'Swamp', cat: 'B', rar: 'C', tgt: 'cell', text: 'Place a swamp. Anyone who reaches it stops there. Lasts 3 turns.' },
+  { id: 'B2', name: 'Ladder to Snake', cat: 'B', rar: 'U', tgt: 'ladder', text: 'Turn a ladder into a snake for 3 turns.' },
+  { id: 'B3', name: 'Snake to Ladder', cat: 'B', rar: 'U', tgt: 'snake', text: 'Turn a snake into a ladder for 3 turns.' },
+  { id: 'B4', name: 'Trampoline', cat: 'B', rar: 'U', tgt: 'cell', text: 'Place a trampoline. Landing on it launches you 3 spaces forward. Lasts 3 turns.' },
+  { id: 'B5', name: 'Portal', cat: 'B', rar: 'R', tgt: 'cell2', text: 'Place two portals on cells up to your own. Landing on one sends you to the other. Lasts 3 turns.' },
+  { id: 'B6', name: 'Earthquake', cat: 'B', rar: 'L', tgt: 'board', text: 'Every snake and ladder shifts 1–2 spaces for 3 turns.' },
+  { id: 'H1', name: 'Slow Down', cat: 'H', rar: 'C', tgt: 'any', text: "A player's next roll totals 3 at most." },
+  { id: 'H2', name: 'Freeze', cat: 'H', rar: 'U', tgt: 'any', text: "A player can't play cards on their next turn." },
+  { id: 'H3', name: 'Skip Turn', cat: 'H', rar: 'R', tgt: 'any', text: 'A player skips their next turn.' },
+  { id: 'P1', name: 'Parachute', cat: 'P', rar: 'C', tgt: 'any', text: 'A player slides only half as far down snakes for 3 turns.' },
+  { id: 'P2', name: 'Swamp Boots', cat: 'P', rar: 'U', tgt: 'any', text: 'A player ignores swamps for 3 turns.' },
+  { id: 'P3', name: 'Shield', cat: 'P', rar: 'R', tgt: 'any', text: 'A player ignores the next snake they land on. Lasts 3 turns.' },
+  { id: 'C1', name: 'Redraw', cat: 'C', rar: 'C', tgt: 'none', text: 'Discard the rest of your hand, then draw one more card than you discarded.' },
+  { id: 'C2', name: 'Peek', cat: 'C', rar: 'C', tgt: 'other', text: "Look at another player's hand until the end of your turn." },
+  { id: 'C3', name: 'Steal', cat: 'C', rar: 'U', tgt: 'other', text: "Take a random card from another player's hand." },
+  { id: 'C4', name: 'Swap Hands', cat: 'C', rar: 'R', tgt: 'other', text: 'Swap hands with another player.' },
+]
+export const CARD = Object.fromEntries(CARDS.map(c => [c.id, c]))
+const BY_RARITY = { C: [], U: [], R: [], L: [] }
+for (const c of CARDS) BY_RARITY[c.rar].push(c.id)
+
+// effects shown over a player: key in fx -> label
+export const FX = {
+  x: { name: 'Extra Die', card: 'D1' }, cf: { name: 'Choose a Face', card: 'D2' }, hv: { name: 'Heavy Die', card: 'D3' },
+  gd: { name: 'Golden Die', card: 'D4' }, sl: { name: 'Slow Down', card: 'H1' }, fz: { name: 'Freeze', card: 'H2' },
+  sk: { name: 'Skip Turn', card: 'H3' }, pa: { name: 'Parachute', card: 'P1' }, bo: { name: 'Swamp Boots', card: 'P2' },
+  sh: { name: 'Shield', card: 'P3' },
+}
+const TIMED = ['pa', 'bo', 'sh']
+
+// ---------- randomness ----------
+export function mulberry32(seed) {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+/** The state's own generator: its position lives in s.r so the state can be sent and resumed. */
+function rnd(s) {
+  s.r = (s.r + 0x6D2B79F5) >>> 0
+  let t = s.r
+  t = Math.imul(t ^ (t >>> 15), t | 1)
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+const rint = (s, n) => Math.floor(rnd(s) * n)
+
+// ---------- board ----------
+export const tierOf = c => Math.floor((c - 1) / CFG.perTier)
+
+/** Checks the field rules of the spec on a list of elements [type (0 snake, 1 ladder), from, to]. */
+export function boardProblems(els, blocked = null, n = CFG.cells) {
+  const bc = boardCfg(n)
+  const used = new Set()
+  const perTier = new Array(bc.tiers).fill(0)
+  let rise = 0, fall = 0
+  for (const [type, from, to] of els) {
+    for (const c of [from, to]) {
+      if (c < 2 || c > bc.cells - 1) return 'end out of range'
+      if (used.has(c)) return 'two ends on one cell'
+      if (blocked && blocked.has(c)) return 'end on a marker'
+      used.add(c)
+      perTier[tierOf(c)]++
+    }
+    const len = Math.abs(to - from)
+    if (len < CFG.minLen || len > bc.maxLen) return 'length'
+    if (type === 1 && to <= from) return 'ladder goes down'
+    if (type === 0 && to >= from) return 'snake goes up'
+    if (type === 1) rise += len; else fall += len
+  }
+  if (perTier.some(n => n > CFG.maxEndsPerTier)) return 'too many ends on a tier'
+  if (rise && fall && Math.abs(rise - fall) / Math.max(rise, fall) > CFG.balance) return 'balance'
+  return crossingProblems(els)
+}
+
+// ---------- crossings: the board as seen from above ----------
+/** A cell's centre on the board's plan in metres (the 3D board's layout: 1 m cells, 1.25 m tiers). */
+export function cellXZ(c) {
+  const t = Math.floor((c - 1) / 10), i = (c - 1) % 10
+  return [t % 2 === 0 ? i : 9 - i, -t * 1.25]
+}
+const segOf = e => { const a = cellXZ(e[1]), b = cellXZ(e[2]); return [a[0], a[1], b[0], b[1]] }
+const cross2 = (ax, ay, bx, by, cx, cy) => (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+function pointSeg(px, py, [x1, y1, x2, y2]) {
+  const dx = x2 - x1, dy = y2 - y1
+  const k = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy || 1)))
+  return Math.hypot(px - x1 - dx * k, py - y1 - dy * k)
+}
+/** How two cut-outs meet: 'none', 'cross' (at a good angle) or 'bad' (a shallow crossing or running alongside). */
+export function relation(e, f) {
+  const p = segOf(e), q = segOf(f)
+  const ux = p[2] - p[0], uy = p[3] - p[1], vx = q[2] - q[0], vy = q[3] - q[1]
+  const cos = Math.abs(ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy) || 1)
+  const angle = Math.acos(Math.min(1, cos)) * 180 / Math.PI
+  const d1 = cross2(...p, q[0], q[1]), d2 = cross2(...p, q[2], q[3])
+  const d3 = cross2(...q, p[0], p[1]), d4 = cross2(...q, p[2], p[3])
+  if (d1 * d2 < 0 && d3 * d4 < 0) return angle < CFG.minCrossAngle ? 'bad' : 'cross'
+  const d = Math.min(pointSeg(p[0], p[1], q), pointSeg(p[2], p[3], q), pointSeg(q[0], q[1], p), pointSeg(q[2], q[3], p))
+  if (d < 0.75 && angle < 25) return 'bad'
+  if (d < 0.45) return angle < CFG.minCrossAngle ? 'bad' : 'cross'
+  return 'none'
+}
+export function crossingProblems(els) {
+  const n = new Array(els.length).fill(0)
+  for (let i = 0; i < els.length; i++) {
+    for (let j = i + 1; j < els.length; j++) {
+      const r = relation(els[i], els[j])
+      if (r === 'bad') return 'shallow crossing'
+      if (r === 'cross') { n[i]++; n[j]++ }
+    }
+  }
+  return n.some(k => k > CFG.maxCrossings) ? 'too many crossings' : null
+}
+
+/** Mean number of rolls of a lone runner without cards, over n runs. */
+export function simulateMean(els, runs, rand, n = CFG.cells) {
+  const jump = new Map(els.map(([, from, to]) => [from, to]))
+  let total = 0
+  for (let i = 0; i < runs; i++) {
+    let pos = 0, rolls = 0
+    while (pos < n && rolls < 1000) {
+      rolls++
+      pos += 1 + Math.floor(rand() * 6)
+      if (pos >= n) break
+      const j = jump.get(pos)
+      if (j !== undefined) pos = j
+    }
+    total += rolls
+  }
+  return total / runs
+}
+
+const boardCache = new Map()
+/** The random field for a seed and a size: on 100 cells 8 snakes and 8 ladders that pass every rule and the 1,000-run check. */
+export function generateBoard(seed, n = CFG.cells) {
+  const key = n + ':' + seed
+  if (boardCache.has(key)) return boardCache.get(key)
+  const bc = boardCfg(n)
+  const r = mulberry32(seed ^ 0x5bd1e995)
+  let els = null
+  for (let attempt = 0; attempt < 4000 && !els; attempt++) {
+    const list = [], used = new Set(), perTier = new Array(bc.tiers).fill(0), crossings = []
+    let ok = true
+    const add = type => {
+      for (let k = 0; k < 300; k++) {
+        const len = CFG.minLen + Math.floor(r() * (bc.maxLen - CFG.minLen + 1))
+        const low = 2 + Math.floor(r() * (bc.cells - 2 - len))
+        const high = low + len
+        if (high > bc.cells - 1 || used.has(low) || used.has(high)) continue
+        const tl = tierOf(low), th = tierOf(high)
+        if (perTier[tl] + 1 > CFG.maxEndsPerTier || perTier[th] + 1 + (tl === th ? 1 : 0) > CFG.maxEndsPerTier) continue
+        const el = type === 1 ? [1, low, high] : [0, high, low]
+        // cross few others, and only steeply
+        let bad = false, mine = 0
+        const hit = []
+        for (let j = 0; j < list.length && !bad; j++) {
+          const rel = relation(el, list[j])
+          if (rel === 'bad') bad = true
+          else if (rel === 'cross') { mine++; hit.push(j); if (crossings[j] + 1 > CFG.maxCrossings) bad = true }
+        }
+        if (bad || mine > CFG.maxCrossings) continue
+        for (const j of hit) crossings[j]++
+        crossings.push(mine)
+        used.add(low); used.add(high); perTier[tl]++; perTier[th]++
+        list.push(el)
+        return true
+      }
+      return false
+    }
+    for (let i = 0; i < Math.max(bc.snakes, bc.ladders) && ok; i++) {
+      if (i < bc.snakes) ok = add(0)
+      if (ok && i < bc.ladders) ok = add(1)
+    }
+    if (!ok || boardProblems(list, null, n)) continue
+    const mean = simulateMean(list, CFG.simRuns, r, n)
+    if (mean < bc.simMin || mean > bc.simMax) continue
+    els = list
+  }
+  if (!els) throw new Error('could not generate a board for seed ' + seed)
+  boardCache.set(key, els)
+  return els
+}
+
+/** The snakes and ladders as they work right now: the base board, shifted by an earthquake, flipped by cards. */
+export function effectiveElements(s) {
+  const src = s.quake ? s.quake.els : s.base
+  return src.map((e, i) => (s.mods.some(m => m.i === i) ? [1 - e[0], e[2], e[1]] : e))
+}
+const markerAt = (s, c, kind) => s.mk.find(m => m.c.includes(c) && (!kind || m.k === kind)) || null
+
+/** Cells where a swamp, trampoline or portal may go. */
+export function freeCells(s) {
+  const ends = new Set()
+  for (const e of effectiveElements(s)) { ends.add(e[1]); ends.add(e[2]) }
+  const out = []
+  for (let c = 1; c < s.n; c++) if (!ends.has(c) && !markerAt(s, c)) out.push(c)
+  return out
+}
+
+// ---------- game ----------
+/**
+ * players: [{ n: name, b: bot level (0 human, 1 easy, 2 medium, 3 hard), id?: session id }]
+ * cells: the board's size (50, 70 or 100). The turn order is drawn at the start.
+ */
+export function createGame({ seed, mode = 'champion', players, cells = CFG.cells }) {
+  if (!SIZES.includes(cells)) cells = CFG.cells
+  if (players.length < 2 || players.length > 6) throw new Error('2 to 6 players')
+  if (mode === 'fool' && players.length < 3) throw new Error('Fool needs at least 3 players')
+  const s = {
+    v: 1, seed: seed >>> 0, mode, n: cells, r: (seed ^ 0x9e3779b9) >>> 0,
+    base: generateBoard(seed >>> 0, cells), mods: [], quake: null, mk: [],
+    pl: [], cur: 0, round: 1, ph: 'main', rolled: false, played: false, frozen: false,
+    peek: null, fin: [], res: null, log: [], seq: 0, turnNo: 0,
+  }
+  const order = players.map((p, i) => i)
+  for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
+  s.pl = order.map(i => ({ n: String(players[i].n).slice(0, 14), b: players[i].b | 0, id: players[i].id ?? null, c: players[i].c ?? i, pos: 0, h: [], d: 0, fx: {} }))
+  const ev = []
+  beginTurn(s, ev)
+  s.ev0 = ev
+  return s
+}
+
+export const clone = s => JSON.parse(JSON.stringify(s))
+const onBoard = s => s.pl.map((p, i) => i).filter(i => !s.pl[i].d)
+function log(s, ev, text) {
+  s.log.push(text)
+  if (s.log.length > 6) s.log.shift()
+  ev.push({ e: 'log', text })
+}
+const nm = (s, i) => s.pl[i].n
+
+function drawCard(s) {
+  let w = rnd(s) * 100, rar = 'C'
+  for (const k of ['C', 'U', 'R', 'L']) { w -= RARITY[k].weight; if (w < 0) { rar = k; break } }
+  const list = BY_RARITY[rar]
+  return list[rint(s, list.length)]
+}
+
+function beginTurn(s, ev) {
+  for (let guard = 0; guard < 12; guard++) {
+    if (s.ph === 'over') return
+    const pi = s.cur, p = s.pl[pi]
+    s.turnNo++
+    s.rolled = false; s.played = false; s.frozen = false; s.peek = null
+    ev.push({ e: 'turn', p: pi, round: s.round })
+    if (p.fx.sk) {
+      delete p.fx.sk
+      log(s, ev, `${p.n} skips this turn`)
+      ev.push({ e: 'skip', p: pi })
+      tickTimers(s, pi, ev)
+      if (!advance(s, ev)) return
+      continue
+    }
+    if (p.fx.fz) { delete p.fx.fz; s.frozen = true; ev.push({ e: 'frozen', p: pi }) }
+    const card = drawCard(s)
+    p.h.push(card)
+    ev.push({ e: 'draw', p: pi, card })
+    s.ph = p.h.length > CFG.hand ? 'disc' : 'main'
+    return
+  }
+}
+
+/** Moves the turn to the next player on the board; false when the game ended on the round limit. */
+function advance(s, ev) {
+  const n = s.pl.length
+  let next = s.cur
+  for (let k = 1; k <= n; k++) {
+    const i = (s.cur + k) % n
+    if (!s.pl[i].d) { next = i; break }
+  }
+  if (next <= s.cur) s.round++
+  s.cur = next
+  if (s.round > CFG.roundLimit) { endByLimit(s, ev); return false }
+  return true
+}
+
+function tickTimers(s, pi, ev) {
+  const p = s.pl[pi]
+  const step = t => { if (t.f) { t.f = 0; return true } t.t--; return t.t > 0 }
+  for (const k of TIMED) if (p.fx[k] && !step(p.fx[k])) delete p.fx[k]
+  let board = false
+  s.mk = s.mk.filter(m => (m.o !== pi || step(m)) || ((board = true), false))
+  s.mods = s.mods.filter(m => (m.o !== pi || step(m)) || ((board = true), false))
+  if (s.quake && s.quake.o === pi && !step(s.quake)) { s.quake = null; board = true }
+  if (board) ev.push(boardEvent(s, 'expire'))
+}
+const boardEvent = (s, why) => ({ e: 'board', why, els: effectiveElements(s), mk: s.mk.map(m => [m.k, m.c, m.t]), mods: s.mods.map(m => m.i) })
+
+function endTurn(s, ev) {
+  if (s.ph === 'over') return
+  const pi = s.cur
+  if (!s.pl[pi].d) tickTimers(s, pi, ev)
+  s.peek = null
+  if (!advance(s, ev)) return
+  beginTurn(s, ev)
+}
+
+function standings(s) {
+  // Champion: the winner first, the rest by cell (further is higher), equal cells share a place
+  const rest = s.pl.map((p, i) => i).filter(i => i !== s.fin[0]).sort((a, b) => s.pl[b].pos - s.pl[a].pos)
+  const places = new Array(s.pl.length)
+  if (s.fin.length) places[s.fin[0]] = 1
+  let place = s.fin.length ? 2 : 1
+  rest.forEach((i, k) => {
+    if (k > 0 && s.pl[i].pos === s.pl[rest[k - 1]].pos) places[i] = places[rest[k - 1]]
+    else places[i] = place + k
+  })
+  return places
+}
+
+function gameOver(s, ev, extra) {
+  s.ph = 'over'
+  if (s.mode === 'champion') s.res = { mode: 'champion', winner: s.fin[0], places: standings(s), ...extra }
+  else {
+    const fool = s.pl.findIndex(p => !p.d)
+    const places = s.pl.map(p => p.d || s.pl.length)
+    s.res = { mode: 'fool', fool, order: [...s.fin], places, ...extra }
+  }
+  ev.push({ e: 'over', res: s.res })
+  if (s.mode === 'champion') log(s, ev, `${nm(s, s.res.winner)} wins!`)
+  else log(s, ev, `${nm(s, s.res.fool)} is the Fool!`)
+}
+
+function endByLimit(s, ev) {
+  const live = onBoard(s)
+  const key = i => s.pl[i].pos
+  if (s.mode === 'champion') {
+    const best = Math.max(...live.map(key))
+    const tied = live.filter(i => key(i) === best)
+    const w = tied[rint(s, tied.length)]
+    s.fin.unshift(w)
+  } else {
+    const worst = Math.min(...live.map(key))
+    const tied = live.filter(i => key(i) === worst)
+    const fool = tied[rint(s, tied.length)]
+    for (const i of live.filter(i => i !== fool).sort((a, b) => key(b) - key(a))) { s.fin.push(i); s.pl[i].d = s.fin.length }
+  }
+  log(s, ev, 'The round limit is reached')
+  gameOver(s, ev, { limit: true })
+}
+
+function finish(s, pi, ev) {
+  const p = s.pl[pi]
+  p.pos = s.n
+  s.fin.push(pi)
+  p.d = s.fin.length
+  ev.push({ e: 'finish', p: pi, place: p.d })
+  if (s.mode === 'champion') { gameOver(s, ev); return }
+  log(s, ev, `${p.n} finished in place ${p.d}`)
+  // a finished player leaves the board: hand, effects and the timers they own go
+  p.h = []; p.fx = {}
+  const before = s.mk.length + s.mods.length + (s.quake ? 1 : 0)
+  s.mk = s.mk.filter(m => m.o !== pi)
+  s.mods = s.mods.filter(m => m.o !== pi)
+  if (s.quake && s.quake.o === pi) s.quake = null
+  if (s.mk.length + s.mods.length + (s.quake ? 1 : 0) !== before) ev.push(boardEvent(s, 'finish'))
+  if (s.peek && (s.peek.by === pi || s.peek.tg === pi)) s.peek = null
+  if (onBoard(s).length <= 1) gameOver(s, ev)
+}
+
+/** The roll a player would make with their effects: [[total, probability], ...] (choices excluded). */
+export function rollDistribution(fx) {
+  const faces = fx.hv ? [3, 4, 5, 6] : [1, 2, 3, 4, 5, 6]
+  const n = fx.x ? 2 : 1
+  const out = new Map()
+  const add = (t, p) => { const v = fx.sl ? Math.min(3, t) : t; out.set(v, (out.get(v) || 0) + p) }
+  if (n === 1) for (const a of faces) add(a, 1 / faces.length)
+  else for (const a of faces) for (const b of faces) add(a + b, 1 / faces.length / faces.length)
+  return [...out]
+}
+
+/** Where a roll of `total` from `pos` ends, without changing anything: { pos, finished }. */
+export function landing(s, pi, pos, total, els = effectiveElements(s)) {
+  const p = s.pl[pi]
+  let c = pos, stopped = false
+  for (let k = 0; k < total; k++) {
+    c++
+    if (c >= s.n) return { pos: s.n, finished: true }
+    if (!p.fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
+  }
+  if (stopped) return { pos: c, finished: false }
+  const el = els.find(e => e[1] === c)
+  if (el) {
+    if (el[0] === 1) return { pos: el[2], finished: el[2] >= s.n }
+    if (p.fx.sh) return { pos: c, finished: false }
+    let fall = el[1] - el[2]
+    if (p.fx.pa) fall = Math.floor(fall / 2)
+    return { pos: c - fall, finished: false }
+  }
+  const m = markerAt(s, c)
+  if (m && m.k === 'tr') return { pos: Math.min(s.n, c + 3), finished: c + 3 >= s.n }
+  if (m && m.k === 'po') return { pos: m.c[0] === c ? m.c[1] : m.c[0], finished: false }
+  return { pos: c, finished: false }
+}
+
+/** The best value for a chosen roll (Choose a Face, Golden Die): the one that ends furthest. */
+export function bestChoice(s, pi, max) {
+  let best = 1, bestPos = -1
+  for (let v = 1; v <= max; v++) {
+    const l = landing(s, pi, s.pl[pi].pos, v)
+    const score = l.finished ? 1000 : l.pos
+    if (score > bestPos) { bestPos = score; best = v }
+  }
+  return best
+}
+
+/** Rolls for a player with their next-roll effects and moves them. Returns the events' roll entry. */
+function rollAndMove(s, pi, value, ev, bonus) {
+  const p = s.pl[pi], fx = p.fx
+  let dice, chosen = false
+  if (fx.gd || fx.cf) {
+    const max = fx.gd ? 6 : 3
+    const v = Number.isInteger(value) && value >= 1 && value <= max ? value : bestChoice(s, pi, max)
+    dice = [v]; chosen = true
+  } else {
+    const n = fx.x ? 2 : 1
+    dice = []
+    for (let k = 0; k < n; k++) dice.push(fx.hv ? 3 + rint(s, 4) : 1 + rint(s, 6))
+  }
+  let total = dice.reduce((a, b) => a + b, 0)
+  const slowed = !!fx.sl && total > 3
+  if (fx.sl) total = Math.min(3, total)
+  delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.sl
+  ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus })
+  log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + dice.reduce((a, b) => a + b, 0) : ''}${slowed ? ', slowed to 3' : ''}`)
+  // step by step: a swamp on the way stops the move
+  const path = []
+  let c = p.pos, stopped = false
+  for (let k = 0; k < total; k++) {
+    c++
+    path.push(Math.min(c, s.n))
+    if (c >= s.n) break
+    if (!fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
+  }
+  p.pos = Math.min(c, s.n)
+  ev.push({ e: 'move', p: pi, path })
+  if (p.pos >= s.n) { finish(s, pi, ev); return }
+  if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+  resolveLanding(s, pi, ev)
+}
+
+function resolveLanding(s, pi, ev) {
+  const p = s.pl[pi], c = p.pos
+  const els = effectiveElements(s)
+  const idx = els.findIndex(e => e[1] === c)
+  if (idx >= 0) {
+    const el = els[idx]
+    if (el[0] === 1) {
+      p.pos = el[2]
+      ev.push({ e: 'ladder', p: pi, from: c, to: p.pos, el: idx })
+      log(s, ev, `${p.n} climbed a ladder from ${c} to ${p.pos}`)
+      if (p.pos >= s.n) finish(s, pi, ev)
+      return
+    }
+    if (p.fx.sh) {
+      delete p.fx.sh
+      ev.push({ e: 'shield', p: pi, c, el: idx })
+      log(s, ev, `${p.n}'s shield blocked a snake on ${c}`)
+      return
+    }
+    let fall = el[1] - el[2]
+    const para = !!p.fx.pa
+    if (para) fall = Math.floor(fall / 2)
+    p.pos = c - fall
+    ev.push({ e: 'snake', p: pi, from: c, to: p.pos, el: idx, tail: el[2], para })
+    log(s, ev, `${p.n} slid down a snake from ${c} to ${p.pos}${para ? ' (parachute)' : ''}`)
+    return
+  }
+  const m = markerAt(s, c)
+  if (m && m.k === 'tr') {
+    p.pos = Math.min(s.n, c + 3)
+    ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
+    log(s, ev, `${p.n} bounced on a trampoline to ${p.pos}`)
+    if (p.pos >= s.n) finish(s, pi, ev)
+    return
+  }
+  if (m && m.k === 'po') {
+    p.pos = m.c[0] === c ? m.c[1] : m.c[0]
+    ev.push({ e: 'portal', p: pi, from: c, to: p.pos })
+    log(s, ev, `${p.n} went through a portal from ${c} to ${p.pos}`)
+  }
+}
+
+/**
+ * Moves from cards (Dash, Setback, Dethrone): the piece jumps, then the cell it lands on works as after a
+ * roll (ladder, snake, trampoline, portal). Going forward a swamp on the way stops it, as on a roll.
+ */
+function jump(s, pi, to, ev, why) {
+  const p = s.pl[pi], fx = p.fx
+  const from = p.pos
+  let dest = Math.max(0, Math.min(s.n, to)), stopped = false
+  for (let c = from + 1; c < dest && c < s.n; c++) if (!fx.bo && markerAt(s, c, 'sw')) { dest = c; stopped = true; break }
+  p.pos = dest
+  ev.push({ e: 'jump', p: pi, from, to: p.pos, why })
+  if (p.pos >= s.n) { finish(s, pi, ev); return }
+  if (p.pos <= 0) return
+  if (stopped || (!fx.bo && markerAt(s, p.pos, 'sw'))) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+  resolveLanding(s, pi, ev)
+}
+
+// ---------- quake ----------
+function quakeElements(s) {
+  const blocked = new Set(s.mk.flatMap(m => m.c))
+  let best = null
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const els = s.base.map(e => [...e])
+    const order = els.map((e, i) => i)
+    for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
+    for (const i of order) {
+      for (let end = 1; end <= 2; end++) {
+        for (let k = 0; k < 6; k++) {
+          const shift = (1 + rint(s, 2)) * (rnd(s) < 0.5 ? -1 : 1)
+          const trial = els.map(e => [...e])
+          trial[i][end] += shift
+          if (!structuralOk(trial, blocked, s.n)) continue
+          els[i][end] += shift
+          break
+        }
+      }
+    }
+    if (boardProblems(els, blocked, s.n)) continue
+    best = els
+    const mean = simulateMean(els, 300, () => rnd(s), s.n)
+    const bc = boardCfg(s.n)
+    if (mean >= bc.simMin && mean <= bc.simMax) return els
+  }
+  return best || s.base.map(e => [...e])
+}
+function structuralOk(els, blocked, n) {
+  const bc = boardCfg(n)
+  const used = new Set()
+  const perTier = new Array(bc.tiers).fill(0)
+  for (const [type, from, to] of els) {
+    for (const c of [from, to]) {
+      if (c < 2 || c > bc.cells - 1 || used.has(c) || blocked.has(c)) return false
+      used.add(c); perTier[tierOf(c)]++
+    }
+    const len = Math.abs(to - from)
+    if (len < CFG.minLen || len > bc.maxLen) return false
+    if (type === 1 ? to <= from : to >= from) return false
+  }
+  return perTier.every(n => n <= CFG.maxEndsPerTier) && !crossingProblems(els)
+}
+
+// ---------- targets ----------
+/** Every target a card can be played on now: player indices, cells, [cell, cell] or element indices. */
+export function targetsFor(s, pi, cardId) {
+  const card = CARD[cardId]
+  const live = onBoard(s)
+  switch (card.tgt) {
+    case 'any': return live
+    case 'other': {
+      const others = live.filter(i => i !== pi)
+      if (cardId === 'C3') return others.filter(i => s.pl[i].h.length > 0)
+      if (cardId === 'C4') return others.filter(i => s.pl[i].h.length > 0 || s.pl[pi].h.length > 1)
+      return others
+    }
+    case 'leader': {
+      const best = Math.max(...live.map(i => s.pl[i].pos))
+      return live.filter(i => s.pl[i].pos === best)
+    }
+    case 'cell': case 'cell2': {
+      let free = freeCells(s)
+      // portals go no further than the player's own cell: a way to keep progress
+      if (card.tgt === 'cell2') free = free.filter(c => c <= s.pl[pi].pos)
+      return card.tgt === 'cell2' && free.length < 2 ? [] : free
+    }
+    case 'ladder': case 'snake': {
+      const want = card.tgt === 'ladder' ? 1 : 0
+      return effectiveElements(s).map((e, i) => i).filter(i => effectiveElements(s)[i][0] === want && !s.mods.some(m => m.i === i))
+    }
+    case 'board': return [null]
+    case 'none': return [null]
+  }
+  return []
+}
+
+export function canPlayCards(s, pi) {
+  return s.ph === 'main' && s.cur === pi && !s.played && !s.frozen && !s.pl[pi].d
+}
+export function playable(s, pi, cardId) {
+  return canPlayCards(s, pi) && targetsFor(s, pi, cardId).length > 0
+}
+function hasPlayable(s, pi) {
+  return canPlayCards(s, pi) && s.pl[pi].h.some(c => targetsFor(s, pi, c).length > 0)
+}
+/** Why a card cannot be played now, or null. */
+export function whyNot(s, pi, cardId) {
+  if (s.ph === 'over') return 'The game is over'
+  if (s.cur !== pi) return 'Not your turn'
+  if (s.ph === 'disc') return 'Choose a card to discard'
+  if (s.frozen) return "You can't play cards this turn"
+  if (s.played) return 'One card per turn'
+  if (!targetsFor(s, pi, cardId).length) return 'No valid targets'
+  return null
+}
+
+// ---------- actions ----------
+/**
+ * a: { t: 'roll', v? } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i }
+ * Returns { ok, err, ev }. The state is changed in place (clone it first to keep the old one).
+ */
+export function apply(s, pi, a) {
+  const ev = []
+  const fail = err => ({ ok: false, err, ev: [] })
+  if (!a || typeof a !== 'object') return fail('bad action')
+  if (s.ph === 'over') return fail('The game is over')
+  if (s.cur !== pi) return fail('Not your turn')
+  const p = s.pl[pi]
+  if (a.t === 'disc') {
+    if (s.ph !== 'disc') return fail('Nothing to discard')
+    const i = a.i | 0
+    if (i < 0 || i >= p.h.length) return fail('bad card')
+    const [card] = p.h.splice(i, 1)
+    ev.push({ e: 'discard', p: pi, card })
+    s.ph = 'main'
+  } else if (s.ph !== 'main') return fail('Choose a card to discard')
+  else if (a.t === 'roll') {
+    if (s.rolled) return fail('Already rolled')
+    s.rolled = true
+    rollAndMove(s, pi, a.v, ev, false)
+    afterAction(s, pi, ev)
+  } else if (a.t === 'end') {
+    if (!s.rolled) return fail('Roll first')
+    endTurn(s, ev)
+  } else if (a.t === 'play') {
+    const i = a.i | 0
+    const cardId = p.h[i]
+    if (!cardId) return fail('bad card')
+    const why = whyNot(s, pi, cardId)
+    if (why) return fail(why)
+    const err = playCard(s, pi, i, a.tg, ev)
+    if (err) return fail(err)
+    afterAction(s, pi, ev)
+  } else return fail('unknown action')
+  s.seq++
+  return { ok: true, ev }
+}
+
+function afterAction(s, pi, ev) {
+  if (s.ph === 'over') return
+  if (s.pl[pi].d) { endTurn(s, ev); return } // finished mid-turn (Fool): the turn ends at once
+  if (s.rolled && (s.played || !hasPlayable(s, pi))) endTurn(s, ev)
+}
+
+function playCard(s, pi, i, tg, ev) {
+  const p = s.pl[pi]
+  const cardId = p.h[i]
+  const card = CARD[cardId]
+  const valid = targetsFor(s, pi, cardId)
+  let target = tg
+  if (card.tgt === 'leader') {
+    if (valid.length === 1) target = valid[0]
+    else if (!valid.includes(target)) return 'Choose a leader'
+  } else if (card.tgt === 'cell2') {
+    if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return 'Choose two free cells'
+  } else if (card.tgt === 'board' || card.tgt === 'none') target = null
+  else if (!valid.includes(target)) return 'Choose a valid target'
+
+  p.h.splice(i, 1)
+  s.played = true
+  ev.push({ e: 'play', p: pi, card: cardId, tg: target })
+  const who = typeof target === 'number' && ['any', 'other', 'leader'].includes(card.tgt) ? s.pl[target] : null
+  const onWho = who ? (target === pi ? ' on themselves' : ` on ${who.n}`) : ''
+  log(s, ev, `${p.n} played ${card.name}${onWho}`)
+  const setFx = (k, v = 1) => { who.fx[k] = v }
+  const timed = k => { who.fx[k] = { t: CFG.fxTurns, f: target === pi ? 1 : 0 } }
+  switch (cardId) {
+    case 'M1': jump(s, target, who.pos + 2, ev, 'dash'); break
+    case 'M2': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - 3), ev, 'setback'); break
+    case 'M3': {
+      // both land on their new cells: the player who played the card first, then the other
+      const a = p.pos
+      p.pos = who.pos; who.pos = a
+      ev.push({ e: 'swap', a: pi, b: target })
+      for (const q of [pi, target]) {
+        if (s.ph === 'over' || s.pl[q].d || s.pl[q].pos <= 0) continue
+        if (!s.pl[q].fx.bo && markerAt(s, s.pl[q].pos, 'sw')) { ev.push({ e: 'swamp', p: q, c: s.pl[q].pos }); continue }
+        resolveLanding(s, q, ev)
+      }
+      break
+    }
+    case 'M4': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - 10), ev, 'dethrone'); break
+    case 'M5': rollAndMove(s, target, undefined, ev, true); break
+    case 'D1': setFx('x'); break
+    case 'D2': delete who.fx.gd; setFx('cf'); break
+    case 'D3': setFx('hv'); break
+    case 'D4': delete who.fx.cf; setFx('gd'); break
+    case 'H1': setFx('sl'); break
+    case 'H2': setFx('fz'); break
+    case 'H3': setFx('sk'); break
+    case 'P1': timed('pa'); break
+    case 'P2': timed('bo'); break
+    case 'P3': timed('sh'); break
+    case 'B1':
+      s.mk = s.mk.filter(m => !(m.k === 'sw' && m.o === pi))
+      s.mk.push({ k: 'sw', c: [target], o: pi, t: CFG.fxTurns, f: 1 })
+      ev.push(boardEvent(s, 'swamp'))
+      break
+    case 'B4':
+      s.mk.push({ k: 'tr', c: [target], o: pi, t: CFG.fxTurns, f: 1 })
+      ev.push(boardEvent(s, 'tramp'))
+      break
+    case 'B5':
+      s.mk.push({ k: 'po', c: [tg[0], tg[1]], o: pi, t: CFG.fxTurns, f: 1 })
+      ev.push(boardEvent(s, 'portal'))
+      break
+    case 'B2': case 'B3':
+      s.mods.push({ i: target, o: pi, t: CFG.fxTurns, f: 1 })
+      ev.push({ ...boardEvent(s, 'flip'), flip: target })
+      break
+    case 'B6':
+      s.quake = { o: pi, t: CFG.fxTurns, f: 1, els: quakeElements(s) }
+      ev.push(boardEvent(s, 'quake'))
+      break
+    case 'C1': {
+      const n = p.h.length
+      p.h = []
+      const draw = Math.min(CFG.hand, n + 1)
+      for (let k = 0; k < draw; k++) p.h.push(drawCard(s))
+      ev.push({ e: 'redraw', p: pi, n: draw })
+      break
+    }
+    case 'C2': s.peek = { by: pi, tg: target }; ev.push({ e: 'peek', p: pi, tg: target }); break
+    case 'C3': {
+      const k = rint(s, who.h.length)
+      const [c] = who.h.splice(k, 1)
+      p.h.push(c)
+      ev.push({ e: 'steal', p: pi, tg: target })
+      break
+    }
+    case 'C4': {
+      const h = p.h
+      p.h = who.h; who.h = h
+      ev.push({ e: 'swaphands', p: pi, tg: target })
+      break
+    }
+  }
+  return null
+}
+
+// ---------- bots ----------
+const CARD_VALUE = { C: 1, U: 1.5, R: 2, L: 3 }
+const handValue = h => h.reduce((a, c) => a + CARD_VALUE[CARD[c].rar], 0)
+
+/** Expected cell after a player's next roll, with their effects and the board as it is. */
+function expectedNext(s, q, els) {
+  const p = s.pl[q]
+  if (p.d) return 130
+  if (p.fx.sk) return p.pos
+  const scoreOf = l => (l.finished ? 115 : l.pos)
+  if (p.fx.gd || p.fx.cf) {
+    const max = p.fx.gd ? 6 : 3
+    let best = 0
+    for (let v = 1; v <= max; v++) best = Math.max(best, scoreOf(landing(s, q, p.pos, v, els)))
+    return best
+  }
+  let ex = 0
+  for (const [t, pr] of rollDistribution(p.fx)) ex += pr * scoreOf(landing(s, q, p.pos, t, els))
+  if (p.fx.dm) { // a pending Double Move (evaluation only): one more ordinary roll from there
+    const after = ex
+    let ex2 = 0
+    for (const [t, pr] of rollDistribution({})) ex2 += pr * Math.min(115, after + t)
+    ex = ex2
+  }
+  return ex
+}
+
+function standingValue(s, q, els) {
+  const p = s.pl[q]
+  if (p.d) return 140
+  let v = expectedNext(s, q, els)
+  if (p.fx.sh) v += 2.5
+  if (p.fx.pa) v += 1.5 * (p.fx.pa.t || 1) / 2
+  if (p.fx.bo) v += 0.4
+  if (p.fx.fz) v -= 0.6
+  v += 0.6 * handValue(p.h)
+  return v
+}
+
+/** How good the position is for player pi (higher is better). */
+export function utility(s, pi) {
+  const els = effectiveElements(s)
+  const mine = standingValue(s, pi, els)
+  if (s.ph === 'over' && s.res) {
+    if (s.mode === 'champion') return s.res.winner === pi ? 1000 : -1000
+    return s.res.fool === pi ? -1000 : 1000
+  }
+  const others = s.pl.map((p, i) => i).filter(i => i !== pi && !s.pl[i].d).map(i => standingValue(s, i, els))
+  if (!others.length) return mine
+  if (s.mode === 'champion') {
+    const max = Math.max(...others), avg = others.reduce((a, b) => a + b, 0) / others.length
+    return mine - 0.75 * max - 0.25 * avg
+  }
+  return mine - Math.min(...others)
+}
+
+/** Candidate targets a bot considers for a card (cells are narrowed to the useful ones). */
+function botTargets(s, pi, cardId) {
+  const all = targetsFor(s, pi, cardId)
+  const card = CARD[cardId]
+  if (card.tgt === 'cell' || card.tgt === 'cell2') {
+    const free = new Set(all)
+    const near = (from, a, b) => { const out = []; for (let c = from + a; c <= from + b; c++) if (free.has(c)) out.push(c); return out }
+    const me = s.pl[pi].pos
+    if (cardId === 'B1') { // swamps go in front of the others
+      const out = new Set()
+      for (const q of onBoard(s)) if (q !== pi) for (const c of near(s.pl[q].pos, 1, 6)) out.add(c)
+      return [...out]
+    }
+    if (cardId === 'B4') return near(me, 1, 6)
+    // portal: the exit near where I stand, the entrance where a snake would drop me
+    const exits = all.filter(c => c <= me).sort((a, b) => b - a).slice(0, 3)
+    const ins = new Set()
+    for (const e of effectiveElements(s)) if (e[0] === 0 && e[2] < me - 4) for (const c of near(e[2], 1, 6)) ins.add(c)
+    const out = []
+    for (const b of exits) for (const a of ins) if (a < b - 6) out.push([a, b])
+    return out.slice(0, 24)
+  }
+  return all
+}
+
+function evaluateOption(s, pi, i, tg, level) {
+  const cardId = s.pl[pi].h[i]
+  const c = clone(s)
+  c.r = (s.r ^ 0xa5a5a5a5) >>> 0 // bots do not see the real future rolls
+  const before = utility(s, pi)
+  if (cardId === 'M5') { // Double Move: expected, not sampled
+    c.pl[pi].h.splice(i, 1); c.played = true
+    c.pl[tg].fx.dm = 1
+    return utility(c, pi) - before
+  }
+  if (cardId === 'C3') { // Steal: the average card of the target's hand
+    const h = s.pl[tg].h
+    if (!h.length) return -1
+    return (0.6 * handValue(h) / h.length) * (1 + (level >= 3 ? 0.3 : 0)) - 0.6 * CARD_VALUE[CARD[cardId].rar] * 0.2
+  }
+  if (cardId === 'C2') return level >= 3 ? 0.3 : 0.05
+  c.rolled = false // judge the board as it stands, without ending the turn in the copy
+  const r = apply(c, pi, { t: 'play', i, tg })
+  if (!r.ok) return -99
+  // a portal back up to where I stand insures against a snake later
+  if (cardId === 'B5') return utility(c, pi) - before + 0.6 * CARD_VALUE.R + 0.07 * Math.abs(tg[1] - tg[0])
+  // the card itself leaves the hand; do not count that as a loss
+  return utility(c, pi) - before + 0.6 * CARD_VALUE[CARD[cardId].rar]
+}
+
+function bestOption(s, pi, level, filter = () => true) {
+  const p = s.pl[pi]
+  let best = null
+  p.h.forEach((cardId, i) => {
+    if (!filter(cardId)) return
+    if (!targetsFor(s, pi, cardId).length) return
+    for (const tg of botTargets(s, pi, cardId)) {
+      let g = evaluateOption(s, pi, i, tg, level)
+      if (level === 2) g += (rnd(s) - 0.5) * 0.6
+      if (!best || g > best.gain) best = { i, tg, gain: g, card: cardId }
+    }
+  })
+  return best
+}
+
+const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'M5'])
+/** The next action of a bot whose turn it is (or who must discard). */
+export function botAction(s, pi) {
+  const p = s.pl[pi], level = p.b || 2
+  if (s.ph === 'disc') {
+    if (level === 1) return { t: 'disc', i: rint(s, p.h.length) }
+    let worst = 0, worstV = Infinity
+    p.h.forEach((c, i) => {
+      const v = CARD_VALUE[CARD[c].rar] + (targetsFor(s, pi, c).length ? 0.5 : 0) + rnd(s) * 0.2
+      if (v < worstV) { worstV = v; worst = i }
+    })
+    return { t: 'disc', i: worst }
+  }
+  const rollAction = () => {
+    if (p.fx.gd) return { t: 'roll', v: bestChoice(s, pi, 6) }
+    if (p.fx.cf) return { t: 'roll', v: bestChoice(s, pi, 3) }
+    return { t: 'roll' }
+  }
+  const canPlay = canPlayCards(s, pi)
+  if (level === 1) {
+    if (!s.rolled) {
+      if (canPlay && rnd(s) < 0.5) {
+        const opts = []
+        p.h.forEach((c, i) => { for (const tg of targetsFor(s, pi, c)) opts.push({ i, tg, c }) })
+        if (opts.length) {
+          const o = opts[rint(s, opts.length)]
+          const tg = CARD[o.c].tgt === 'cell2' ? pickTwo(s, pi) : o.tg
+          return { t: 'play', i: o.i, tg }
+        }
+      }
+      return rollAction()
+    }
+    return { t: 'end' }
+  }
+  const threshold = level >= 3 ? 0.7 : 0.9
+  const hold = (o) => level >= 3 && CARD[o.card].rar === 'L' && o.gain < 2.5 && p.h.length < CFG.hand && !s.pl.some(q => !q.d && q.pos >= s.n * 0.7)
+  if (!s.rolled) {
+    if (canPlay) {
+      // cards that shape this turn's roll go before it
+      const o = bestOption(s, pi, level, c => ROLL_CARDS.has(c))
+      if (o && o.gain > threshold && !hold(o) && (CARD[o.card].tgt !== 'any' || o.tg === pi)) return { t: 'play', i: o.i, tg: o.tg }
+    }
+    return rollAction()
+  }
+  if (canPlay) {
+    const o = bestOption(s, pi, level)
+    if (o && o.gain > threshold && !hold(o)) return { t: 'play', i: o.i, tg: o.tg }
+  }
+  return { t: 'end' }
+}
+function pickTwo(s, pi) {
+  const free = targetsFor(s, pi, 'B5')
+  const a = free[rint(s, free.length)]
+  let b = a
+  while (b === a) b = free[rint(s, free.length)]
+  return [a, b]
+}
+
+/** A copy of the state for sending: the base board is regenerated from the seed on arrival. */
+export function pack(s) {
+  const o = { ...s }
+  delete o.base; delete o.ev0
+  return o
+}
+export function unpack(o) {
+  const s = { ...o }
+  s.n = SIZES.includes(s.n) ? s.n : CFG.cells
+  s.base = generateBoard(s.seed, s.n)
+  return s
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>card faces</title>
+<style>body { margin: 8px; background: #d8d2c6; font: 12px sans-serif } canvas { margin: 4px; vertical-align: top }</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script type="module">
+// Every card face (or ?ids=C1,M2 at ?w=512) for checking the drawings.
+import * as P from '../experience/paper.js'
+import { CARDS } from '../experience/rules.js'
+const q = new URLSearchParams(location.search)
+const w = +(q.get('w') || 256), h = Math.round(w * 1.4)
+const ids = q.get('ids') ? q.get('ids').split(',') : CARDS.map(c => c.id)
+for (const id of ids) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  const g = c.getContext('2d')
+  if (id === 'back') P.drawCardBack(g, w, h); else P.drawCard(g, id, w, h)
+  document.body.appendChild(c)
+}
+</script>
+</body>
+</html>

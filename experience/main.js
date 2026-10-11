@@ -1,0 +1,580 @@
+// Cards, Snakes & Ladders for Project 0: a turn-based race up paper tiers with a deck of cards.
+// Play against bots on your own or with friends at one computer (passing it round), or sit down with
+// everyone in the lot at the Shared Table, where the session's host runs the rules and the bots and the
+// others send their moves. Players in the lot can invite each other to the Shared Table.
+import * as THREE from 'three'
+import * as R from './rules.js'
+import { View } from './view.js'
+import { UI } from './ui.js'
+import { T } from './strings.js'
+
+const BOT_NAMES = ['Pip', 'Juniper', 'Mossy', 'Bramble', 'Clover', 'Fennel', 'Quill', 'Basil', 'Tansy', 'Wren', 'Sorrel', 'Nutmeg']
+const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
+const BOT_DELAY = 1.1
+const TURN_SECONDS = 45
+const INVITE_SECONDS = 45
+
+// ---------- a game played in this browser: one player or several taking turns at it, and bots ----------
+class LocalTable {
+  constructor(app, { kind, mode, humans = 1, bots, level, size = 100 }) {
+    this.app = app
+    this.kind = kind
+    this.humans = humans
+    this.shown = -1 // with several players at one computer: whose hand was last shown
+    const p0 = app.p0
+    const seed = (Math.random() * 2 ** 31) >>> 0
+    const names = shuffle([...BOT_NAMES], seed)
+    const players = []
+    for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: T.playerN(i + 1), b: 0, id: null, c: i })
+    for (let i = 0; i < bots; i++) players.push({ n: names[i], b: level, c: players.length })
+    this.cfg = { mode, humans, bots, level, size }
+    this.s = R.createGame({ seed, mode, players, cells: size })
+    this.s.gid = seed
+    this.wait = 1.4
+    app.view.tasks = []
+    app.view.setState(R.clone(this.s), { players: p0.players })
+    for (const l of this.s.log) app.ui.log(l)
+    app.view.distWant = 7.5
+    app.view.focusWant.copy(app.view.tokens[this.s.cur].group.position)
+  }
+  /** The seat this screen plays: mine, or with several players at one computer whoever's turn is shown. */
+  mySeat() {
+    if (this.kind !== 'solo') return -1
+    if (this.humans < 2) return this.s.pl.findIndex(p => !p.b && p.id === this.app.p0.me.id)
+    const s = this.app.view.state || this.s
+    return s.ph !== 'over' && !s.pl[s.cur].b ? s.cur : -1
+  }
+  /** A player whose turn it is but whose hand stays hidden until they say they hold the computer, or -1. */
+  curtain() {
+    if (this.humans < 2) return -1
+    const me = this.mySeat()
+    return me >= 0 && me !== this.shown ? me : -1
+  }
+  reveal() { this.shown = this.mySeat() }
+  act(a) {
+    if (this.app.view.busy || this.curtain() >= 0) return false
+    const pi = this.mySeat()
+    if (pi < 0) return false
+    const r = R.apply(this.s, pi, a)
+    if (!r.ok) { this.app.ui.say(r.err); return false }
+    this.after(r.ev)
+    return true
+  }
+  after(ev) {
+    this.app.view.play(ev, R.clone(this.s), { players: this.app.p0.players })
+    // a game shared at one computer does not count for the week's table
+    if (this.s.ph === 'over') this.app.gameOver(this.s, this.humans > 1 ? -1 : this.mySeat())
+  }
+  update(dt) {
+    const s = this.s, view = this.app.view
+    if (s.ph === 'over') return
+    if (view.busy) return
+    const p = s.pl[s.cur]
+    if (!p.b) return
+    this.wait -= dt * view.speed
+    if (this.wait > 0) return
+    this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5)
+    const r = R.apply(s, s.cur, R.botAction(s, s.cur))
+    if (!r.ok) { this.app.p0.log('bot error', r.err); R.apply(s, s.cur, { t: s.rolled ? 'end' : 'roll' }); return }
+    this.after(r.ev)
+  }
+}
+
+// ---------- the board behind the menus: no game is played there ----------
+class IdleTable {
+  constructor(app) {
+    this.app = app
+    this.kind = 'idle'
+    const seed = (Math.random() * 2 ** 31) >>> 0
+    this.s = R.createGame({ seed, mode: 'champion', players: [{ n: 'A', b: 1 }, { n: 'B', b: 1 }] })
+    app.view.tasks = []
+    app.view.setState(R.clone(this.s))
+    for (const t of app.view.tokens) t.group.visible = false
+    app.view.overview()
+    this.t = 0
+  }
+  mySeat() { return -1 }
+  act() { return false }
+  update(dt) {
+    // the camera drifts slowly over the board
+    this.t += dt
+    const v = this.app.view
+    v.focusWant.set(Math.sin(this.t * 0.09) * 2.2, 1.6, 0.4 + Math.sin(this.t * 0.06) * 2)
+  }
+}
+
+// ---------- the Shared Table: everyone in the session, the host runs the rules ----------
+class SharedTable {
+  constructor(app, g) {
+    this.app = app
+    this.kind = 'shared'
+    this.wait = 1.4
+    this.turnSeen = -1
+    this.turnStart = 0
+    this.load(g, true)
+  }
+  get p0() { return this.app.p0 }
+  load(g, snap) {
+    const s = R.unpack(g.s)
+    s.gid = g.gid
+    const fresh = !this.s || this.s.gid !== g.gid
+    const ev = g.ev
+    const nextSeq = this.s && !fresh && ev && s.seq === this.s.seq + 1
+    this.s = s
+    if (fresh || snap || !nextSeq) {
+      this.app.view.tasks = []
+      this.app.view.setState(R.clone(s), { players: this.p0.players })
+      if (fresh) { this.app.ui.logLines = []; this.app.view.overview() }
+      for (const l of (fresh ? s.log : [])) this.app.ui.log(l)
+    } else this.app.view.play(ev, R.clone(s), { players: this.p0.players })
+    if (s.ph === 'over') this.app.gameOver(s, this.mySeat())
+  }
+  mySeat() { return this.s.pl.findIndex(p => !p.b && p.id === this.p0.me.id) }
+  act(a) {
+    if (this.app.view.busy || this.app.waiting > 0) return false
+    if (this.p0.room.isHost) return this.applyFrom(this.p0.me.id, a)
+    this.p0.room.sendTo(this.p0.room.host, { t: 'act', gid: this.s.gid, seq: this.s.seq, a })
+    this.app.waiting = 2.5
+    return true
+  }
+  /** Host: a player's action, checked against whose turn it is. */
+  applyFrom(id, a) {
+    const s = this.s
+    const pi = s.cur
+    if (s.ph === 'over' || s.pl[pi].id !== id || s.pl[pi].b) { if (id !== this.p0.me.id) this.p0.room.sendTo(id, { t: 'err', text: 'Not your turn' }); return false }
+    const r = R.apply(s, pi, a)
+    if (!r.ok) { if (id === this.p0.me.id) this.app.ui.say(r.err); else this.p0.room.sendTo(id, { t: 'err', text: r.err }); return false }
+    this.publish(r.ev)
+    return true
+  }
+  publish(ev) {
+    const s = this.s
+    let payload = { gid: s.gid, s: R.pack(s), ev }
+    if (bytes(payload) > 2000) payload = { gid: s.gid, s: R.pack(s), ev: ev.filter(e => e.e !== 'board' && e.e !== 'log') }
+    if (bytes(payload) > 2000) payload = { gid: s.gid, s: R.pack(s), ev: null }
+    if (bytes(payload) > 2040) { const t = R.pack(s); t.log = t.log.slice(-2); payload = { gid: s.gid, s: t, ev: null } }
+    this.p0.room.set('g', payload)
+    this.app.view.play(ev || [], R.clone(s), { players: this.p0.players })
+    if (s.ph === 'over') this.app.gameOver(s, this.mySeat())
+  }
+  onState(g, from) {
+    if (!g) return
+    if (from === this.p0.me.id && this.p0.room.isHost) return // our own publish, already shown
+    this.app.waiting = 0
+    this.load(g, false)
+  }
+  /** Host: a seated player left the session; a bot takes the seat with the same hand. */
+  replace(id) {
+    const s = this.s
+    const i = s.pl.findIndex(p => p.id === id && !p.b)
+    if (i < 0 || s.ph === 'over') return
+    s.pl[i].b = 2
+    s.log.push(T.replacedByBot(s.pl[i].n)); if (s.log.length > 6) s.log.shift()
+    this.app.ui.log(T.replacedByBot(s.pl[i].n))
+    s.seq++
+    this.publish([])
+  }
+  update(dt) {
+    const s = this.s, view = this.app.view
+    // the turn clock, as everyone sees it
+    if (s.turnNo !== this.turnSeen) { this.turnSeen = s.turnNo; this.turnStart = 0 }
+    if (!view.busy) this.turnStart += dt
+    const human = !s.pl[s.cur].b && s.ph !== 'over'
+    this.app.turnLeft = human ? Math.max(0, TURN_SECONDS - this.turnStart) : null
+    if (!this.p0.room.isHost || s.ph === 'over' || view.busy) return
+    const p = s.pl[s.cur]
+    if (p.b) {
+      this.wait -= dt * view.speed
+      if (this.wait > 0) return
+      this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5)
+      const r = R.apply(s, s.cur, R.botAction(s, s.cur))
+      if (r.ok) this.publish(r.ev)
+      return
+    }
+    if (this.turnStart > TURN_SECONDS) {
+      // out of time: discard the card just drawn, roll if not rolled, then end the turn
+      const a = s.ph === 'disc' ? { t: 'disc', i: p.h.length - 1 } : !s.rolled ? { t: 'roll' } : { t: 'end' }
+      const r = R.apply(s, s.cur, a)
+      if (r.ok) this.publish(r.ev)
+      this.turnStart = TURN_SECONDS - 2
+    }
+  }
+}
+
+const bytes = v => new TextEncoder().encode(JSON.stringify(v ?? null)).byteLength
+function shuffle(a, seed) {
+  const r = R.mulberry32(seed)
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
+  return a
+}
+
+// ---------- the app ----------
+class App {
+  constructor(p0) {
+    this.p0 = p0
+    this.screen = 'menu'
+    this.cfg = { mode: 'champion', humans: 1, bots: 3, level: 2, size: 100 }
+    this.speedIdx = 0
+    this.waiting = 0
+    this.turnLeft = null
+    this.reward = null
+    this.menuOpen = false
+    this.view = new View(p0)
+    this.ui = new UI(p0, this)
+    this.table = null
+    this.shared = null
+    this.lastSfx = {}
+    this.status = new Map() // what the others in the lot are doing: id -> 'menu' | 'solo' | 'lobby' | 'shared'
+    this.statusSent = null
+    this.invite = null // an invitation to the Shared Table I got: { from, t }
+    this.invSent = new Map() // id -> when I last invited them
+    const v = this.view
+    v.on('draw', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.4); this.ui.dirty = true })
+    for (const name of ['turn', 'discard', 'roll', 'redraw', 'steal', 'swaphands', 'peek', 'settled']) v.on(name, () => { this.ui.dirty = true })
+    v.on('log', text => this.ui.log(text))
+    v.on('play', e => { this.ui.showPlayed(e); this.sfx('card', 0.6); this.ui.dirty = true })
+    v.on('over', () => { this.ui.dirty = true })
+    v.on('sfx', (name, vol) => this.sfx(name, vol))
+  }
+  sfx(name, volume = 0.5) {
+    const now = this.p0.time
+    if (this.table?.kind === 'idle' || now - (this.lastSfx[name] || -9) < 0.09) return
+    this.lastSfx[name] = now
+    try { this.p0.sound.play(`sfx/${name}.mp3`, { volume }) } catch { /* sound is optional */ }
+  }
+  mySeat() { return this.table ? this.table.mySeat() : -1 }
+  /** Several players taking turns at this computer. */
+  hotseat() { return this.table?.kind === 'solo' && this.table.humans > 1 }
+  /** The player who should take the computer before their hand is shown, or -1. */
+  curtain() { return this.screen === 'game' && this.table?.curtain ? this.table.curtain() : -1 }
+  reveal() { this.table?.reveal?.(); this.sfx('draw', 0.4); this.ui.dirty = true }
+  sessionCount() { return this.p0.players.size }
+  nameOf(id) { return this.p0.players.get(id)?.name || 'someone' }
+  speedLabel() { return SPEEDS[this.speedIdx][1] }
+  cycleSpeed() { this.speedIdx = (this.speedIdx + 1) % SPEEDS.length; this.view.speed = SPEEDS[this.speedIdx][0]; this.ui.dirty = true }
+
+  startAttract() {
+    this.table = new IdleTable(this)
+    this.view.speed = 1
+  }
+  startSolo() {
+    this.reward = null
+    this.ui.logLines = []
+    this.ui.selected = -1; this.ui.cancelTarget()
+    const c = this.cfg
+    this.table = new LocalTable(this, { kind: 'solo', mode: c.mode, humans: c.humans, bots: c.bots, level: c.level, size: c.size })
+    this.view.speed = SPEEDS[this.speedIdx][0]
+    this.screen = 'game'
+    this.ui.dirty = true
+    this.sfx('draw', 0.4)
+  }
+  toMenu() {
+    if (this.table?.kind === 'shared') {
+      if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.p0.room.set('lob', lob) }
+      else this.p0.room.sendTo(this.p0.room.host, { t: 'leaveSeat' })
+    }
+    this.menuOpen = false
+    this.screen = 'menu'
+    this.shared = null
+    this.ui.cancelTarget(); this.ui.selected = -1
+    this.startAttract()
+    this.ui.dirty = true
+  }
+  rematch() {
+    this.menuOpen = false
+    if (this.table?.kind === 'shared') { if (this.p0.room.isHost) this.lobbyCmd({ t: 'start' }); return }
+    this.startSolo()
+  }
+  openGameMenu() { this.menuOpen = !this.menuOpen; this.ui.dirty = true }
+  act(a) { return this.table && this.screen === 'game' ? this.table.act(a) : false }
+
+  // ----- shared table lobby (kept in room.state 'lob', written by the host) -----
+  lobby() {
+    const l = this.p0.room.state.lob
+    return l ? JSON.parse(JSON.stringify(l)) : { seats: [null, null, null, null, null, null], mode: 'champion', size: 100, status: 'lobby', gid: 0 }
+  }
+  openLobby() {
+    const lob = this.lobby()
+    if (lob.status === 'playing' && this.p0.room.state.g) { this.joinShared(this.p0.room.state.g); return }
+    this.screen = 'lobby'
+    this.lobbyCmd({ t: 'sit' })
+    this.ui.dirty = true
+  }
+  leaveLobby() { this.lobbyCmd({ t: 'stand' }); this.screen = 'menu'; this.ui.dirty = true }
+  lobbyCmd(cmd) {
+    if (this.p0.room.isHost) this.handleLobby(this.p0.me.id, cmd)
+    else this.p0.room.sendTo(this.p0.room.host, { t: 'lob', cmd })
+  }
+  handleLobby(from, cmd) {
+    const lob = this.lobby()
+    const host = from === this.p0.me.id
+    const seated = lob.seats.findIndex(s => s && s.id === from && !s.b)
+    const free = lob.seats.findIndex(s => !s)
+    if (cmd.t === 'sit' && seated < 0 && free >= 0) lob.seats[free] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
+    else if (cmd.t === 'stand' && seated >= 0) lob.seats[seated] = null
+    else if (!host) return
+    else if (cmd.t === 'mode') lob.mode = cmd.mode
+    else if (cmd.t === 'size' && R.SIZES.includes(cmd.size)) lob.size = cmd.size
+    else if (cmd.t === 'bot' && free >= 0) {
+      const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
+      lob.seats[free] = { id: null, n: BOT_NAMES.find(n => !used.has(n)) || 'Bot', b: 2 }
+    } else if (cmd.t === 'botlvl' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat].b = (lob.seats[cmd.seat].b % 3) + 1
+    else if (cmd.t === 'remove' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat] = null
+    else if (cmd.t === 'start') { this.startShared(lob); return }
+    this.p0.room.set('lob', lob)
+    this.ui.dirty = true
+  }
+  startShared(lob) {
+    const seats = lob.seats.map((s, i) => (s ? { ...s, c: i } : null)).filter(Boolean)
+    if (seats.length < 2 || (lob.mode === 'fool' && seats.length < 3)) return
+    const seed = (Math.random() * 2 ** 31) >>> 0
+    const s = R.createGame({ seed, mode: lob.mode, cells: lob.size || 100, players: seats.map(x => ({ n: x.n, b: x.b, id: x.id, c: x.c })) })
+    s.gid = seed
+    lob.status = 'playing'; lob.gid = seed
+    this.p0.room.set('lob', lob)
+    const g = { gid: seed, s: R.pack(s), ev: null }
+    this.p0.room.set('g', g)
+    this.joinShared(g)
+  }
+  joinShared(g) {
+    this.reward = null
+    this.ui.logLines = []
+    this.ui.selected = -1; this.ui.cancelTarget()
+    this.shared = new SharedTable(this, g)
+    this.table = this.shared
+    this.view.speed = SPEEDS[this.speedIdx][0]
+    this.screen = 'game'
+    this.ui.dirty = true
+  }
+  onRoomState(key, value, from) {
+    if (key === 'lob') {
+      if (value && value.status === 'playing' && (this.screen === 'lobby' || (this.screen === 'game' && this.table?.kind === 'shared'))) {
+        const g = this.p0.room.state.g
+        if (g && g.gid === value.gid && (!this.shared || this.shared.s.gid !== value.gid)) this.joinShared(g)
+      }
+      if (value && value.status === 'lobby' && this.screen === 'game' && this.table?.kind === 'shared') { this.screen = 'lobby'; this.shared = null; this.startAttract(); this.screen = 'lobby' }
+      this.ui.dirty = true
+    }
+    if (key === 'g' && value) {
+      if (this.shared && this.shared.s.gid === value.gid) this.shared.onState(value, from)
+      else if (this.screen === 'lobby' && this.lobby().status === 'playing' && this.lobby().gid === value.gid) this.joinShared(value)
+    }
+  }
+  // ----- who is doing what in the lot, and invitations to the Shared Table -----
+  myStatus() {
+    if (this.screen === 'game') return this.table?.kind === 'shared' ? 'shared' : 'solo'
+    return this.screen === 'lobby' ? 'lobby' : 'menu'
+  }
+  syncStatus() {
+    const st = this.myStatus()
+    if (st === this.statusSent) return
+    // the first one also asks everyone for theirs: a join can come before this game listens
+    const ask = this.statusSent == null
+    this.statusSent = st
+    try { this.p0.room.send(ask ? { t: 'st', s: st, ask: 1 } : { t: 'st', s: st }) } catch { /* the others ask again when they join */ }
+  }
+  /** Session players who are not sitting at the Shared Table. */
+  notSeated() {
+    const seated = new Set(this.lobby().seats.filter(s => s && !s.b).map(s => s.id))
+    return [...this.p0.players.keys()].filter(id => id !== this.p0.me.id && !seated.has(id))
+  }
+  invitePlayer(id) {
+    const last = this.invSent.get(id)
+    if (last != null && this.p0.time - last < 8) return
+    this.invSent.set(id, this.p0.time)
+    try { this.p0.room.sendTo(id, { t: 'inv' }) } catch { return }
+    this.ui.say(T.inviteSent(this.nameOf(id)), 2.5)
+  }
+  acceptInvite() {
+    const inv = this.invite
+    if (!inv) return
+    this.invite = null
+    try { this.p0.room.sendTo(inv.from, { t: 'invr', r: 'yes' }) } catch { /* they see me sit down anyway */ }
+    // a game against bots here ends; a shared game is left the usual way
+    if (this.screen === 'game') this.toMenu()
+    this.screen = 'menu'
+    this.openLobby()
+  }
+  declineInvite() {
+    const inv = this.invite
+    if (!inv) return
+    this.invite = null
+    try { this.p0.room.sendTo(inv.from, { t: 'invr', r: 'no' }) } catch { /* nothing to do */ }
+    this.ui.dirty = true
+  }
+
+  onMessage(m, from) {
+    if (!m || typeof m !== 'object') return
+    if (m.t === 'st') {
+      this.status.set(from, String(m.s).slice(0, 8))
+      if (m.ask && this.statusSent) { try { this.p0.room.sendTo(from, { t: 'st', s: this.statusSent }) } catch { /* fine */ } }
+      this.ui.dirty = true
+      return
+    }
+    if (m.t === 'inv') {
+      const atTable = this.screen === 'lobby' || this.table?.kind === 'shared'
+      if (atTable) { try { this.p0.room.sendTo(from, { t: 'invr', r: 'here' }) } catch { /* fine */ } return }
+      this.invite = { from, t: INVITE_SECONDS }
+      this.sfx('target', 0.5)
+      this.ui.dirty = true
+      return
+    }
+    if (m.t === 'invr') {
+      const name = this.nameOf(from)
+      this.ui.say(m.r === 'yes' ? T.inviteYes(name) : m.r === 'here' ? T.inviteHere(name) : T.inviteNo(name), 3)
+      return
+    }
+    if (m.t === 'act' && this.p0.room.isHost && this.shared && m.gid === this.shared.s.gid) this.shared.applyFrom(from, m.a)
+    else if (m.t === 'err') { this.waiting = 0; this.ui.hidden = null; this.ui.say(String(m.text).slice(0, 60)) }
+    else if (m.t === 'lob' && this.p0.room.isHost && m.cmd) this.handleLobby(from, m.cmd)
+    else if (m.t === 'leaveSeat' && this.p0.room.isHost && this.shared) this.shared.replace(from)
+  }
+  onLeave(p) {
+    this.status.delete(p.id)
+    if (this.invite?.from === p.id) { this.invite = null; this.ui.dirty = true }
+    if (!this.p0.room.isHost) return
+    const lob = this.lobby()
+    const i = lob.seats.findIndex(s => s && s.id === p.id && !s.b)
+    if (i >= 0 && lob.status === 'lobby') { lob.seats[i] = null; this.p0.room.set('lob', lob) }
+    if (this.shared) this.shared.replace(p.id)
+  }
+  onHost() {
+    // a new host carries on from the last state everyone has
+    if (this.p0.room.isHost && this.shared) {
+      this.ui.say(T.hostLeft)
+      // seats of players who are gone (the old host among them) go to bots
+      for (const p of this.shared.s.pl) if (!p.b && p.id != null && !this.p0.players.has(p.id)) this.shared.replace(p.id)
+    }
+    if (this.p0.room.isHost) {
+      const lob = this.lobby()
+      let changed = false
+      lob.seats = lob.seats.map(s => { if (s && !s.b && !this.p0.players.has(s.id)) { changed = true; return null } return s })
+      if (changed && lob.status === 'lobby') this.p0.room.set('lob', lob)
+    }
+    this.ui.dirty = true
+  }
+
+  /** Scores for the week's table: wins count, more and harder opponents, a bigger board and fewer rounds count more. */
+  gameOver(s, me) {
+    if (this.scored === s.gid || me < 0) return
+    this.scored = s.gid
+    const won = s.mode === 'champion' ? s.res.winner === me : s.res.places[me] === 1
+    if (!won) return
+    const n = s.n || 100
+    let score = 0
+    s.pl.forEach((p, i) => { if (i !== me) score += 100 + (p.b ? (p.b - 1) * 40 : 80) })
+    score += Math.max(0, Math.round(40 * n / 100) - s.round) * 5
+    score = Math.round(score * (0.6 + 0.4 * n / 100))
+    if (s.mode === 'fool') score = Math.round(score * 0.8)
+    this.reward = T.scoreSent(score)
+    try { this.p0.score(score); this.p0.win() } catch (e) { this.p0.log('score', String(e)) }
+  }
+  onReward(r) {
+    if (r.kind === 'score' && r.ok) this.reward = T.score(r.score, r.best, r.place)
+    else if (r.kind === 'score' && r.reason) this.reward = r.reason
+    this.ui.dirty = true
+  }
+
+  update(dt) {
+    if (this.waiting > 0) { this.waiting -= dt; if (this.waiting <= 0) this.ui.dirty = true }
+    if (this.invite && (this.invite.t -= dt) <= 0) { this.invite = null; this.ui.dirty = true }
+    this.syncStatus()
+    this.table?.update(dt)
+    const trayOn = this.view.trayVisible > 0
+    if (trayOn !== this.trayWas) { this.trayWas = trayOn; this.ui.dirty = true }
+    if (this.turnLeft != null && Math.ceil(this.turnLeft) !== this.turnShown) { this.turnShown = Math.ceil(this.turnLeft); this.ui.dirty = true }
+    if (this.screen === 'game' && this.table?.kind !== 'shared') this.turnLeft = null
+  }
+}
+
+export default async function start(p0) {
+  p0.loading(0.05, 'cutting paper')
+  p0.controls.mode = 'none'
+  p0.controls.vertical = false
+  p0.bodies.visible = false
+  p0.autoRender = false
+  const renderer = p0.createRenderer({ antialias: true })
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  const app = new App(p0)
+  globalThis.__csl = app // for local testing from the console
+  p0.loading(0.5, 'setting the table')
+  app.startAttract()
+  p0.hud(T.hud)
+
+  // input
+  let down = null
+  p0.on('pointerdown', e => {
+    down = { x: e.x, y: e.y, at: p0.time, moved: false, ui: !!(app.ui.hitAt(e.x, e.y) || app.ui.cardAt(e.x, e.y)) }
+  })
+  p0.on('pointermove', e => {
+    const overUI = app.ui.pointerMove(e.x, e.y)
+    if (app.ui.target && !overUI && app.screen === 'game') app.ui.hoverTarget(app.view.pick(e.x, e.y))
+    if (down && (e.buttons || e.touch)) {
+      if (!down.moved && Math.hypot(e.x - down.x, e.y - down.y) > 8) down.moved = true
+      if (down.moved && !down.ui && app.screen === 'game') app.view.pan(e.dx, e.dy)
+    }
+  })
+  p0.on('pointerup', e => {
+    if (!down) return
+    const d = down
+    down = null
+    if (d.moved) return
+    if (app.menuOpen && app.ui.hitAt(e.x, e.y)) { app.ui.click(e.x, e.y); return }
+    if (app.ui.click(e.x, e.y, p0.time - d.at > 0.45)) return
+    if (app.screen !== 'game') return
+    const hit = app.view.pick(e.x, e.y)
+    if (!app.ui.boardClick(hit) && app.ui.selected >= 0 && !app.ui.target) { app.ui.selected = -1; app.ui.dirty = true }
+  })
+  p0.on('wheel', e => { if (app.screen === 'game') app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
+  p0.on('keydown', e => {
+    if (e.repeat || app.screen !== 'game') return
+    const s = app.view.state, me = app.mySeat()
+    if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }
+    if (e.code === 'Space' && s && me >= 0 && s.cur === me && s.ph === 'main' && !s.rolled && !s.pl[me].fx.gd && !s.pl[me].fx.cf) app.act({ t: 'roll' })
+    else if (/^Digit[1-4]$/.test(e.code) && s && me >= 0) { const c = app.ui.cards.find(k => k.kind === 'hand' && k.i === +e.code.slice(5) - 1); if (c) app.ui.cardClicked(c) }
+    else if (e.code === 'Escape' && app.ui.target) app.ui.cancelTarget()
+    else if (e.code === 'Equal' || e.code === 'NumpadAdd') app.view.zoom(0.8)
+    else if (e.code === 'Minus' || e.code === 'NumpadSubtract') app.view.zoom(1.25)
+    else if (e.code === 'KeyR' && s?.ph === 'over') app.rematch()
+    else if (e.code === 'KeyM' || e.code === 'Tab') app.openGameMenu()
+  })
+  p0.room.on('state', (k, v, from) => app.onRoomState(k, v, from))
+  p0.room.on('message', (m, from) => app.onMessage(m, from))
+  p0.on('join', p => {
+    // tell the newcomer what I am doing, for their invite list
+    if (p && p.id !== p0.me.id && app.statusSent) { try { p0.room.sendTo(p.id, { t: 'st', s: app.statusSent }) } catch { /* they ask again */ } }
+    app.ui.dirty = true
+  })
+  p0.on('leave', p => { app.onLeave(p); app.ui.dirty = true })
+  p0.on('host', () => app.onHost())
+  p0.on('reward', r => app.onReward(r))
+  p0.on('table', () => { app.ui.dirty = true })
+  p0.on('reconnect', () => { app.status.clear(); app.statusSent = null; app.invite = null; if (app.table?.kind === 'shared') app.toMenu(); app.ui.dirty = true })
+
+  // compile every material before the first frame
+  app.view.update(0.016)
+  app.ui.update(0.016)
+  app.ui.warm(renderer)
+  await renderer.compileAsync(p0.scene, p0.camera)
+  await renderer.compileAsync(app.view.tray, app.view.trayCam)
+  p0.loading(0.95, 'ready')
+
+  // frame: board, screen layer, dice tray; resolution steps down on slow machines
+  let slow = 0, ratio = Math.min(p0.pixelRatio, 2)
+  renderer.setPixelRatio(ratio)
+  p0.loop(dt => {
+    if (dt > 0.065) slow++; else slow = Math.max(0, slow - 0.25)
+    if ((slow > 4 || dt > 0.25) && ratio > 0.5) { ratio = Math.max(0.5, ratio * 0.75); renderer.setPixelRatio(ratio); slow = 0 }
+    app.update(dt)
+    app.view.update(dt)
+    app.ui.update(dt)
+    renderer.autoClear = true
+    renderer.render(p0.scene, p0.camera)
+    renderer.autoClear = false
+    renderer.clearDepth()
+    renderer.render(app.ui.scene, app.ui.cam)
+    renderer.autoClear = true
+    app.view.renderTray(renderer, app.ui.trayRect)
+  })
+  renderer.render(p0.scene, p0.camera)
+}
