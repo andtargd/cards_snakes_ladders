@@ -270,7 +270,7 @@ class App {
   }
   toMenu() {
     if (this.table?.kind === 'shared') {
-      if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.p0.room.set('lob', lob) }
+      if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.pruneSeats(lob); this.p0.room.set('lob', lob) }
       else this.p0.room.sendTo(this.p0.room.host, { t: 'leaveSeat' })
     }
     this.menuOpen = false
@@ -293,6 +293,12 @@ class App {
     const l = this.p0.room.state.lob
     return l ? JSON.parse(JSON.stringify(l)) : { seats: [null, null, null, null, null, null], mode: 'champion', size: 100, status: 'lobby', gid: 0 }
   }
+  /** Host: seats of players who left the session (during a game, say) are free again. */
+  pruneSeats(lob) {
+    let changed = false
+    lob.seats = lob.seats.map(s => { if (s && !s.b && !this.p0.players.has(s.id)) { changed = true; return null } return s })
+    return changed
+  }
   openLobby() {
     const lob = this.lobby()
     if (lob.status === 'playing' && this.p0.room.state.g) { this.joinShared(this.p0.room.state.g); return }
@@ -307,6 +313,7 @@ class App {
   }
   handleLobby(from, cmd) {
     const lob = this.lobby()
+    if (lob.status === 'lobby') this.pruneSeats(lob)
     const host = from === this.p0.me.id
     const seated = lob.seats.findIndex(s => s && s.id === from && !s.b)
     const free = lob.seats.findIndex(s => !s)
@@ -325,6 +332,7 @@ class App {
     this.ui.dirty = true
   }
   startShared(lob) {
+    this.pruneSeats(lob)
     const seats = lob.seats.map((s, i) => (s ? { ...s, c: i } : null)).filter(Boolean)
     if (seats.length < 2 || (lob.mode === 'fool' && seats.length < 3)) return
     const seed = (Math.random() * 2 ** 31) >>> 0
@@ -429,6 +437,20 @@ class App {
     else if (m.t === 'lob' && this.p0.room.isHost && m.cmd) this.handleLobby(from, m.cmd)
     else if (m.t === 'leaveSeat' && this.p0.room.isHost && this.shared) this.shared.replace(from)
   }
+  /** The web build joined an online room (sit down at its table) or left it. */
+  onWebRoom(room, reason) {
+    this.status.clear(); this.statusSent = null; this.invite = null
+    if (room?.fresh) {
+      this.menuOpen = false
+      if (this.screen === 'game') this.toMenu()
+      this.screen = 'menu'
+      this.openLobby()
+    } else if (!room) {
+      if (this.screen === 'lobby' || this.table?.kind === 'shared') this.toMenu()
+      if (reason === 'lost') this.ui.say(T.roomLost, 3)
+    }
+    this.ui.dirty = true
+  }
   onLeave(p) {
     this.status.delete(p.id)
     if (this.invite?.from === p.id) { this.invite = null; this.ui.dirty = true }
@@ -447,9 +469,7 @@ class App {
     }
     if (this.p0.room.isHost) {
       const lob = this.lobby()
-      let changed = false
-      lob.seats = lob.seats.map(s => { if (s && !s.b && !this.p0.players.has(s.id)) { changed = true; return null } return s })
-      if (changed && lob.status === 'lobby') this.p0.room.set('lob', lob)
+      if (this.pruneSeats(lob) && lob.status === 'lobby') this.p0.room.set('lob', lob)
     }
     this.ui.dirty = true
   }
@@ -549,6 +569,7 @@ export default async function start(p0) {
   p0.on('host', () => app.onHost())
   p0.on('reward', r => app.onReward(r))
   p0.on('table', () => { app.ui.dirty = true })
+  p0.on('room', (room, reason) => app.onWebRoom(room, reason))
   p0.on('reconnect', () => { app.status.clear(); app.statusSent = null; app.invite = null; if (app.table?.kind === 'shared') app.toMenu(); app.ui.dirty = true })
 
   // compile every material before the first frame

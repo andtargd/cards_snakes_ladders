@@ -232,8 +232,8 @@ export class UI {
 
   drawMenu() {
     const W = this.W, H = this.H, u = this.u, app = this.app, c = app.cfg
-    const web = !!this.p0.web // the browser build has no lot to share a table with
-    const pw = Math.min(W - 24 * u, 460 * u), ph = (web ? 540 : 566) * u
+    const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
+    const pw = Math.min(W - 24 * u, 460 * u), ph = (web ? (room ? 590 : 540) : 566) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.94)' })
     this.drawLogo(W / 2, y + 52 * u, Math.min(1, pw / (440 * u)))
@@ -267,13 +267,21 @@ export class UI {
     this.button('start', T.start, bx, yy, bw, 50 * u, () => app.startSolo(), { primary: true, size: 20 })
     yy += 64 * u
     const openHelp = () => { app.screen = 'help'; this.helpPage = 0; this.dirty = true }
-    if (web) this.button('help', T.howToPlay, bx, yy, bw, 42 * u, openHelp, { size: 15 })
-    else {
-      this.button('table', T.sharedTable, bx, yy, bw / 2 - 4 * u, 42 * u, () => app.openLobby(), { size: 15 })
+    if (web && !room) {
+      this.button('online', T.playOnline, bx, yy, bw / 2 - 4 * u, 42 * u, () => web.online(), { size: 15, primary: true, color: '#2d3a6b' })
+      this.button('help', T.howToPlay, bx + bw / 2 + 4 * u, yy, bw / 2 - 4 * u, 42 * u, openHelp, { size: 15 })
+    } else {
+      this.button('table', T.sharedTable, bx, yy, bw / 2 - 4 * u, 42 * u, () => app.openLobby(), { size: 15, primary: !!room, color: '#2d3a6b' })
       this.button('help', T.howToPlay, bx + bw / 2 + 4 * u, yy, bw / 2 - 4 * u, 42 * u, openHelp, { size: 15 })
       yy += 54 * u
-      const others = app.sessionCount() - 1
-      this.text(others > 0 ? T.othersHere(others) : T.aloneHere, W / 2, yy + 6 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: bw })
+      if (room) {
+        this.text(T.roomLine(room.code, app.sessionCount()), bx, yy + 18 * u, { size: 14, max: bw * 0.4 - 6 * u })
+        this.button('share', T.shareLink, bx + bw * 0.4, yy, bw * 0.3 - 4 * u, 36 * u, () => this.shareRoom(), { size: 13.5 })
+        this.button('leaveroom', T.leaveRoom, bx + bw * 0.7 + 4 * u, yy, bw * 0.3 - 4 * u, 36 * u, () => web.leave(), { size: 13.5 })
+      } else {
+        const others = app.sessionCount() - 1
+        this.text(others > 0 ? T.othersHere(others) : T.aloneHere, W / 2, yy + 6 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: bw })
+      }
     }
     // the week's table, beside the panel when there is room
     const table = this.p0.table || []
@@ -287,6 +295,11 @@ export class UI {
         this.text(String(r.score), tx + tw - 14 * u, ry, { size: 13, align: 'right' })
       })
     }
+  }
+
+  /** The web build: send the online room's link. */
+  shareRoom() {
+    this.p0.web.share().then(r => { if (r === 'copied') this.say(T.linkCopied, 3); else if (r === 'failed') this.say(T.linkFailed, 3) })
   }
 
   /** "Board" and a button per size (50, 70, 100 cells). */
@@ -325,7 +338,8 @@ export class UI {
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.95)' })
     this.text(T.sharedTable, W / 2, y + 30 * u, { size: 22, align: 'center' })
-    this.text(isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host)), W / 2, y + 56 * u, { size: 13, align: 'center', bold: false, color: '#5b544c' })
+    const room = this.p0.web?.room, hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
+    this.text(room ? `${T.roomCode(room.code)} · ${hostLine}` : hostLine, W / 2, y + 56 * u, { size: 13, align: 'center', bold: false, color: '#5b544c' })
     const bx = x + 24 * u, bw = pw - 48 * u
     let yy = y + 76 * u
     const modes = [['champion', 'Champion'], ['fool', 'Fool']]
@@ -377,10 +391,11 @@ export class UI {
     this.g.fillStyle = 'rgba(30,26,22,0.35)'; this.g.fillRect(0, 0, W, H)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.98)', stroke: '#2d3a6b', lw: 2.5 })
     this.text(T.inviteTitle, W / 2, y + 32 * u, { size: 21, align: 'center', color: '#2d3a6b' })
-    this.text(T.inviteSub, W / 2, y + 58 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
+    const room = this.p0.web?.room
+    this.text(room ? T.roomSub : T.inviteSub, W / 2, y + 58 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
     const bx = x + 20 * u, bw = pw - 40 * u
     let yy = y + 80 * u
-    if (!ids.length) this.text(T.noOneHere, W / 2, yy + 20 * u, { size: 14, align: 'center', bold: false, color: '#9a948a', max: bw })
+    if (!ids.length) this.text(room ? T.noOneRoom : T.noOneHere, W / 2, yy + 20 * u, { size: 14, align: 'center', bold: false, color: '#9a948a', max: bw })
     ids.forEach((id, i) => {
       const ry = yy + i * 46 * u
       this.panel(bx, ry, bw, 40 * u, { fill: '#ffffff', r: 10 })
@@ -394,7 +409,8 @@ export class UI {
       this.button('inv' + id, sent ? T.inviteSentShort : T.inviteOne, bx + bw - 110 * u, ry + 5 * u, 100 * u, 30 * u, () => { app.invitePlayer(id); this.dirty = true }, { primary: !sent, disabled: sent, size: 14 })
     })
     const by = y + ph - 56 * u
-    this.button('invcity', T.inviteCity, bx, by, bw * 0.6 - 4 * u, 42 * u, () => { try { this.p0.invite({ kind: 'team', note: T.inviteNote }) } catch { /* the city's own button does it */ } this.say(T.inviteHint, 4) }, { size: 14 })
+    if (room) this.button('invlink', T.shareLink, bx, by, bw * 0.6 - 4 * u, 42 * u, () => this.shareRoom(), { size: 14, primary: !ids.length, color: '#2d3a6b' })
+    else this.button('invcity', T.inviteCity, bx, by, bw * 0.6 - 4 * u, 42 * u, () => { try { this.p0.invite({ kind: 'team', note: T.inviteNote }) } catch { /* the city's own button does it */ } this.say(T.inviteHint, 4) }, { size: 14 })
     this.button('invclose', T.close, bx + bw * 0.6 + 4 * u, by, bw * 0.4 - 4 * u, 42 * u, () => { this.picker = false; this.dirty = true }, { size: 15 })
   }
 
