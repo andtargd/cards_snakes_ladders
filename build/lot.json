@@ -1,10 +1,17 @@
 {
   "script": "build.js",
   "materials": {
-    "Cards": {
+    "Snake": {
+      "vertex": "sway.glsl",
       "glow": 0
     },
     "Paper": {
+      "glow": 0
+    },
+    "Board": {
+      "glow": 0
+    },
+    "Cards": {
       "glow": 0
     }
   }

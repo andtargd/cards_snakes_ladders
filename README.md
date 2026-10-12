@@ -4,6 +4,8 @@ Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck
 
 **Play:** <https://andtargd.github.io/cards_snakes_ladders/>
 
+**Diorama:** `diorama/index.html` — a giant cardboard snake coiled round a giant ladder over the pastel board, to orbit, snapshot or download as GLB.
+
 ## Features
 
 - **Two modes:** *Champion* — the first to reach the last cell wins; *Fool* — whoever is left last on the board is the Fool.
@@ -34,6 +36,7 @@ web/online.js       the Play Online dialog
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
 tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews
 build/              the street-view diorama for the Project 0 lot
+diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page
 ```
 
 ## How online play works

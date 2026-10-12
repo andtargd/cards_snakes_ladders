@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f1e8d8">
+<meta name="description" content="A monumental paper-craft diorama of Cards, Snakes & Ladders: a giant cardboard snake coiled round a giant ladder over a stepped pastel board.">
+<title>Snakes &amp; Ladders Diorama</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='6' width='52' height='52' rx='10' fill='%23fffdf8' stroke='%2346ad4d' stroke-width='4'/%3E%3Cpath d='M18 46 L46 18' stroke='%23a8612c' stroke-width='5'/%3E%3Cpath d='M46 46 C36 40 30 26 20 18' stroke='%2346ad4d' stroke-width='6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,600;0,800;0,900;1,800;1,900&display=swap" rel="stylesheet">
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
+} }
+</script>
+<style>
+  :root {
+    --bg: #f1e8d8; --paper: #fffdf8; --ink: #2b2622; --muted: #6b6259; --line: rgba(43,38,34,.16);
+    --navy: #2d3a6b; --orange: #e8743b; --green: #3d9a44; --red: #d64545; --chip: #f4ece0;
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font: 600 14px/1.4 Nunito, "Trebuchet MS", system-ui, sans-serif; overscroll-behavior: none; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  .dim { padding: 2px 8px; border-radius: 999px; background: var(--navy); color: #fff; font: 800 12px Nunito, sans-serif; white-space: nowrap; }
+
+  #loading { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 0 16px; background: var(--bg); text-align: center; transition: opacity .6s; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading h2 { margin: 0; font: italic 900 30px Nunito, sans-serif; color: var(--navy); }
+  #label { color: var(--muted); }
+  #loading.error #label { color: var(--red); }
+  .dots { display: flex; gap: 8px; }
+  .dots i { width: 12px; height: 12px; border-radius: 3px; background: var(--orange); animation: hop 1s ease-in-out infinite; }
+  .dots i:nth-child(2) { background: #f9cf5e; animation-delay: .15s }
+  .dots i:nth-child(3) { background: #7fd19b; animation-delay: .3s }
+  .dots i:nth-child(4) { background: #73a8ee; animation-delay: .45s }
+  @keyframes hop { 50% { transform: translateY(-10px) rotate(45deg) } }
+  @media (prefers-reduced-motion: reduce) { .dots i { animation: none } }
+
+  #panel { position: fixed; top: 16px; left: 16px; z-index: 2; width: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); box-sizing: border-box; overflow: auto; background: var(--paper); border: 2px solid var(--navy); border-radius: 16px; box-shadow: 0 5px 0 rgba(43,38,34,.12), 0 16px 36px rgba(60,40,20,.16); }
+  #panel header { display: flex; align-items: flex-start; gap: 8px; padding: 14px 14px 10px 16px; }
+  #panel h1 { flex: 1; margin: 0; font: italic 900 21px/1.15 Nunito, sans-serif; color: var(--navy); }
+  #panel h1 small { display: block; margin-top: 3px; font: 700 12.5px Nunito, sans-serif; color: var(--muted); }
+  #b-panel { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--navy); font-size: 18px; cursor: pointer; transition: transform .2s; }
+  #b-panel:hover { background: var(--chip); }
+  #panel.collapsed #b-panel { transform: rotate(180deg); }
+  #panel.collapsed .body { display: none; }
+  .body { padding: 0 16px 14px; }
+  .body p { margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  h3 { margin: 12px 0 6px; font: 900 11px Nunito, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; }
+  .row button { min-height: 32px; padding: 0 12px; border: 1.5px solid var(--line); border-radius: 999px; background: #fff; color: var(--ink); font-weight: 800; font-size: 13px; cursor: pointer; transition: background .15s, border-color .15s, transform .08s; }
+  .row button:hover { border-color: var(--navy); }
+  .row button:active { transform: translateY(1px); }
+  .row button:focus-visible, #b-panel:focus-visible { outline: 3px solid rgba(45,58,107,.35); outline-offset: 2px; }
+  .row button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .row button:disabled { opacity: .6; cursor: default; }
+  .row button.act { background: var(--orange); border-color: var(--orange); color: #fff; }
+  .row button.act:hover { background: #d9652d; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--green); }
+  .bad { color: var(--red); }
+  ul.zones { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+  ul.zones li { display: flex; gap: 8px; align-items: baseline; color: var(--ink); }
+  ul.zones b { flex: none; width: 10px; height: 10px; border-radius: 3px; transform: translateY(1px); }
+  #hint { position: fixed; right: 16px; bottom: 14px; z-index: 1; padding: 6px 12px; border-radius: 999px; background: rgba(255,253,248,.85); color: var(--muted); font-size: 12.5px; pointer-events: none; }
+  @media (max-width: 640px) {
+    #panel { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-width: none; max-height: 52vh; }
+    #panel h1 { font-size: 18px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0" aria-label="3D view of the Snakes and Ladders diorama: drag to orbit, scroll to zoom"></canvas>
+<div id="labels"></div>
+
+<aside id="panel">
+  <header>
+    <h1>Snakes &amp; Ladders <small>Paper-craft diorama · 12 × 19 × 12 m</small></h1>
+    <button id="b-panel" type="button" aria-expanded="true" aria-controls="panel-body" title="Hide or show the panel">▾</button>
+  </header>
+  <div class="body" id="panel-body">
+    <p>A giant cardboard snake coils round a giant wooden ladder in an X over the stepped board, built from the game's own palette, cards, pawns and dice.</p>
+
+    <h3>Camera</h3>
+    <div class="row" id="cams"></div>
+
+    <h3>View</h3>
+    <div class="row">
+      <button type="button" id="t-anim">Idle motion</button>
+      <button type="button" id="t-spin">Turntable</button>
+      <button type="button" id="t-tilt">Tilt-shift</button>
+      <button type="button" id="t-ao">Soft shadows</button>
+      <button type="button" id="t-bounds">Volume</button>
+    </div>
+
+    <h3>Save</h3>
+    <div class="row">
+      <button type="button" class="act" id="b-shot">Snapshot PNG</button>
+      <button type="button" class="act" id="b-glb">Download GLB</button>
+    </div>
+
+    <h3>In the scene</h3>
+    <ul class="zones">
+      <li><b style="background:#46ad4d"></b>Centre: the snake and the ladder crossed in an X</li>
+      <li><b style="background:#f7a072"></b>Middle: ten pastel tiers, cells 1–100, the golden 100</li>
+      <li><b style="background:#2b8fd6"></b>Front left: the card fan with Parachute, the draw pile, two pawns</li>
+      <li><b style="background:#f7a6c8"></b>Front right: dice mid-roll, START, a pawn and a pink friend</li>
+      <li><b style="background:#ddd3f2"></b>Back: layered cut-out hills and clouds</li>
+    </ul>
+
+    <h3>Measured</h3>
+    <dl>
+      <dt>Bounding box</dt><dd id="fit">–</dd>
+      <dt>Volume check</dt><dd id="fit-ok">–</dd>
+      <dt>Snake length</dt><dd id="snake-len">–</dd>
+      <dt>Ladder length</dt><dd id="ladder-len">–</dd>
+      <dt>Triangles</dt><dd id="tris">–</dd>
+    </dl>
+  </div>
+</aside>
+<div id="hint">Drag to orbit · scroll to zoom · right-drag to pan</div>
+
+<div id="loading">
+  <h2>Snakes &amp; Ladders</h2>
+  <div class="dots" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div id="label">Loading…</div>
+</div>
+<script type="module" src="./viewer.js"></script>
+</body>
+</html>
