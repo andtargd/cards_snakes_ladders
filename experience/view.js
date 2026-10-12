@@ -33,6 +33,8 @@ export class View {
     this.distWant = 11
     this.manual = 0
     this.shake = 0
+    // the menus push the board aside: its picture moves right by `side` of the screen's width, `scale` shrinks it
+    this.aside = { side: 0, scale: 1, sideNow: 0, scaleNow: 1 }
     this.highlight = null
     this.time = 0
     this.buildStatic()
@@ -497,8 +499,8 @@ export class View {
     this.tasks.push({
       dur: e.chosen ? 0.7 : 1.05,
       start: () => {
-        // dice that waited in the tray for the click are tossed up from where they lie
-        tossed = this.trayPrompt > 0 && !e.chosen
+        // dice lying in the tray (it always shows the last roll) are tossed up from where they lie
+        tossed = (this.trayPrompt > 0 || this.trayDice[0].visible) && !e.chosen
         this.trayRolling = true
         this.trayVisible = 3.2
         this.trayLabel = ''
@@ -609,6 +611,13 @@ export class View {
     cam.position.copy(p)
     cam.lookAt(this.focus.x, this.focus.y, this.focus.z - 0.6)
     cam.near = 0.1; cam.far = 80
+    const fr = this.aside, k = 1 - Math.exp(-4 * dt)
+    fr.sideNow += (fr.side - fr.sideNow) * k
+    fr.scaleNow += (fr.scale - fr.scaleNow) * k
+    if (Math.abs(fr.sideNow) < 0.001 && Math.abs(fr.scaleNow - 1) < 0.001) { fr.sideNow = 0; fr.scaleNow = 1 }
+    cam.zoom = fr.scaleNow
+    if (fr.sideNow) cam.setViewOffset(this.p0.width, this.p0.height, -fr.sideNow * this.p0.width, fr.sideNow * 0.22 * this.p0.height, this.p0.width, this.p0.height) // a little up, the tray below out of sight
+    else if (cam.view) cam.clearViewOffset()
     cam.updateProjectionMatrix()
     this.p0.me.position.set(THREE.MathUtils.clamp(p.x, -5, 5), Math.min(p.y, L.height - 1), THREE.MathUtils.clamp(p.z, -8.5, 8.5))
   }
@@ -761,7 +770,7 @@ export class View {
 
   /** Draws the dice tray into a corner rectangle (CSS px) after the main scene. */
   renderTray(renderer, rect) {
-    if ((this.trayVisible <= 0 && !this.trayPrompt) || !rect) return
+    if (!rect) return
     const { x, y, w, h } = rect
     const H = this.p0.height
     renderer.setScissorTest(true)

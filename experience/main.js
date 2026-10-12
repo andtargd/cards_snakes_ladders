@@ -13,6 +13,22 @@ const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
 const BOT_DELAY = 1.1
 const TURN_SECONDS = 45
 const INVITE_SECONDS = 45
+const SETTINGS_KEY = 'csl-settings'
+
+/** The menu's choices and the sound, as last left (kept in this browser, where it lets us). */
+function loadSettings() {
+  const cfg = { mode: 'champion', humans: 1, bots: 3, level: 2, size: 100 }, sound = { on: true, vol: 0.8 }
+  let saved = null
+  try { saved = JSON.parse(globalThis.localStorage?.getItem(SETTINGS_KEY) || 'null') } catch { /* no storage here */ }
+  const c = saved?.cfg, int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
+  if (c && ['champion', 'fool'].includes(c.mode) && int(c.humans, 1, 6) && int(c.bots, 0, 5) && int(c.level, 1, 3) && R.SIZES.includes(c.size)) {
+    const total = c.humans + c.bots
+    if (total >= (c.mode === 'fool' ? 3 : 2) && total <= 6) Object.assign(cfg, { mode: c.mode, humans: c.humans, bots: c.bots, level: c.level, size: c.size })
+  }
+  if (typeof saved?.sound?.on === 'boolean') sound.on = saved.sound.on
+  if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
+  return { cfg, sound }
+}
 
 // ---------- a game played in this browser: one player or several taking turns at it, and bots ----------
 class LocalTable {
@@ -90,17 +106,14 @@ class IdleTable {
     app.view.tasks = []
     app.view.setState(R.clone(this.s))
     for (const t of app.view.tokens) t.group.visible = false
+    // the whole board, still: the menus stand beside it
+    app.view.manual = 0
     app.view.overview()
-    this.t = 0
+    app.view.focusWant.z += 0.4
   }
   mySeat() { return -1 }
   act() { return false }
-  update(dt) {
-    // the camera drifts slowly over the board
-    this.t += dt
-    const v = this.app.view
-    v.focusWant.set(Math.sin(this.t * 0.09) * 2.2, 1.6, 0.4 + Math.sin(this.t * 0.06) * 2)
-  }
+  update() {}
 }
 
 // ---------- the Shared Table: everyone in the session, the host runs the rules ----------
@@ -213,7 +226,9 @@ class App {
   constructor(p0) {
     this.p0 = p0
     this.screen = 'menu'
-    this.cfg = { mode: 'champion', humans: 1, bots: 3, level: 2, size: 100 }
+    const saved = loadSettings()
+    this.cfg = saved.cfg
+    this.sound = saved.sound // { on, vol }
     this.speedIdx = 0
     this.waiting = 0
     this.turnLeft = null
@@ -241,7 +256,29 @@ class App {
     const now = this.p0.time
     if (this.table?.kind === 'idle' || now - (this.lastSfx[name] || -9) < 0.09) return
     this.lastSfx[name] = now
-    try { this.p0.sound.play(`sfx/${name}.mp3`, { volume }) } catch { /* sound is optional */ }
+    this.playSound(name, volume)
+  }
+  playSound(name, volume = 0.5) {
+    const v = this.sound.on ? volume * this.sound.vol : 0
+    if (v < 0.005) return
+    try { this.p0.sound.play(`sfx/${name}.mp3`, { volume: v }) } catch { /* sound is optional */ }
+  }
+  saveSettings() {
+    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ cfg: this.cfg, sound: this.sound })) } catch { /* no storage here */ }
+  }
+  toggleSound() {
+    const snd = this.sound
+    snd.on = !(snd.on && snd.vol > 0.02)
+    if (snd.on && snd.vol < 0.05) snd.vol = 0.6
+    this.saveSettings()
+    if (snd.on) this.playSound('select', 0.5)
+    this.ui.dirty = true
+  }
+  /** The volume slider: 0 to 1; moving it up turns the sound on. */
+  setVolume(v) {
+    this.sound.vol = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100
+    if (this.sound.vol > 0) this.sound.on = true
+    this.ui.dirty = true
   }
   mySeat() { return this.table ? this.table.mySeat() : -1 }
   /** Several players taking turns at this computer. */
@@ -259,6 +296,7 @@ class App {
     this.view.speed = 1
   }
   startSolo() {
+    this.saveSettings()
     this.reward = null
     this.ui.logLines = []
     this.ui.selected = -1; this.ui.cancelTarget()
@@ -520,14 +558,17 @@ export default async function start(p0) {
   globalThis.__csl = app // for local testing from the console
   p0.loading(0.5, 'setting the table')
   app.startAttract()
-  p0.hud(T.hud)
 
   // input
   let down = null
   p0.on('pointerdown', e => {
+    // a slider follows the pointer until it lets go
+    const h = app.ui.hitAt(e.x, e.y)
+    if (h?.drag) { app.ui.drag = h; h.drag(e.x); down = null; return }
     down = { x: e.x, y: e.y, at: p0.time, moved: false, ui: !!(app.ui.hitAt(e.x, e.y) || app.ui.cardAt(e.x, e.y)) }
   })
   p0.on('pointermove', e => {
+    if (app.ui.drag) { app.ui.drag.drag(e.x); return }
     const overUI = app.ui.pointerMove(e.x, e.y)
     if (app.ui.target && !overUI && app.screen === 'game') app.ui.hoverTarget(app.view.pick(e.x, e.y))
     if (down && (e.buttons || e.touch)) {
@@ -536,6 +577,7 @@ export default async function start(p0) {
     }
   })
   p0.on('pointerup', e => {
+    if (app.ui.drag) { app.ui.drag.end?.(); app.ui.drag = null; return }
     if (!down) return
     const d = down
     down = null
@@ -548,7 +590,10 @@ export default async function start(p0) {
   })
   p0.on('wheel', e => { if (app.screen === 'game') app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
   p0.on('keydown', e => {
-    if (e.repeat || app.screen !== 'game') return
+    if (e.repeat) return
+    if (app.screen === 'local' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
+    if ((app.screen === 'local' || app.screen === 'help') && e.code === 'Escape') { app.screen = 'menu'; app.ui.dirty = true; return }
+    if (app.screen !== 'game') return
     const s = app.view.state, me = app.mySeat()
     if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }
     const mine = s && me >= 0 && s.cur === me && s.ph === 'main'
@@ -556,6 +601,7 @@ export default async function start(p0) {
     else if (e.code === 'Space' && mine && s.rolled && !app.view.busy && !app.menuOpen) { if (app.ui.target) app.ui.cancelTarget(); app.act({ t: 'end' }) }
     else if (/^Digit[1-4]$/.test(e.code) && s && me >= 0) { const c = app.ui.cards.find(k => k.kind === 'hand' && k.i === +e.code.slice(5) - 1); if (c) app.ui.cardClicked(c) }
     else if (e.code === 'Escape' && app.ui.target) app.ui.cancelTarget()
+    else if (e.code === 'Escape') app.ui.closePeek()
     else if (e.code === 'Equal' || e.code === 'NumpadAdd') app.view.zoom(0.8)
     else if (e.code === 'Minus' || e.code === 'NumpadSubtract') app.view.zoom(1.25)
     else if (e.code === 'KeyR' && s?.ph === 'over') app.rematch()
@@ -596,9 +642,13 @@ export default async function start(p0) {
     renderer.render(p0.scene, p0.camera)
     renderer.autoClear = false
     renderer.clearDepth()
-    renderer.render(app.ui.scene, app.ui.cam)
+    // the screen and the hand, then the dice tray, then the windows over them all
+    app.ui.render(renderer, false)
     renderer.autoClear = true
     app.view.renderTray(renderer, app.ui.trayDice)
+    renderer.autoClear = false
+    app.ui.render(renderer, true)
+    renderer.autoClear = true
   })
   renderer.render(p0.scene, p0.camera)
 }

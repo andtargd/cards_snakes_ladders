@@ -109,19 +109,25 @@ export class UI {
     this.narrow = W < 720
     this.cam.left = 0; this.cam.right = W; this.cam.top = H; this.cam.bottom = 0
     this.cam.updateProjectionMatrix()
-    if (this.layer) { this.scene.remove(this.layer); this.layer.material.map.dispose(); this.layer.geometry.dispose() }
+    // the screen goes under the cards; the windows over it (menu, results, invitations) go over them
+    this.base = this.makeLayer(this.base, 0)
+    this.over = this.makeLayer(this.over, 50)
+    this.g = this.base.g
+    this.dirty = true
+  }
+  makeLayer(old, order) {
+    const W = this.W, H = this.H
+    if (old) { this.scene.remove(old.mesh); old.tex.dispose(); old.mesh.geometry.dispose(); old.mesh.material.dispose() }
     const { c, g } = P.canvas(Math.max(2, Math.round(W * this.dpr)), Math.max(2, Math.round(H * this.dpr)))
-    this.cv = c; this.g = g
     const tex = new THREE.CanvasTexture(c)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.generateMipmaps = false
     tex.minFilter = THREE.LinearFilter
-    this.tex = tex
-    this.layer = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
-    this.layer.position.set(W / 2, H / 2, 0)
-    this.layer.renderOrder = 0
-    this.scene.add(this.layer)
-    this.dirty = true
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
+    mesh.position.set(W / 2, H / 2, order)
+    mesh.renderOrder = order
+    this.scene.add(mesh)
+    return { c, g, tex, mesh, used: true }
   }
 
   cardTexture(id) {
@@ -145,6 +151,14 @@ export class UI {
     return mesh
   }
   dropCard(mesh) { this.scene.remove(mesh); mesh.material.dispose() }
+
+  /** Draws the layers under the dice tray (top = false) or over it (the windows and what stands on them). */
+  render(renderer, top) {
+    const shown = []
+    for (const o of this.scene.children) if (o.visible && (o.renderOrder >= 50) !== top) { o.visible = false; shown.push(o) }
+    renderer.render(this.scene, this.cam)
+    for (const o of shown) o.visible = true
+  }
 
   /** Compiles every UI shader now (a card of each kind, offscreen). */
   warm(renderer) {
@@ -280,19 +294,36 @@ export class UI {
 
   // ---------- main draw ----------
   draw() {
-    const g = this.g, W = this.W, H = this.H
+    const W = this.W, H = this.H
+    let g = this.g = this.base.g
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     g.clearRect(0, 0, W, H)
     this.hits = []
+    this.modal = false // a window is open over the cards: they take no clicks
     this.trayRect = null // the tray on screen
     this.trayDice = null // where the view draws the dice: the tray, unless it shows End Turn or values to choose
     this.trayMode = null // 'roll', 'end', 'choose' or 'show'
     const app = this.app
-    if (app.screen === 'menu') this.drawMenu()
-    else if (app.screen === 'lobby') this.drawLobby()
+    // the board stands in the middle, unless a title screen moves it aside
+    app.view.aside.side = 0; app.view.aside.scale = 1
+    // the title screens stand beside the board when the screen is wide; on a phone they fill it, in bigger type
+    const u0 = this.u
+    this.menuWide = W >= 720 && W / u0 >= 980
+    if (app.screen === 'menu' || app.screen === 'local') {
+      if (!this.menuWide) this.u = Math.max(u0, Math.min(W / 440, H / 760, 1.2))
+      if (app.screen === 'menu') this.drawMenu(); else this.drawLocal()
+      this.u = u0
+    } else if (app.screen === 'lobby') this.drawLobby()
     else if (app.screen === 'help') this.drawHelp()
     else if (app.screen === 'game') this.drawGame()
     if (app.screen !== 'lobby') this.picker = false
+    this.base.tex.needsUpdate = true
+    // the windows, on the layer over the cards
+    const ov = this.over
+    g = this.g = ov.g
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    if (ov.used) g.clearRect(0, 0, W, H)
+    if (app.screen === 'game') this.drawGameWindows()
     if (this.picker) this.drawPicker()
     if (app.invite) this.drawInvite()
     if (this.toast) {
@@ -302,7 +333,10 @@ export class UI {
       this.panel((W - w) / 2, H * 0.42, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
       this.text(t.text, W / 2, H * 0.42 + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
-    this.tex.needsUpdate = true
+    const used = this.modal || !!this.toast || !!this.peekRect
+    if (used || ov.used) ov.tex.needsUpdate = true
+    ov.used = used
+    this.g = this.base.g
     this.dirty = false
   }
 
@@ -318,80 +352,299 @@ export class UI {
     line('Snakes & Ladders', y + 50 * u, 52, ['rgba(45,58,107,0.18)', '#e8743b', '#2d3a6b'])
   }
 
-  /** A label with − value + buttons, `w` wide from x. */
-  stepper(key, label, x, y, w, value, dec, inc, canDec, canInc) {
-    const u = this.u, b = 38 * u, lw = w - 2 * b - 34 * u
-    this.text(label, x, y + 19 * u, { size: 15, max: lw - 4 * u })
-    this.button(key + '-', '−', x + lw, y, b, b, () => { dec(); this.dirty = true }, { disabled: !canDec })
-    this.text(String(value), x + lw + b + 17 * u, y + 19 * u, { size: 20, align: 'center' })
-    this.button(key + '+', '+', x + lw + b + 34 * u, y, b, b, () => { inc(); this.dirty = true }, { disabled: !canInc })
+  /**
+   * The title screens stand in a column of paper on the left, the board rests on the right; on a narrow
+   * screen the paper covers it all. `cw` is the content's width: the paper is as wide as it needs.
+   */
+  menuLayout(cw) {
+    const W = this.W, H = this.H, u = this.u
+    const wide = this.menuWide
+    const fr = this.app.view.aside
+    if (!wide) {
+      const w = Math.min(cw, W - 32 * u)
+      this.g.fillStyle = 'rgba(243,238,229,0.9)'; this.g.fillRect(0, 0, W, H)
+      return { wide, x: (W - w) / 2, w }
+    }
+    const zone = Math.min(W * 0.66, Math.max(W * 0.5, cw + 120 * u))
+    fr.side = zone / (2 * W)
+    fr.scale = THREE.MathUtils.clamp((W - zone) / W * 1.45, 0.45, 0.8)
+    const g = this.g, gr = g.createLinearGradient(0, 0, zone * 1.15, 0)
+    gr.addColorStop(0, 'rgba(243,238,229,1)'); gr.addColorStop(0.8, 'rgba(243,238,229,0.97)'); gr.addColorStop(1, 'rgba(243,238,229,0.3)')
+    g.fillStyle = gr; g.fillRect(0, 0, zone * 1.15, H)
+    // a light veil keeps the board quiet behind the buttons
+    g.fillStyle = 'rgba(243,238,229,0.3)'; g.fillRect(zone * 1.15, 0, W - zone * 1.15, H)
+    return { wide, x: (zone - cw) / 2, w: cw }
   }
 
   drawMenu() {
-    const W = this.W, H = this.H, u = this.u, app = this.app, c = app.cfg
+    const H = this.H, u = this.u, app = this.app
     const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
-    const pw = Math.min(W - 24 * u, 460 * u), ph = (web ? (room ? 590 : 540) : 566) * u
-    const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
-    this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.94)' })
-    this.drawLogo(W / 2, y + 52 * u, Math.min(1, pw / (440 * u)))
-    this.text(T.tagline, W / 2, y + 140 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
-    let yy = y + 170 * u
-    const bw = pw - 60 * u, bx = x + 30 * u
-    this.text(T.playHere, bx, yy, { size: 15 }); yy += 22 * u
-    // mode: Fool needs three on the board
-    const minTotal = () => (c.mode === 'fool' ? 3 : 2)
-    const fill = () => { const lack = minTotal() - c.humans - c.bots; if (lack > 0) c.bots += lack }
-    const modes = [['champion', 'Champion'], ['fool', 'Fool']]
-    modes.forEach(([m, label], i) => this.button('mode' + m, label, bx + i * (bw / 2 + 4 * u), yy, bw / 2 - 4 * u, 38 * u, () => { c.mode = m; fill(); this.dirty = true }, { selected: c.mode === m, size: 15 }))
-    yy += 46 * u
-    this.text(c.humans > 1 ? T.hotseatHint : c.mode === 'fool' ? T.foolHint : T.championHint, W / 2, yy + 4 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: bw })
-    yy += 22 * u
-    // players at this computer and bots: 2 to 6 on the board
-    const total = c.humans + c.bots, half = bw / 2 - 8 * u
-    this.stepper('hum', T.players, bx, yy, half, c.humans,
-      () => { c.humans--; fill() }, () => { c.humans++; if (c.humans + c.bots > 6) c.bots-- },
-      c.humans > 1, c.humans < 6 && (total < 6 || c.bots > 0))
-    this.stepper('bots', T.bots, bx + bw / 2 + 8 * u, yy, half, c.bots,
-      () => { c.bots-- }, () => { c.bots++ },
-      c.bots > 0 && total - 1 >= minTotal(), total < 6)
-    yy += 46 * u
-    const levels = [[1, 'Easy'], [2, 'Medium'], [3, 'Hard']]
-    levels.forEach(([l, label], i) => this.button('lvl' + l, label, bx + i * (bw / 3 + 2 * u), yy, bw / 3 - 4 * u, 36 * u, () => { c.level = l; this.dirty = true }, { selected: c.level === l && c.bots > 0, disabled: !c.bots, size: 14 }))
-    yy += 46 * u
-    // the board's size
-    this.sizeButtons('size', bx, yy, bw, c.size, n => { c.size = n; this.dirty = true }, true)
-    yy += 48 * u
-    this.button('start', T.start, bx, yy, bw, 50 * u, () => app.startSolo(), { primary: true, size: 20 })
-    yy += 64 * u
-    const openHelp = () => { app.screen = 'help'; this.helpPage = 0; this.dirty = true }
-    if (web && !room) {
-      this.button('online', T.playOnline, bx, yy, bw / 2 - 4 * u, 42 * u, () => web.online(), { size: 15, primary: true, color: '#2d3a6b' })
-      this.button('help', T.howToPlay, bx + bw / 2 + 4 * u, yy, bw / 2 - 4 * u, 42 * u, openHelp, { size: 15 })
-    } else {
-      this.button('table', T.sharedTable, bx, yy, bw / 2 - 4 * u, 42 * u, () => app.openLobby(), { size: 15, primary: !!room, color: '#2d3a6b' })
-      this.button('help', T.howToPlay, bx + bw / 2 + 4 * u, yy, bw / 2 - 4 * u, 42 * u, openHelp, { size: 15 })
-      yy += 54 * u
-      if (room) {
-        this.text(T.roomLine(room.code, app.sessionCount()), bx, yy + 18 * u, { size: 14, max: bw * 0.4 - 6 * u })
-        this.button('share', T.shareLink, bx + bw * 0.4, yy, bw * 0.3 - 4 * u, 36 * u, () => this.shareRoom(), { size: 13.5 })
-        this.button('leaveroom', T.leaveRoom, bx + bw * 0.7 + 4 * u, yy, bw * 0.3 - 4 * u, 36 * u, () => web.leave(), { size: 13.5 })
-      } else {
-        const others = app.sessionCount() - 1
-        this.text(others > 0 ? T.othersHere(others) : T.aloneHere, W / 2, yy + 6 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: bw })
-      }
-    }
-    // the week's table, beside the panel when there is room
+    const { x, w } = this.menuLayout(400 * u)
     const table = this.p0.table || []
-    if (table.length && W > pw + 520 * u) {
-      const tx = x + pw + 20 * u, tw = 230 * u
-      this.panel(tx, y, tw, 60 * u + table.length * 26 * u)
-      this.text(T.weekTable, tx + tw / 2, y + 26 * u, { size: 15, align: 'center' })
-      table.slice(0, 10).forEach((r, i) => {
-        const ry = y + 58 * u + i * 26 * u
-        this.text(`${i + 1}. ${r.name}${r.owner ? ' *' : ''}`, tx + 14 * u, ry, { size: 13, bold: !!r.you, max: tw - 80 * u })
-        this.text(String(r.score), tx + tw - 14 * u, ry, { size: 13, align: 'right' })
+    const ch = (room ? 470 : 430) * u, cx = x + w / 2
+    let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
+    this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
+    this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
+    y += 156 * u
+    this.bigButton('local', T.playLocally, T.playLocallySub, x, y, w, 76 * u, () => { app.screen = 'local'; this.dirty = true }, '#e8743b')
+    y += 92 * u
+    const online = web && !room ? () => web.online() : () => app.openLobby()
+    this.bigButton('online', web ? T.playOnline : T.sharedTable, web ? T.playOnlineSub : T.sharedTableSub, x, y, w, 76 * u, online, '#2d3a6b')
+    y += 88 * u
+    if (room) {
+      this.text(T.roomLine(room.code, app.sessionCount()), x + 4 * u, y + 16 * u, { size: 13.5, max: w * 0.4 - 8 * u })
+      this.button('share', T.shareLink, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
+      this.button('leaveroom', T.leaveRoom, x + w * 0.7 + 4 * u, y, w * 0.3 - 4 * u, 32 * u, () => web.leave(), { size: 13 })
+      y += 44 * u
+    } else if (!web) {
+      const others = app.sessionCount() - 1
+      this.text(others > 0 ? T.othersHere(others) : T.aloneHere, cx, y + 2 * u, { size: 12, align: 'center', bold: false, color: '#7a7268', max: w })
+      y += 22 * u
+    }
+    this.ghostButton('help', T.howToPlay, cx - 80 * u, y + 6 * u, 160 * u, 36 * u, () => { app.screen = 'help'; this.helpPage = 0; this.dirty = true })
+    y += 58 * u
+    // the week's table, quietly under the buttons
+    if (table.length && y + 40 * u < H) {
+      this.text(T.weekTable, cx, y + 8 * u, { size: 13, align: 'center', color: '#5b544c' })
+      table.slice(0, 5).forEach((r, i) => {
+        const ry = y + 30 * u + i * 20 * u
+        if (ry > H - 10 * u) return
+        this.text(`${i + 1}. ${r.name}${r.owner ? ' *' : ''}`, x + w * 0.2, ry, { size: 12, bold: !!r.you, color: '#5b544c', max: w * 0.45 })
+        this.text(String(r.score), x + w * 0.8, ry, { size: 12, align: 'right', color: '#5b544c' })
       })
     }
+    this.soundControl()
+  }
+
+  /** Play Locally: the mode, big; the table's settings beside it, quiet; and Play. */
+  drawLocal() {
+    const H = this.H, u = this.u, app = this.app, c = app.cfg
+    const save = fn => () => { fn(); app.saveSettings(); this.dirty = true }
+    const minTotal = () => (c.mode === 'fool' ? 3 : 2)
+    const fill = () => { const lack = minTotal() - c.humans - c.bots; if (lack > 0) c.bots += lack }
+    const sideW = 220 * u, gap = 26 * u
+    const L = this.menuLayout(640 * u)
+    const side = L.wide // the settings stand beside the modes, or under them
+    const mw = side ? L.w - sideW - gap : L.w
+    const cardW = (mw - 16 * u) / 2, cardH = Math.min(side ? 240 * u : 210 * u, cardW * 1.25)
+    const setH = 236 * u
+    const blockH = 44 * u + cardH + 18 * u + 66 * u + (side ? 0 : 20 * u + setH)
+    const x = L.x
+    let y = Math.max(14 * u, (H - blockH) / 2)
+    this.ghostButton('back', '← ' + T.back, x - 8 * u, y, 96 * u, 32 * u, () => { app.screen = 'menu'; this.dirty = true })
+    this.text(T.chooseMode, x + mw / 2, y + 16 * u, { size: 18, align: 'center', color: '#2d3a6b' })
+    y += 44 * u
+    const top = y
+    const pick = m => save(() => { if (c.mode !== m) app.playSound('select', 0.35); c.mode = m; fill() })
+    this.modeCard('champion', x, y, cardW, cardH, c.mode === 'champion', pick('champion'))
+    this.modeCard('fool', x + cardW + 16 * u, y, cardW, cardH, c.mode === 'fool', pick('fool'))
+    y += cardH + 18 * u
+    this.playButton(x, y, mw, 66 * u, () => app.startSolo())
+    y += 66 * u
+    // the settings: who plays, how well the bots play, the board's size
+    const sx = side ? x + mw + gap : x, sy = side ? top : y + 20 * u, sw = side ? sideW : mw
+    const sh = side ? y - top : setH
+    this.panel(sx, sy, sw, sh, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
+    const ix = sx + 16 * u, iw = sw - 32 * u
+    let yy = sy + 14 * u
+    const rowGap = Math.max(0, (sh - 24 * u - 4 * 52 * u) / 3)
+    const total = c.humans + c.bots
+    const label = (t, extra) => {
+      this.text(t, ix, yy + 8 * u, { size: 12.5, color: '#7a7268' })
+      if (extra) this.text(extra, ix + iw, yy + 8 * u, { size: 11, align: 'right', bold: false, color: '#9a948a', max: iw * 0.62 })
+    }
+    label(T.players, c.humans > 1 ? T.hotseatShort : '')
+    this.miniStepper('hum', ix, yy + 20 * u, iw, c.humans, save(() => { c.humans--; fill() }), save(() => { c.humans++; if (c.humans + c.bots > 6) c.bots-- }),
+      c.humans > 1, c.humans < 6 && (total < 6 || c.bots > 0))
+    yy += 52 * u + rowGap
+    label(T.bots)
+    this.miniStepper('bots', ix, yy + 20 * u, iw, c.bots, save(() => { c.bots-- }), save(() => { c.bots++ }), c.bots > 0 && total - 1 >= minTotal(), total < 6)
+    yy += 52 * u + rowGap
+    label(T.level)
+    this.segmented('lvl', ix, yy + 20 * u, iw, [1, 2, 3], T.levels, c.level, l => save(() => { c.level = l })(), !c.bots)
+    yy += 52 * u + rowGap
+    label(T.board)
+    this.segmented('size', ix, yy + 20 * u, iw, SIZES, SIZES.map(String), c.size, n => save(() => { c.size = n })())
+    this.soundControl()
+  }
+
+  /** A big button for the title screen: a label and a line under it, on a paper offset. */
+  bigButton(key, label, sub, x, y, w, h, action, color) {
+    const g = this.g, u = this.u, hov = this.hover === key, lift = hov ? 3 * u : 0, r = 16 * u
+    g.fillStyle = 'rgba(43,38,34,0.16)'; P.roundRect(g, x, y + 5 * u, w, h, r); g.fill()
+    g.fillStyle = color; P.roundRect(g, x, y - lift, w, h, r); g.fill()
+    g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1.5 * u; g.stroke()
+    this.text(label, x + w / 2, y - lift + h * 0.4, { size: 23, align: 'center', color: '#ffffff', max: w - 24 * u })
+    this.text(sub, x + w / 2, y - lift + h * 0.72, { size: 12.5, align: 'center', bold: false, color: 'rgba(255,255,255,0.82)', max: w - 24 * u })
+    this.hits.push({ key, x, y: y - lift, w, h: h + lift, action })
+  }
+  /** A quiet button: no fill until the pointer is on it. */
+  ghostButton(key, label, x, y, w, h, action) {
+    const g = this.g, hov = this.hover === key
+    if (hov) { g.fillStyle = 'rgba(43,38,34,0.07)'; P.roundRect(g, x, y, w, h, h / 2); g.fill() }
+    this.text(label, x + w / 2, y + h / 2 + 1, { size: 15, align: 'center', color: hov ? P.INK : '#5b544c', max: w - 8 })
+    this.hits.push({ key, x, y, w, h, action })
+  }
+  /** Champion in gold, Fool in gloom: a big card to pick the mode by. */
+  modeCard(mode, x, y, w, h, selected, action) {
+    const g = this.g, u = this.u, key = 'mode' + mode, hov = this.hover === key
+    const champ = mode === 'champion'
+    const lift = selected ? 4 * u : hov ? 2 * u : 0
+    y -= lift
+    const r = 18 * u
+    g.save()
+    if (!selected) g.globalAlpha = hov ? 0.9 : 0.72
+    // the frame's glow, then the card
+    g.save()
+    g.shadowColor = champ ? 'rgba(255,186,40,0.75)' : 'rgba(34,18,48,0.6)'
+    g.shadowBlur = (selected ? 22 : 0) * u
+    g.shadowOffsetY = (selected ? 4 : 0) * u
+    g.fillStyle = champ ? (selected ? '#fffaf0' : '#fffdf8') : (selected ? '#f1ecf5' : '#fffdf8')
+    P.roundRect(g, x, y, w, h, r); g.fill()
+    g.restore()
+    const gr = g.createLinearGradient(x, y, x + w, y + h)
+    if (champ) { gr.addColorStop(0, '#ffe08a'); gr.addColorStop(0.4, '#d29a12'); gr.addColorStop(0.65, '#fff0b3'); gr.addColorStop(1, '#b8800a') }
+    else { gr.addColorStop(0, '#5a4470'); gr.addColorStop(0.45, '#241830'); gr.addColorStop(0.7, '#6e5a82'); gr.addColorStop(1, '#1c1226') }
+    g.strokeStyle = gr; g.lineWidth = (selected ? 5 : 2.5) * u
+    P.roundRect(g, x, y, w, h, r); g.stroke()
+    if (selected) {
+      // a thin inner line, as on the gold cards
+      g.strokeStyle = champ ? 'rgba(210,154,18,0.45)' : 'rgba(60,40,80,0.35)'; g.lineWidth = 1.2 * u
+      P.roundRect(g, x + 8 * u, y + 8 * u, w - 16 * u, h - 16 * u, r - 6 * u); g.stroke()
+    }
+    const s = Math.min(w * 0.42, h * 0.36)
+    if (champ) this.crown(x + w / 2, y + h * 0.31, s)
+    else this.jesterCap(x + w / 2, y + h * 0.31, s)
+    this.text(champ ? T.champion : T.fool, x + w / 2, y + h * 0.6, { size: Math.min(26, w / u / 7.5), align: 'center', color: champ ? '#9a6b00' : '#3a2a4c' })
+    g.font = this.font(12.5 * u, false)
+    const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u).slice(0, 2)
+    lines.forEach((l, i) => this.text(l, x + w / 2, y + h * 0.79 + (i - (lines.length - 1) / 2) * 17 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c' }))
+    g.restore()
+    this.hits.push({ key, x, y, w, h: h + lift, action })
+  }
+  crown(cx, cy, s) {
+    const g = this.g
+    const pts = [[-0.5, 0.28], [-0.5, -0.16], [-0.25, 0.04], [0, -0.34], [0.25, 0.04], [0.5, -0.16], [0.5, 0.28]]
+    const path = () => { g.beginPath(); pts.forEach(([a, b], i) => (i ? g.lineTo(cx + a * s, cy + b * s) : g.moveTo(cx + a * s, cy + b * s))); g.closePath() }
+    g.save()
+    g.shadowColor = 'rgba(255,190,40,0.6)'; g.shadowBlur = s * 0.18
+    const gr = g.createLinearGradient(cx, cy - s * 0.4, cx, cy + s * 0.3)
+    gr.addColorStop(0, '#ffe28a'); gr.addColorStop(0.55, '#f2b632'); gr.addColorStop(1, '#c58a0a')
+    g.fillStyle = gr; path(); g.fill()
+    g.restore()
+    g.strokeStyle = '#9a6b00'; g.lineWidth = s * 0.035; g.lineJoin = 'round'
+    path(); g.stroke()
+    g.fillStyle = '#b8800a'; g.fillRect(cx - s * 0.5, cy + s * 0.14, s, s * 0.05)
+    for (const [a, b] of [[-0.5, -0.16], [0, -0.34], [0.5, -0.16]]) { g.fillStyle = '#fff0b3'; g.beginPath(); g.arc(cx + a * s, cy + b * s - s * 0.04, s * 0.07, 0, Math.PI * 2); g.fill(); g.stroke() }
+    g.fillStyle = '#d64545'; g.beginPath(); g.arc(cx, cy + s * 0.04, s * 0.06, 0, Math.PI * 2); g.fill()
+  }
+  jesterCap(cx, cy, s) {
+    const g = this.g
+    g.save()
+    g.shadowColor = 'rgba(34,18,48,0.45)'; g.shadowBlur = s * 0.15
+    g.lineJoin = 'round'; g.lineWidth = s * 0.035; g.strokeStyle = '#1c1226'
+    // two points drooping to the sides, one standing up, then the band
+    for (const d of [-1, 1]) {
+      g.fillStyle = '#4a3560'
+      g.beginPath(); g.moveTo(cx + d * 0.1 * s, cy + 0.18 * s)
+      g.quadraticCurveTo(cx + d * 0.3 * s, cy - 0.42 * s, cx + d * 0.58 * s, cy + 0.02 * s)
+      g.quadraticCurveTo(cx + d * 0.4 * s, cy + 0.02 * s, cx + d * 0.46 * s, cy + 0.18 * s)
+      g.closePath(); g.fill(); g.stroke()
+    }
+    g.fillStyle = '#6b5480'
+    g.beginPath(); g.moveTo(cx - 0.3 * s, cy + 0.18 * s)
+    g.quadraticCurveTo(cx - 0.12 * s, cy - 0.3 * s, cx + 0.06 * s, cy - 0.5 * s)
+    g.quadraticCurveTo(cx + 0.14 * s, cy - 0.1 * s, cx + 0.3 * s, cy + 0.18 * s)
+    g.closePath(); g.fill(); g.stroke()
+    g.restore()
+    g.fillStyle = '#2e2140'; g.strokeStyle = '#1c1226'; g.lineWidth = s * 0.035
+    P.roundRect(g, cx - 0.5 * s, cy + 0.16 * s, s, 0.16 * s, 0.06 * s); g.fill(); g.stroke()
+    for (const [a, b] of [[-0.58, 0.06], [0.58, 0.06], [0.06, -0.5]]) {
+      g.fillStyle = '#a99bb6'; g.beginPath(); g.arc(cx + a * s, cy + b * s, s * 0.07, 0, Math.PI * 2); g.fill(); g.stroke()
+    }
+    for (const a of [-0.3, 0, 0.3]) { g.fillStyle = '#8a7a99'; g.beginPath(); g.arc(cx + a * s, cy + 0.24 * s, s * 0.035, 0, Math.PI * 2); g.fill() }
+  }
+  /** The big Play: orange into gold, on its paper offset, with a warm glow. */
+  playButton(x, y, w, h, action) {
+    const g = this.g, u = this.u, hov = this.hover === 'play', lift = hov ? 3 * u : 0, r = 18 * u
+    g.fillStyle = 'rgba(150,70,10,0.3)'; P.roundRect(g, x, y + 6 * u, w, h, r); g.fill()
+    y -= lift
+    g.save()
+    g.shadowColor = 'rgba(255,170,40,0.7)'; g.shadowBlur = (hov ? 26 : 16) * u
+    const gr = g.createLinearGradient(0, y, 0, y + h)
+    gr.addColorStop(0, '#ffd166'); gr.addColorStop(0.5, '#f7a03c'); gr.addColorStop(1, '#e8743b')
+    g.fillStyle = gr; P.roundRect(g, x, y, w, h, r); g.fill()
+    g.restore()
+    const rim = g.createLinearGradient(x, y, x + w, y + h)
+    rim.addColorStop(0, '#fff0b3'); rim.addColorStop(0.5, '#c58a0a'); rim.addColorStop(1, '#ffe08a')
+    g.strokeStyle = rim; g.lineWidth = 3 * u; P.roundRect(g, x, y, w, h, r); g.stroke()
+    g.strokeStyle = 'rgba(255,255,255,0.45)'; g.lineWidth = 1.5 * u; P.roundRect(g, x + 5 * u, y + 4 * u, w - 10 * u, h * 0.45, r - 5 * u); g.stroke()
+    g.save()
+    g.shadowColor = 'rgba(120,50,0,0.45)'; g.shadowOffsetY = 2 * u; g.shadowBlur = 3 * u
+    this.text(T.play, x + w / 2, y + h / 2 + 2 * u, { size: 32, align: 'center', color: '#ffffff' })
+    g.restore()
+    this.hits.push({ key: 'play', x, y, w, h: h + lift, action })
+  }
+  /** − value + in a small row, `w` wide. */
+  miniStepper(key, x, y, w, value, dec, inc, canDec, canInc) {
+    const u = this.u, b = 30 * u
+    this.button(key + '-', '−', x, y, b, b, dec, { disabled: !canDec, size: 16 })
+    this.text(String(value), x + w / 2, y + b / 2 + 1, { size: 17, align: 'center' })
+    this.button(key + '+', '+', x + w - b, y, b, b, inc, { disabled: !canInc, size: 16 })
+  }
+  /** A row of quiet choices: the chosen one in white with a navy line. */
+  segmented(key, x, y, w, values, labels, current, pick, disabled = false) {
+    const g = this.g, u = this.u, h = 30 * u, n = values.length, sw = w / n
+    g.fillStyle = 'rgba(43,38,34,0.06)'; P.roundRect(g, x, y, w, h, 9 * u); g.fill()
+    values.forEach((v, i) => {
+      const k = key + v, on = v === current, hov = this.hover === k && !disabled
+      const bx = x + i * sw
+      if (on && !disabled) {
+        g.fillStyle = '#ffffff'; P.roundRect(g, bx + 2 * u, y + 2 * u, sw - 4 * u, h - 4 * u, 7 * u); g.fill()
+        g.strokeStyle = 'rgba(45,58,107,0.55)'; g.lineWidth = 1.3 * u; g.stroke()
+      } else if (hov) { g.fillStyle = 'rgba(255,255,255,0.6)'; P.roundRect(g, bx + 2 * u, y + 2 * u, sw - 4 * u, h - 4 * u, 7 * u); g.fill() }
+      this.text(labels[i], bx + sw / 2, y + h / 2 + 1, { size: 12.5, align: 'center', bold: on, color: disabled ? '#b5afa5' : on ? '#2d3a6b' : '#7a7268', max: sw - 6 * u })
+      if (!disabled) this.hits.push({ key: k, x: bx, y, w: sw, h, action: () => pick(v) })
+    })
+  }
+
+  // ---------- sound: a speaker that mutes, a slider for the volume ----------
+  speaker(cx, cy, s, color) {
+    const g = this.g, snd = this.app.sound, on = snd.on && snd.vol > 0.02
+    g.save()
+    g.fillStyle = color; g.strokeStyle = color; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = s * 0.09
+    g.beginPath()
+    g.moveTo(cx - s * 0.42, cy - s * 0.14); g.lineTo(cx - s * 0.22, cy - s * 0.14); g.lineTo(cx + s * 0.02, cy - s * 0.36)
+    g.lineTo(cx + s * 0.02, cy + s * 0.36); g.lineTo(cx - s * 0.22, cy + s * 0.14); g.lineTo(cx - s * 0.42, cy + s * 0.14)
+    g.closePath(); g.fill()
+    if (!on) {
+      g.beginPath(); g.moveTo(cx + s * 0.16, cy - s * 0.14); g.lineTo(cx + s * 0.42, cy + s * 0.14); g.moveTo(cx + s * 0.42, cy - s * 0.14); g.lineTo(cx + s * 0.16, cy + s * 0.14); g.stroke()
+    } else {
+      const waves = snd.vol > 0.66 ? 3 : snd.vol > 0.33 ? 2 : 1
+      for (let i = 0; i < waves; i++) { g.beginPath(); g.arc(cx + s * 0.04, cy, s * (0.2 + i * 0.14), -0.8, 0.8); g.stroke() }
+    }
+    g.restore()
+  }
+  soundButton(key, x, y, s) {
+    const hov = this.hover === key
+    this.button(key, '', x, y, s, s, () => this.app.toggleSound(), { size: 14 })
+    this.speaker(x + s / 2, y + s / 2 - (hov ? 2 * this.u : 0), s * 0.62, P.INK)
+  }
+  volumeSlider(key, x, y, w, h) {
+    const g = this.g, u = this.u, app = this.app, snd = app.sound, v = snd.on ? snd.vol : 0
+    const cy = y + h / 2, tr = 3 * u
+    g.fillStyle = 'rgba(43,38,34,0.14)'; P.roundRect(g, x, cy - tr, w, tr * 2, tr); g.fill()
+    if (v > 0) { g.fillStyle = '#e8743b'; P.roundRect(g, x, cy - tr, Math.max(tr * 2, w * v), tr * 2, tr); g.fill() }
+    const kx = x + w * v, hov = this.hover === key || this.drag?.key === key
+    g.fillStyle = '#ffffff'; g.strokeStyle = hov ? '#e8743b' : 'rgba(43,38,34,0.35)'; g.lineWidth = 1.5 * u
+    g.beginPath(); g.arc(kx, cy, (hov ? 9 : 8) * u, 0, Math.PI * 2); g.fill(); g.stroke()
+    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - x) / w), end: () => { app.saveSettings(); app.playSound('select', 0.5) } })
+  }
+  /** The title screens' corner: the slider, then the speaker. */
+  soundControl() {
+    const u = this.u, s = 36 * u, x = this.W - s - 14 * u, y = 14 * u
+    this.soundButton('snd', x, y, s)
+    if (this.W >= 320) this.volumeSlider('vol', x - 122 * u, y, 104 * u, s)
   }
 
   /** The web build: send the online room's link. */
@@ -484,6 +737,7 @@ export class UI {
     const rows = Math.max(1, ids.length)
     const pw = Math.min(W - 20 * u, 430 * u), ph = (128 + rows * 46 + 64) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
+    this.modal = true
     this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
     this.g.fillStyle = 'rgba(30,26,22,0.35)'; this.g.fillRect(0, 0, W, H)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.98)', stroke: '#2d3a6b', lw: 2.5 })
@@ -518,6 +772,7 @@ export class UI {
     const ending = app.screen === 'game' && app.table?.kind === 'solo' && app.table.s.ph !== 'over'
     const pw = Math.min(W - 20 * u, 400 * u), ph = (ending ? 196 : 174) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, H * 0.3 - ph / 2)
+    this.modal = true
     this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
     this.g.fillStyle = 'rgba(30,26,22,0.3)'; this.g.fillRect(0, 0, W, H)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.99)', stroke: '#e8743b', lw: 3 })
@@ -617,11 +872,12 @@ export class UI {
     this.text(status, sx + sw / 2, sy + 21 * u, { size: 17, align: 'center', color: myTurn ? '#ffffff' : P.INK, max: sw - 20 * u })
     if (!this.narrow) this.text(T.round(s.round, CFG.roundLimit) + (s.mode === 'fool' ? ' · Fool' : ' · Champion'), sx + sw / 2, sy + 52 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c' })
     if (app.turnLeft != null && myTurn) this.text(`${Math.ceil(app.turnLeft)} s`, sx + sw - 30 * u, sy + 21 * u, { size: 14, align: 'center', color: app.turnLeft < 10 ? '#ffb4a8' : '#ffffff' })
-    // corner buttons: menu, speed, zoom
+    // corner buttons: menu, speed, sound, zoom
     const cb = 40 * u
     const rx = W - cb - 10 * u
     this.button('menu', '☰', rx, 10 * u, cb, cb, () => app.openGameMenu(), { size: 18 })
-    this.button('speed', `${app.speedLabel()}`, rx - cb - 8 * u, 10 * u, cb + 10 * u, cb, () => app.cycleSpeed(), { size: 14 })
+    this.button('speed', `${app.speedLabel()}`, rx - cb - 18 * u, 10 * u, cb + 10 * u, cb, () => app.cycleSpeed(), { size: 14 })
+    this.soundButton('snd', rx - 2 * cb - 26 * u, 10 * u, cb)
     const zy = this.narrow ? panelBottom + 54 * u : 64 * u
     this.button('zin', '+', rx, zy, cb, cb, () => app.view.zoom(0.8), { size: 20 })
     this.button('zout', '−', rx, zy + cb + 6 * u, cb, cb, () => app.view.zoom(1.25), { size: 20 })
@@ -634,7 +890,7 @@ export class UI {
     const ready = myTurn && s.ph === 'main' && curtain < 0 && !busy && !app.menuOpen && !app.invite
     const choose = ready && !s.rolled && !this.target ? choiceMax(pmy.fx) : 0
     const prompt = this.promptN > 0 && s.cur === me
-    this.trayMode = prompt ? 'roll' : ready && s.rolled ? 'end' : choose ? 'choose' : app.view.trayVisible > 0 ? 'show' : null
+    this.trayMode = prompt ? 'roll' : ready && s.rolled ? 'end' : choose ? 'choose' : 'show' // the tray always stands in its corner
     this.trayTop = null
     if (this.trayMode) {
       const g = this.g, mode = this.trayMode
@@ -677,32 +933,54 @@ export class UI {
     }
     // log
     this.drawLog()
-    if (this.peekRect) {
+  }
+  /** The peeked hand stays until the roll; I can put it away sooner. */
+  peekKey(s) { return s?.peek ? `${s.gid}:${s.turnNo}:${s.peek.tg}` : null }
+  closePeek() { if (this.peekRect) { this.peekClosed = this.peekKey(this.app.view.state); this.dirty = true; return true } return false }
+
+  /** The game's windows over the cards: whose turn it is at one computer, the results, the game menu. */
+  drawGameWindows() {
+    const app = this.app, s = app.view.state
+    if (!s) return
+    const W = this.W, H = this.H, u = this.u
+    // another player's hand, seen with Peek: over everything, the cards over the window
+    if (this.peekRect && s.peek) {
       const r = this.peekRect
-      this.panel(r.x - 12 * u, r.y - 34 * u, r.w + 24 * u, r.h + 46 * u, { fill: 'rgba(255,253,248,0.92)' })
-      this.text(T.handOf(s.pl[s.peek.tg].n), r.x + r.w / 2, r.y - 17 * u, { size: 14, align: 'center' })
+      this.panel(r.x - 12 * u, r.y - 34 * u, r.w + 24 * u, r.h + 46 * u, { fill: 'rgba(255,253,248,0.96)', stroke: 'rgba(43,38,34,0.25)' })
+      this.text(T.handOf(s.pl[s.peek.tg].n), r.x + r.w / 2, r.y - 17 * u, { size: 15, align: 'center' })
       if (r.empty) this.text(T.noCards, r.x + r.w / 2, r.y + r.h / 2, { size: 14, align: 'center', bold: false, color: '#5b544c' })
+      const cb = 34 * u
+      this.button('peekx', '✕', r.x + r.w + 12 * u - cb - 2 * u, r.y - 34 * u + 2 * u, cb, cb, () => this.closePeek(), { size: 15 })
     }
+    const curtain = app.curtain()
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
-    if (s.ph === 'over' && !busy) this.drawResults(s, me)
+    if (s.ph === 'over' && !(app.view.busy || app.waiting)) this.drawResults(s, app.mySeat())
+    if (curtain >= 0 || s.ph === 'over' || app.menuOpen) this.modal = true
     if (app.menuOpen) {
       const web = !!this.p0.web
-      const mw = Math.min(W - 20 * u, 320 * u), mh = (web ? 252 : 300) * u
-      const mx = (W - mw) / 2, my = (H - mh) / 2
+      const mw = Math.min(W - 20 * u, 320 * u)
+      // the controls, which used to stand over the players' list, are told here
+      this.g.font = this.font(11.5 * u, false)
+      const keys = P.wrapText(this.g, T.controls, mw - 36 * u)
+      const mh = (web ? 262 : 310) * u + keys.length * 15 * u + 14 * u
+      const mx = (W - mw) / 2, my = (H - mh) / 2, bx = mx + 24 * u, bw = mw - 48 * u
       this.panel(mx, my, mw, mh, { fill: 'rgba(255,253,248,0.97)' })
       this.text(T.menuTitle, W / 2, my + 30 * u, { size: 20, align: 'center' })
-      this.button('resume', T.resume, mx + 24 * u, my + 60 * u, mw - 48 * u, 44 * u, () => app.openGameMenu(), { primary: true })
-      this.button('speed2', `Speed: ${app.speedLabel()}`, mx + 24 * u, my + 112 * u, mw - 48 * u, 40 * u, () => app.cycleSpeed(), { size: 15 })
-      this.button('leave', T.leaveGame, mx + 24 * u, my + 160 * u, mw - 48 * u, 40 * u, () => app.toMenu(), { size: 15 })
-      if (!web) this.button('exitcity', T.exitCity, mx + 24 * u, my + 208 * u, mw - 48 * u, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
-      this.text(T.menuKeys, W / 2, my + (web ? 224 : 272) * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u })
+      this.button('resume', T.resume, bx, my + 60 * u, bw, 44 * u, () => app.openGameMenu(), { primary: true })
+      this.button('speed2', `Speed: ${app.speedLabel()}`, bx, my + 112 * u, bw, 40 * u, () => app.cycleSpeed(), { size: 15 })
+      // sound: the speaker mutes, the slider sets the volume
+      this.soundButton('snd2', bx, my + 160 * u, 40 * u)
+      this.volumeSlider('vol2', bx + 58 * u, my + 160 * u, bw - 68 * u, 40 * u)
+      this.button('leave', T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.toMenu(), { size: 15 })
+      if (!web) this.button('exitcity', T.exitCity, bx, my + 256 * u, bw, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
+      keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * 15 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
     }
   }
 
   /** Several players at one computer: the next one takes it before their hand shows. */
   drawCurtain(p) {
     const W = this.W, H = this.H, u = this.u, g = this.g
-    this.hits = this.hits.filter(h => h.key === 'menu')
+    this.hits = this.hits.filter(h => h.key === 'menu' || h.key === 'snd')
     g.fillStyle = 'rgba(30,26,22,0.42)'; g.fillRect(0, 0, W, H)
     const pw = Math.min(W - 20 * u, 380 * u), ph = 196 * u
     const x = (W - pw) / 2, y = (H - ph) / 2
@@ -853,7 +1131,8 @@ export class UI {
       })
     }
     this.peekRect = null
-    if (app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide) {
+    const peeking = app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide && !app.menuOpen && this.peekClosed !== this.peekKey(s)
+    if (peeking) {
       s.pl[s.peek.tg].h.forEach((id, i) => want.push({ id, key: 'p' + i + id, i, kind: 'peek', n: s.pl[s.peek.tg].h.length }))
     }
     if (app.screen === 'help' && this.helpPage === 1) CARDS.forEach((c, i) => want.push({ id: c.id, key: 'c' + c.id, i, kind: 'catalog' }))
@@ -892,12 +1171,16 @@ export class UI {
     })
     const peek = this.cards.filter(c => c.kind === 'peek')
     if (peek.length) {
-      const pw = cw * 0.7
-      const x0 = W / 2 - (peek.length - 1) / 2 * pw * 1.05
-      const y = H * 0.38
-      peek.forEach((c, k) => { c.tx = x0 + k * pw * 1.05; c.ty = y; c.ts = pw; c.rot = 0; c.dim = 0; c.lift = 0 })
-      this.peekRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (peek.length - 1) * pw * 1.05 + pw, h: pw * 1.4 }
-    } else if (app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide) {
+      // as big as my own cards, as far as the screen lets them; the window stands over everything
+      const n = peek.length
+      const pw = Math.min(cw, (W - 40 * u) / (n * 1.05), (H - 80 * u) / 1.4)
+      const ph = pw * 1.4 + 46 * u
+      const top = Math.max(8 * u, (H - ph) / 2 - 30 * u)
+      const x0 = W / 2 - (n - 1) / 2 * pw * 1.05
+      const y = top + 34 * u + pw * 0.7
+      peek.forEach((c, k) => { c.tx = x0 + k * pw * 1.05; c.ty = y; c.ts = pw; c.rot = 0; c.dim = 0; c.lift = 0; c.z = 60 })
+      this.peekRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * 1.05 + pw, h: pw * 1.4 }
+    } else if (peeking) {
       this.peekRect = { x: W / 2 - 90 * u, y: H * 0.38 - 12 * u, w: 180 * u, h: 24 * u, empty: true }
     }
     const cat = this.cards.filter(c => c.kind === 'catalog')
@@ -1092,6 +1375,7 @@ export class UI {
   // ---------- input ----------
   hitAt(x, y) { for (let k = this.hits.length - 1; k >= 0; k--) { const h = this.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h } return null }
   cardAt(x, y) {
+    if (this.modal) return null
     const list = [...this.cards].sort((a, b) => (b.mesh.renderOrder - a.mesh.renderOrder))
     for (const c of list) {
       const w = c.s, h = c.s * 1.4
