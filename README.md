@@ -14,7 +14,11 @@ Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck
 - **Online:** *Quick Match* sits you down with others who are looking for a game; *Create a Room* gives a code and a link for friends. The room's table has seats for up to 6 (players and bots); others can watch.
 - A 3D paper board with animated dice, sound effects, works on desktop and phones.
 
-Controls: click the dice tray when it lights up (or press Space) to roll; click a card, then its target; 1–4 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
+Controls: click the dice tray when it lights up (or press Space) to roll; while you can still play a card the tray says End Turn: click it or press Space to end the turn. Click a card, then its target; 1–4 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
+
+## Tuning the cards
+
+`experience/cards.config.js` holds the deck for game design: each card's name, text, rarity, how often it comes up within its rarity (`weight`), whether it is in the deck (`enabled`) and its numbers (spaces, turns, dice values…). Texts use `{placeholders}` for those numbers, so they follow the values. The hand size and the rarity weights are there too. Edit and reload the page.
 
 ## Running locally
 
@@ -34,6 +38,7 @@ web/p0web.js        browser stand-in for the Project 0 runtime the game is writt
 web/net.js          online rooms: WebRTC through PeerJS, one player relays, host handover
 web/online.js       the Play Online dialog
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
+  cards.config.js   the deck's names, texts, rarity and numbers, for tuning
 tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page

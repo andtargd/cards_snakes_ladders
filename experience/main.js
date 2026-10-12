@@ -551,7 +551,9 @@ export default async function start(p0) {
     if (e.repeat || app.screen !== 'game') return
     const s = app.view.state, me = app.mySeat()
     if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }
-    if (e.code === 'Space' && s && me >= 0 && s.cur === me && s.ph === 'main' && !s.rolled && !s.pl[me].fx.gd && !s.pl[me].fx.cf) app.act({ t: 'roll' })
+    const mine = s && me >= 0 && s.cur === me && s.ph === 'main'
+    if (e.code === 'Space' && mine && !s.rolled && !R.choiceMax(s.pl[me].fx)) app.act({ t: 'roll' })
+    else if (e.code === 'Space' && mine && s.rolled && !app.view.busy && !app.menuOpen) { if (app.ui.target) app.ui.cancelTarget(); app.act({ t: 'end' }) }
     else if (/^Digit[1-4]$/.test(e.code) && s && me >= 0) { const c = app.ui.cards.find(k => k.kind === 'hand' && k.i === +e.code.slice(5) - 1); if (c) app.ui.cardClicked(c) }
     else if (e.code === 'Escape' && app.ui.target) app.ui.cancelTarget()
     else if (e.code === 'Equal' || e.code === 'NumpadAdd') app.view.zoom(0.8)
@@ -596,7 +598,7 @@ export default async function start(p0) {
     renderer.clearDepth()
     renderer.render(app.ui.scene, app.ui.cam)
     renderer.autoClear = true
-    app.view.renderTray(renderer, app.ui.trayRect)
+    app.view.renderTray(renderer, app.ui.trayDice)
   })
   renderer.render(p0.scene, p0.camera)
 }

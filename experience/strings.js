@@ -1,4 +1,6 @@
-// Every piece of text the game shows, in one table (English only for now).
+// Every piece of text the game shows, in one table (English only for now). Card names and texts are in cards.config.js.
+import { CFG } from './rules.js'
+
 const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th')
 
 export const T = {
@@ -75,14 +77,14 @@ export const T = {
   chooseDiscard: 'Choose a card to discard',
   // the message at the end of a turn with more cards than the hand holds
   discardTitle: 'Discard a card',
-  discardHint: n => (n > 1 ? `You hold ${n} too many: click the cards to burn` : 'You can keep 3: click a card to burn it'),
+  discardHint: n => (n > 1 ? `You hold ${n} too many: click the cards to burn` : `You can keep ${CFG.hand}: click a card to burn it`),
   cantPlay: "You can't play cards this turn",
   yourTurn: 'Your turn',
   turnOf: name => `${name}'s turn`,
   passTo: name => `${name}'s turn`,
   passHint: 'Pass the computer over: the others look away.',
   showCards: 'Show my cards',
-  playOrEnd: 'Play a card or End Turn',
+  playOrEnd: 'Play a card or end the turn',
   waitingFor: name => `Waiting for ${name}`,
   demo: 'Bots are playing a demo game',
   round: (n, max) => `Round ${n} of ${max}`,
@@ -92,6 +94,7 @@ export const T = {
   chooseValue: 'Choose a value',
   tapToRoll: 'Tap to roll',
   clickToRoll: 'Click to roll · Space',
+  clickToEnd: 'Click or press Space',
   endTurn: 'End Turn',
   playCard: 'Play Card',
   handOf: name => `${name}'s hand`,
@@ -115,13 +118,13 @@ export const T = {
   leaveGame: 'Main Menu',
   exitCity: 'Exit to the City',
   menuKeys: 'M or Tab opens this menu. Esc leaves the game at once.',
-  hud: 'Click a card to play it, then click its target. Click the dice tray to roll; one card per turn, before or after the roll. Hold a card to read it. Space rolls, 1-4 play a card, wheel or +/- zoom, drag to look around, M or Tab: menu.',
+  hud: 'Click a card to play it, then click its target. Click the dice tray to roll, and again to end the turn; one card per turn, before or after the roll. Hold a card to read it. Space rolls and ends the turn, 1-4 play a card, wheel or +/- zoom, drag to look around, M or Tab: menu.',
   rules: [
-    'Race up the paper tiers to the last cell: 50, 70 or 100, as you pick the board. On your turn you must roll the die once (click the dice tray when it lights up) and may play one card, in either order.',
+    'Race up the paper tiers to the last cell: 50, 70 or 100, as you pick the board. On your turn you must roll the die once (click the dice tray when it lights up) and may play one card, in either order. While you still can play a card the tray says End Turn: click it or press Space when you are done.',
     'End your move on a ladder’s foot to climb it, on a snake’s head to slide down. Passing over them does nothing, and there are no chains. A swamp on the way stops a roll, but Dash jumps over it. Cards that move a player (Dash, Setback, Dethrone, Swap Places) work the same: the cell they land on takes effect.',
-    'You draw one card at the start of each turn and keep up to 3: holding 4 at the end of your turn, you burn one. Cards can target any player, yourself included.',
+    `You draw one card at the start of each turn and keep up to ${CFG.hand}: holding ${CFG.hand + 1} at the end of your turn, you burn one. Cards can target any player, yourself included.`,
     'Rarity: Common (grey), Uncommon (green, one star), Rare (blue, two stars), Legendary (gold, three stars). Rarer cards come up less often.',
-    'Timed effects last 3 turns of their owner. Next-roll effects apply to the target’s first roll not made yet.',
+    'Timed effects last the turns the card says, counted on the turns of the player who played it (in Fool, even after they finish). Next-roll effects apply to the target’s first roll not made yet.',
     'Champion: the first to reach 100 or beyond wins. Fool: players leave the board as they finish; the last one left is the Fool.',
     'Several players can share this computer: set Players above 1 and pass it round; each hand shows on its own turn.',
     'At the Shared Table everyone in this lot can sit down together, with bots in free seats; Invite sends the others in the lot an invitation. Turns last 45 seconds there.',

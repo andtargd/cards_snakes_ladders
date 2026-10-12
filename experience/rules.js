@@ -3,10 +3,12 @@
 // against bots and, on the session's host, the shared table. All randomness comes from the state's own
 // seeded generator, so a game replays exactly from its seed and its actions.
 
+import DECK from './cards.config.js'
+
 export const CFG = {
   cells: 100, tiers: 10, perTier: 10,
   snakes: 8, ladders: 8,
-  hand: 3, fxTurns: 3, roundLimit: 150,
+  hand: Math.max(1, DECK.hand | 0 || 3), fxTurns: 3, roundLimit: 150,
   minLen: 8, maxLen: 60, maxEndsPerTier: 4, balance: 0.15,
   simRuns: 1000, simMin: 25, simMax: 45,
   // how snakes and ladders may cross: at most 2 crossings each, at 40 degrees or more
@@ -22,55 +24,37 @@ export function boardCfg(n = CFG.cells) {
   return { cells: CFG.cells, tiers: CFG.tiers, snakes: CFG.snakes, ladders: CFG.ladders, maxLen: CFG.maxLen, simMin: CFG.simMin, simMax: CFG.simMax }
 }
 
-export const RARITY = {
-  C: { name: 'Common', weight: 55 },
-  U: { name: 'Uncommon', weight: 28 },
-  R: { name: 'Rare', weight: 13 },
-  L: { name: 'Legendary', weight: 4 },
-}
+export const RARITY = DECK.rarity
 
 export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 'Protection', C: 'Hand' }
 
-// tgt: any (any player on the board, self included), other (another player), leader (automatic),
-// cell, cell2 (two cells), ladder, snake, board, none
-export const CARDS = [
-  { id: 'M1', name: 'Dash', cat: 'M', rar: 'C', tgt: 'any', text: 'Move any player 2 spaces forward, over any swamp.' },
-  { id: 'M2', name: 'Setback', cat: 'M', rar: 'U', tgt: 'any', text: 'Move any player 3 spaces back.' },
-  { id: 'M3', name: 'Swap Places', cat: 'M', rar: 'R', tgt: 'other', text: 'Swap places with another player.' },
-  { id: 'M4', name: 'Dethrone', cat: 'M', rar: 'L', tgt: 'leader', text: 'The player closest to the finish moves 10 spaces back.' },
-  { id: 'M5', name: 'Double Move', cat: 'M', rar: 'L', tgt: 'any', text: 'Any player immediately rolls again and moves.' },
-  { id: 'D1', name: 'Extra Die', cat: 'D', rar: 'C', tgt: 'any', text: "A player's next roll uses 2 dice." },
-  { id: 'D2', name: 'Choose a Face', cat: 'D', rar: 'U', tgt: 'any', text: 'A player picks a value from 1 to 3 instead of rolling.' },
-  { id: 'D3', name: 'Heavy Die', cat: 'D', rar: 'R', tgt: 'any', text: "A player's next roll: no die shows less than 3." },
-  { id: 'D4', name: 'Golden Die', cat: 'D', rar: 'L', tgt: 'any', text: 'A player picks any value from 1 to 6 instead of rolling.' },
-  { id: 'B1', name: 'Swamp', cat: 'B', rar: 'C', tgt: 'cell', text: 'Place a swamp. Anyone who reaches it stops there. Lasts 3 turns.' },
-  { id: 'B2', name: 'Ladder to Snake', cat: 'B', rar: 'U', tgt: 'ladder', text: 'Turn a ladder into a snake for 3 turns.' },
-  { id: 'B3', name: 'Snake to Ladder', cat: 'B', rar: 'U', tgt: 'snake', text: 'Turn a snake into a ladder for 3 turns.' },
-  { id: 'B4', name: 'Trampoline', cat: 'B', rar: 'U', tgt: 'cell', text: 'Place a trampoline. Landing on it launches you 3 spaces forward. Lasts 3 turns.' },
-  { id: 'B5', name: 'Portal', cat: 'B', rar: 'R', tgt: 'cell2', text: 'Place two portals on cells up to your own. Landing on one sends you to the other. Lasts 3 turns.' },
-  { id: 'B6', name: 'Earthquake', cat: 'B', rar: 'L', tgt: 'board', text: 'Every snake and ladder shifts 1–2 spaces for 3 turns.' },
-  { id: 'H1', name: 'Slow Down', cat: 'H', rar: 'C', tgt: 'any', text: "A player's next roll totals 3 at most." },
-  { id: 'H2', name: 'Freeze', cat: 'H', rar: 'U', tgt: 'any', text: "A player can't play cards on their next turn." },
-  { id: 'H3', name: 'Skip Turn', cat: 'H', rar: 'R', tgt: 'any', text: 'A player skips their next turn.' },
-  { id: 'P1', name: 'Parachute', cat: 'P', rar: 'C', tgt: 'any', text: 'A player slides only half as far down snakes for 3 turns.' },
-  { id: 'P2', name: 'Swamp Boots', cat: 'P', rar: 'U', tgt: 'any', text: 'A player ignores swamps for 3 turns.' },
-  { id: 'P3', name: 'Shield', cat: 'P', rar: 'R', tgt: 'any', text: 'A player ignores the next snake they land on. Lasts 3 turns.' },
-  { id: 'C1', name: 'Redraw', cat: 'C', rar: 'C', tgt: 'none', text: 'Discard the rest of your hand, then draw one more card than you discarded.' },
-  { id: 'C2', name: 'Peek', cat: 'C', rar: 'C', tgt: 'other', text: "Look at another player's hand until the end of your turn." },
-  { id: 'C3', name: 'Steal', cat: 'C', rar: 'U', tgt: 'other', text: "Take a random card from another player's hand." },
-  { id: 'C4', name: 'Swap Hands', cat: 'C', rar: 'R', tgt: 'other', text: 'Swap hands with another player.' },
-]
-export const CARD = Object.fromEntries(CARDS.map(c => [c.id, c]))
+// How each card works: its category and what it targets. Names, texts, rarity and numbers come from
+// cards.config.js. tgt: any (any player on the board, self included), other (another player), leader
+// (automatic), cell, cell2 (two cells), ladder, snake, board, none
+const KINDS = {
+  M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'leader'], M5: ['M', 'any'],
+  D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'],
+  B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
+  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'],
+  P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
+  C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'],
+}
+const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1 }
+/** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
+const ALL = Object.entries(KINDS).map(([id, [cat, tgt]]) => {
+  const c = { ...DEFAULTS, ...DECK.cards[id] }
+  const text = String(c.text || '').replace(/\{(\w+)\}/g, (m, k) => (c[k] !== undefined ? String(c[k]) : m))
+  return { ...c, id, name: String(c.name || id), cat, rar: RARITY[c.rarity] ? c.rarity : 'C', tgt, text, w: Math.max(0, +(c.weight ?? 1) || 0), on: c.enabled !== false }
+})
+/** The cards in the deck, in catalogue order. */
+export const CARDS = ALL.filter(c => c.on && c.w > 0)
+export const CARD = Object.fromEntries(ALL.map(c => [c.id, c]))
 const BY_RARITY = { C: [], U: [], R: [], L: [] }
 for (const c of CARDS) BY_RARITY[c.rar].push(c.id)
 
 // effects shown over a player: key in fx -> label
-export const FX = {
-  x: { name: 'Extra Die', card: 'D1' }, cf: { name: 'Choose a Face', card: 'D2' }, hv: { name: 'Heavy Die', card: 'D3' },
-  gd: { name: 'Golden Die', card: 'D4' }, sl: { name: 'Slow Down', card: 'H1' }, fz: { name: 'Freeze', card: 'H2' },
-  sk: { name: 'Skip Turn', card: 'H3' }, pa: { name: 'Parachute', card: 'P1' }, bo: { name: 'Swamp Boots', card: 'P2' },
-  sh: { name: 'Shield', card: 'P3' },
-}
+export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', sl: 'H1', fz: 'H2', sk: 'H3', pa: 'P1', bo: 'P2', sh: 'P3' })
+  .map(([k, card]) => [k, { name: CARD[card].name, card }]))
 const TIMED = ['pa', 'bo', 'sh']
 
 // ---------- randomness ----------
@@ -113,6 +97,7 @@ export function boardProblems(els, blocked = null, n = CFG.cells) {
     }
     const len = Math.abs(to - from)
     if (len < CFG.minLen || len > bc.maxLen) return 'length'
+    if (tierOf(from) === tierOf(to)) return 'flat on one tier'
     if (type === 1 && to <= from) return 'ladder goes down'
     if (type === 0 && to >= from) return 'snake goes up'
     if (type === 1) rise += len; else fall += len
@@ -197,7 +182,8 @@ export function generateBoard(seed, n = CFG.cells) {
         const high = low + len
         if (high > bc.cells - 1 || used.has(low) || used.has(high)) continue
         const tl = tierOf(low), th = tierOf(high)
-        if (perTier[tl] + 1 > CFG.maxEndsPerTier || perTier[th] + 1 + (tl === th ? 1 : 0) > CFG.maxEndsPerTier) continue
+        // every snake and ladder joins two tiers: none lies flat along one
+        if (tl === th || perTier[tl] + 1 > CFG.maxEndsPerTier || perTier[th] + 1 > CFG.maxEndsPerTier) continue
         const el = type === 1 ? [1, low, high] : [0, high, low]
         // cross few others, and only steeply
         let bad = false, mine = 0
@@ -279,11 +265,15 @@ function log(s, ev, text) {
 }
 const nm = (s, i) => s.pl[i].n
 
+/** A rarity by its weight (rarities without cards in the deck left out), then a card of it by the cards' weights. */
 function drawCard(s) {
-  let w = rnd(s) * 100, rar = 'C'
-  for (const k of ['C', 'U', 'R', 'L']) { w -= RARITY[k].weight; if (w < 0) { rar = k; break } }
+  const rars = ['C', 'U', 'R', 'L'].filter(k => BY_RARITY[k].length && RARITY[k]?.weight > 0)
+  let w = rnd(s) * rars.reduce((a, k) => a + RARITY[k].weight, 0), rar = rars[rars.length - 1]
+  for (const k of rars) { w -= RARITY[k].weight; if (w < 0) { rar = k; break } }
   const list = BY_RARITY[rar]
-  return list[rint(s, list.length)]
+  let v = rnd(s) * list.reduce((a, id) => a + CARD[id].w, 0)
+  for (const id of list) { v -= CARD[id].w; if (v < 0) return id }
+  return list[list.length - 1]
 }
 
 function beginTurn(s, ev) {
@@ -316,6 +306,8 @@ function advance(s, ev) {
   for (let k = 1; k <= n; k++) {
     const i = (s.cur + k) % n
     if (!s.pl[i].d) { next = i; break }
+    // a finished player's seat still counts its turns: the board changes they made run out on time
+    tickTimers(s, i, ev)
   }
   if (next <= s.cur) s.round++
   s.cur = next
@@ -344,8 +336,7 @@ function finishTurn(s, ev) {
 
 function endTurn(s, ev) {
   if (s.ph === 'over') return
-  const pi = s.cur
-  if (!s.pl[pi].d) tickTimers(s, pi, ev)
+  tickTimers(s, s.cur, ev)
   s.peek = null
   if (!advance(s, ev)) return
   beginTurn(s, ev)
@@ -403,27 +394,31 @@ function finish(s, pi, ev) {
   ev.push({ e: 'finish', p: pi, place: p.d })
   if (s.mode === 'champion') { gameOver(s, ev); return }
   log(s, ev, `${p.n} finished in place ${p.d}`)
-  // a finished player leaves the board: hand, effects and the timers they own go
+  // a finished player leaves the board with their hand and effects; the swamps, portals and other
+  // changes they made stay until their turns run out
   p.h = []; p.fx = {}
-  const before = s.mk.length + s.mods.length + (s.quake ? 1 : 0)
-  s.mk = s.mk.filter(m => m.o !== pi)
-  s.mods = s.mods.filter(m => m.o !== pi)
-  if (s.quake && s.quake.o === pi) s.quake = null
-  if (s.mk.length + s.mods.length + (s.quake ? 1 : 0) !== before) ev.push(boardEvent(s, 'finish'))
   if (s.peek && (s.peek.by === pi || s.peek.tg === pi)) s.peek = null
   if (onBoard(s).length <= 1) gameOver(s, ev)
 }
 
 /** The roll a player would make with their effects: [[total, probability], ...] (choices excluded). */
 export function rollDistribution(fx) {
-  const faces = fx.hv ? [3, 4, 5, 6] : [1, 2, 3, 4, 5, 6]
-  const n = fx.x ? 2 : 1
+  const faces = []
+  for (let f = fx.hv ? heavyMin() : 1; f <= 6; f++) faces.push(f)
+  let sums = new Map([[0, 1]])
+  for (let k = 0; k < diceCount(fx); k++) {
+    const next = new Map()
+    for (const [t, p] of sums) for (const f of faces) next.set(t + f, (next.get(t + f) || 0) + p / faces.length)
+    sums = next
+  }
   const out = new Map()
-  const add = (t, p) => { const v = fx.sl ? Math.min(3, t) : t; out.set(v, (out.get(v) || 0) + p) }
-  if (n === 1) for (const a of faces) add(a, 1 / faces.length)
-  else for (const a of faces) for (const b of faces) add(a + b, 1 / faces.length / faces.length)
+  for (const [t, p] of sums) { const v = fx.sl ? Math.min(CARD.H1.max, t) : t; out.set(v, (out.get(v) || 0) + p) }
   return [...out]
 }
+const diceCount = fx => (fx.x ? Math.max(1, CARD.D1.dice | 0) : 1)
+const heavyMin = () => Math.max(1, Math.min(6, CARD.D3.min | 0))
+/** The highest value a chosen roll may take (Golden Die, Choose a Face), or 0 for a roll of the dice. */
+export const choiceMax = fx => (fx.gd ? CARD.D4.max : fx.cf ? CARD.D2.max : 0)
 
 /** Where a roll of `total` from `pos` ends, without changing anything: { pos, finished }. */
 export function landing(s, pi, pos, total, els = effectiveElements(s)) {
@@ -440,14 +435,16 @@ export function landing(s, pi, pos, total, els = effectiveElements(s)) {
     if (el[0] === 1) return { pos: el[2], finished: el[2] >= s.n }
     if (p.fx.sh) return { pos: c, finished: false }
     let fall = el[1] - el[2]
-    if (p.fx.pa) fall = Math.floor(fall / 2)
+    if (p.fx.pa) fall = parachute(fall)
     return { pos: c - fall, finished: false }
   }
   const m = markerAt(s, c)
-  if (m && m.k === 'tr') return { pos: Math.min(s.n, c + 3), finished: c + 3 >= s.n }
+  if (m && m.k === 'tr') return { pos: Math.min(s.n, c + CARD.B4.spaces), finished: c + CARD.B4.spaces >= s.n }
   if (m && m.k === 'po') return { pos: m.c[0] === c ? m.c[1] : m.c[0], finished: false }
   return { pos: c, finished: false }
 }
+
+const parachute = fall => Math.max(0, Math.min(fall, Math.floor(fall * CARD.P1.slide)))
 
 /** The best value for a chosen roll (Choose a Face, Golden Die): the one that ends furthest. */
 export function bestChoice(s, pi, max) {
@@ -465,20 +462,21 @@ function rollAndMove(s, pi, value, ev, bonus) {
   const p = s.pl[pi], fx = p.fx
   let dice, chosen = false
   if (fx.gd || fx.cf) {
-    const max = fx.gd ? 6 : 3
+    const max = choiceMax(fx)
     const v = Number.isInteger(value) && value >= 1 && value <= max ? value : bestChoice(s, pi, max)
     dice = [v]; chosen = true
   } else {
-    const n = fx.x ? 2 : 1
+    const n = diceCount(fx), lo = fx.hv ? heavyMin() : 1
     dice = []
-    for (let k = 0; k < n; k++) dice.push(fx.hv ? 3 + rint(s, 4) : 1 + rint(s, 6))
+    for (let k = 0; k < n; k++) dice.push(lo + rint(s, 7 - lo))
   }
   let total = dice.reduce((a, b) => a + b, 0)
-  const slowed = !!fx.sl && total > 3
-  if (fx.sl) total = Math.min(3, total)
+  const slow = CARD.H1.max
+  const slowed = !!fx.sl && total > slow
+  if (fx.sl) total = Math.min(slow, total)
   delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.sl
   ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus })
-  log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + dice.reduce((a, b) => a + b, 0) : ''}${slowed ? ', slowed to 3' : ''}`)
+  log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + dice.reduce((a, b) => a + b, 0) : ''}${slowed ? ', slowed to ' + slow : ''}`)
   // step by step: a swamp on the way stops the move
   const path = []
   let c = p.pos, stopped = false
@@ -516,7 +514,7 @@ function resolveLanding(s, pi, ev) {
     }
     let fall = el[1] - el[2]
     const para = !!p.fx.pa
-    if (para) fall = Math.floor(fall / 2)
+    if (para) fall = parachute(fall)
     p.pos = c - fall
     ev.push({ e: 'snake', p: pi, from: c, to: p.pos, el: idx, tail: el[2], para })
     log(s, ev, `${p.n} slid down a snake from ${c} to ${p.pos}${para ? ' (parachute)' : ''}`)
@@ -524,7 +522,7 @@ function resolveLanding(s, pi, ev) {
   }
   const m = markerAt(s, c)
   if (m && m.k === 'tr') {
-    p.pos = Math.min(s.n, c + 3)
+    p.pos = Math.min(s.n, c + CARD.B4.spaces)
     ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
     log(s, ev, `${p.n} bounced on a trampoline to ${p.pos}`)
     if (p.pos >= s.n) finish(s, pi, ev)
@@ -563,7 +561,7 @@ function quakeElements(s) {
     for (const i of order) {
       for (let end = 1; end <= 2; end++) {
         for (let k = 0; k < 6; k++) {
-          const shift = (1 + rint(s, 2)) * (rnd(s) < 0.5 ? -1 : 1)
+          const shift = (1 + rint(s, Math.max(1, CARD.B6.shift | 0))) * (rnd(s) < 0.5 ? -1 : 1)
           const trial = els.map(e => [...e])
           trial[i][end] += shift
           if (!structuralOk(trial, blocked, s.n)) continue
@@ -590,7 +588,7 @@ function structuralOk(els, blocked, n) {
       used.add(c); perTier[tierOf(c)]++
     }
     const len = Math.abs(to - from)
-    if (len < CFG.minLen || len > bc.maxLen) return false
+    if (len < CFG.minLen || len > bc.maxLen || tierOf(from) === tierOf(to)) return false
     if (type === 1 ? to <= from : to >= from) return false
   }
   return perTier.every(n => n <= CFG.maxEndsPerTier) && !crossingProblems(els)
@@ -721,10 +719,10 @@ function playCard(s, pi, i, tg, ev) {
   const onWho = who ? (target === pi ? ' on themselves' : ` on ${who.n}`) : ''
   log(s, ev, `${p.n} played ${card.name}${onWho}`)
   const setFx = (k, v = 1) => { who.fx[k] = v }
-  const timed = k => { who.fx[k] = { t: CFG.fxTurns, f: target === pi ? 1 : 0 } }
+  const timed = k => { who.fx[k] = { t: card.turns, f: target === pi ? 1 : 0 } }
   switch (cardId) {
-    case 'M1': jump(s, target, who.pos + 2, ev, 'dash'); break
-    case 'M2': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - 3), ev, 'setback'); break
+    case 'M1': jump(s, target, who.pos + card.spaces, ev, 'dash'); break
+    case 'M2': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'setback'); break
     case 'M3': {
       // both land on their new cells: the player who played the card first, then the other
       const a = p.pos
@@ -737,7 +735,7 @@ function playCard(s, pi, i, tg, ev) {
       }
       break
     }
-    case 'M4': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - 10), ev, 'dethrone'); break
+    case 'M4': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
     case 'M5': rollAndMove(s, target, undefined, ev, true); break
     case 'D1': setFx('x'); break
     case 'D2': delete who.fx.gd; setFx('cf'); break
@@ -751,29 +749,29 @@ function playCard(s, pi, i, tg, ev) {
     case 'P3': timed('sh'); break
     case 'B1':
       s.mk = s.mk.filter(m => !(m.k === 'sw' && m.o === pi))
-      s.mk.push({ k: 'sw', c: [target], o: pi, t: CFG.fxTurns, f: 1 })
+      s.mk.push({ k: 'sw', c: [target], o: pi, t: card.turns, f: 1 })
       ev.push(boardEvent(s, 'swamp'))
       break
     case 'B4':
-      s.mk.push({ k: 'tr', c: [target], o: pi, t: CFG.fxTurns, f: 1 })
+      s.mk.push({ k: 'tr', c: [target], o: pi, t: card.turns, f: 1 })
       ev.push(boardEvent(s, 'tramp'))
       break
     case 'B5':
-      s.mk.push({ k: 'po', c: [tg[0], tg[1]], o: pi, t: CFG.fxTurns, f: 1 })
+      s.mk.push({ k: 'po', c: [tg[0], tg[1]], o: pi, t: card.turns, f: 1 })
       ev.push(boardEvent(s, 'portal'))
       break
     case 'B2': case 'B3':
-      s.mods.push({ i: target, o: pi, t: CFG.fxTurns, f: 1 })
+      s.mods.push({ i: target, o: pi, t: card.turns, f: 1 })
       ev.push({ ...boardEvent(s, 'flip'), flip: target })
       break
     case 'B6':
-      s.quake = { o: pi, t: CFG.fxTurns, f: 1, els: quakeElements(s) }
+      s.quake = { o: pi, t: card.turns, f: 1, els: quakeElements(s) }
       ev.push(boardEvent(s, 'quake'))
       break
     case 'C1': {
       const n = p.h.length
       p.h = []
-      const draw = Math.min(CFG.hand, n + 1)
+      const draw = Math.min(CFG.hand, n + card.extra)
       for (let k = 0; k < draw; k++) p.h.push(drawCard(s))
       ev.push({ e: 'redraw', p: pi, n: draw })
       break
@@ -807,7 +805,7 @@ function expectedNext(s, q, els) {
   if (p.fx.sk) return p.pos
   const scoreOf = l => (l.finished ? 115 : l.pos)
   if (p.fx.gd || p.fx.cf) {
-    const max = p.fx.gd ? 6 : 3
+    const max = choiceMax(p.fx)
     let best = 0
     for (let v = 1; v <= max; v++) best = Math.max(best, scoreOf(landing(s, q, p.pos, v, els)))
     return best
@@ -931,8 +929,7 @@ export function botAction(s, pi) {
     return { t: 'disc', i: worst }
   }
   const rollAction = () => {
-    if (p.fx.gd) return { t: 'roll', v: bestChoice(s, pi, 6) }
-    if (p.fx.cf) return { t: 'roll', v: bestChoice(s, pi, 3) }
+    if (p.fx.gd || p.fx.cf) return { t: 'roll', v: bestChoice(s, pi, choiceMax(p.fx)) }
     return { t: 'roll' }
   }
   const canPlay = canPlayCards(s, pi)

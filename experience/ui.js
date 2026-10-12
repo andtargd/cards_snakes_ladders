@@ -2,7 +2,7 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORY, FX, RARITY, targetsFor, whyNot, CFG, SIZES } from './rules.js'
+import { CARD, CARDS, FX, targetsFor, whyNot, choiceMax, CFG, SIZES } from './rules.js'
 import { T } from './strings.js'
 
 const CARD_VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
@@ -168,7 +168,7 @@ export class UI {
   }
   updateTrayFrame(dt) {
     const m = this.trayFrame, un = m.material.uniforms, r = this.trayRect
-    const want = this.promptN && r ? 1 : 0
+    const want = (this.promptN || this.trayMode === 'end') && r ? 1 : 0
     un.opacity.value += (want - un.opacity.value) * (1 - Math.exp(-(want ? 8 : 14) * dt))
     m.visible = un.opacity.value > 0.01 && !!r
     if (!m.visible) return
@@ -284,7 +284,9 @@ export class UI {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     g.clearRect(0, 0, W, H)
     this.hits = []
-    this.trayRect = null
+    this.trayRect = null // the tray on screen
+    this.trayDice = null // where the view draws the dice: the tray, unless it shows End Turn or values to choose
+    this.trayMode = null // 'roll', 'end', 'choose' or 'show'
     const app = this.app
     if (app.screen === 'menu') this.drawMenu()
     else if (app.screen === 'lobby') this.drawLobby()
@@ -598,6 +600,7 @@ export class UI {
       if (valid) this.hits.push({ key: 'pl' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.chooseTarget(i) })
     })
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
+    this.panelBottom = panelBottom
     // status
     let status
     if (s.ph === 'over') status = s.mode === 'champion' ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
@@ -623,50 +626,54 @@ export class UI {
     this.button('zin', '+', rx, zy, cb, cb, () => app.view.zoom(0.8), { size: 20 })
     this.button('zout', '−', rx, zy + cb + 6 * u, cb, cb, () => app.view.zoom(1.25), { size: 20 })
     this.button('zall', '⤢', rx, zy + 2 * (cb + 6 * u), cb, cb, () => app.view.overview(), { size: 18 })
-    // action buttons (the roll is a click on the dice tray)
-    const bw = this.narrow ? 132 * u : 170 * u, bh = 50 * u
-    const bx = W - bw - 12 * u
-    let by = H - bh - 12 * u
+    // the dice tray (the view draws the dice into it): it shows a roll, waits with a gold frame for my click
+    // to roll, offers the values of a chosen roll, and once I have rolled it ends my turn
     const handTop = H - this.handHeight()
-    if (this.narrow) by = handTop - bh - 10 * u
-    if (s.ph !== 'over' && curtain < 0) {
-      const pmy = me >= 0 ? s.pl[me] : null
-      if (this.target) {
-        this.button('cancel', T.cancel, bx, by, bw, bh, () => this.cancelTarget(), { size: 18 })
-      } else if (myTurn && s.ph === 'disc') {
-        // a click on a card discards it
-      } else if (myTurn) {
-        if (!s.rolled) {
-          const choose = pmy.fx.gd ? 6 : pmy.fx.cf ? 3 : 0
-          if (choose) {
-            const n = choose, w = Math.min((W - 24 * u) / n - 6 * u, 54 * u)
-            const total = n * (w + 6 * u)
-            const x0 = this.narrow ? W - total - 8 * u : bx + bw - total
-            this.text(T.chooseValue, x0 + total / 2, by - 16 * u, { size: 14, align: 'center' })
-            for (let v = 1; v <= n; v++) this.button('v' + v, String(v), x0 + (v - 1) * (w + 6 * u), by, w, bh, () => app.act({ t: 'roll', v }), { primary: true, disabled: busy, color: pmy.fx.gd ? '#c99400' : '#7b5ce0', size: 20 })
-          }
-        } else this.button('end', T.endTurn, bx, by, bw, bh, () => app.act({ t: 'end' }), { primary: true, color: '#2d3a6b', disabled: busy, size: 18 })
-      }
-    }
-    // the dice tray (the view draws the dice into it): it shows a roll, or waits for my click with a gold frame
-    const tw = this.narrow ? THREE.MathUtils.clamp(W * 0.47, 150, 240) : 236 * u, th = tw * 0.66
-    const tx = this.narrow ? 14 : W - tw - 12 * u
-    const ty = this.narrow ? handTop - th - 12 * u : by - th - 36 * u
+    const { x: tx, y: ty, w: tw, h: th } = this.trayBox()
+    const pmy = me >= 0 ? s.pl[me] : null
+    const ready = myTurn && s.ph === 'main' && curtain < 0 && !busy && !app.menuOpen && !app.invite
+    const choose = ready && !s.rolled && !this.target ? choiceMax(pmy.fx) : 0
     const prompt = this.promptN > 0 && s.cur === me
+    this.trayMode = prompt ? 'roll' : ready && s.rolled ? 'end' : choose ? 'choose' : app.view.trayVisible > 0 ? 'show' : null
     this.trayTop = null
-    if (app.view.trayVisible > 0 || prompt) {
-      this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: prompt ? '#dcebfa' : 'rgba(127,178,240,0.9)', stroke: prompt ? null : undefined, r: 12 })
+    if (this.trayMode) {
+      const g = this.g, mode = this.trayMode
+      this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: '#fffdf8', stroke: mode === 'roll' || mode === 'end' ? null : undefined, r: 12 })
       this.trayRect = { x: tx, y: ty, w: tw, h: th }
+      if (mode === 'roll' || mode === 'show') this.trayDice = this.trayRect
+      const k = tw / (354 * u) // the tray's size against the desktop one
       // labels go under the tray, or over it on a phone where the hand is under it
       const ly = this.narrow ? ty - 22 * u : ty + th + 18 * u
-      if (prompt) {
-        const label = this.narrow ? T.tapToRoll : T.clickToRoll
+      const pill = label => {
         const lw = this.measure(label, 14) + 30 * u
         this.panel(tx + tw / 2 - lw / 2, ly - 13 * u, lw, 26 * u, { fill: '#2d3a6b', stroke: null, r: 13 })
         this.text(label, tx + tw / 2, ly + 1, { size: 14, align: 'center', color: '#ffffff' })
-        this.hits.push({ key: 'tray', x: tx - 10 * u, y: ty - 10 * u, w: tw + 20 * u, h: th + 20 * u, action: () => { if (this.target) this.cancelTarget(); app.act({ t: 'roll' }) } })
+      }
+      const hit = action => this.hits.push({ key: 'tray', x: tx - 10 * u, y: ty - 10 * u, w: tw + 20 * u, h: th + 20 * u, action })
+      if (mode === 'roll') {
+        pill(this.narrow ? T.tapToRoll : T.clickToRoll)
+        hit(() => { if (this.target) this.cancelTarget(); app.act({ t: 'roll' }) })
+      } else if (mode === 'end') {
+        // no dice: the paper itself says End Turn, glowing
+        g.save()
+        g.shadowColor = 'rgba(255,184,40,0.95)'; g.shadowBlur = 22 * u * k
+        const lift = this.hover === 'tray' ? 2 * u : 0
+        for (let i = 0; i < 2; i++) this.text(T.endTurn, tx + tw / 2, ty + th / 2 - lift, { size: 40 * k, align: 'center', color: '#2d3a6b', max: tw - 24 * u })
+        g.restore()
+        if (!this.narrow) pill(T.clickToEnd)
+        hit(() => { if (this.target) this.cancelTarget(); app.act({ t: 'end' }) })
+      } else if (mode === 'choose') {
+        this.text(T.chooseValue, tx + tw / 2, ty + th * 0.24, { size: 20 * k, align: 'center', color: '#2d3a6b' })
+        const n = choose, gap = 6 * u, w = Math.min((tw - 16 * u) / n - gap, 64 * u * k), bh = Math.min(th * 0.44, 62 * u * k)
+        const x0 = tx + (tw - n * (w + gap) + gap) / 2
+        for (let v = 1; v <= n; v++) this.button('v' + v, String(v), x0 + (v - 1) * (w + gap), ty + th * 0.42, w, bh, () => app.act({ t: 'roll', v }), { primary: true, color: pmy.fx.gd ? '#c99400' : '#7b5ce0', size: 24 * k })
       } else if (app.view.trayLabel) this.text(app.view.trayLabel, tx + tw / 2, ly, { size: 16, align: 'center' })
       this.trayTop = this.narrow ? ly - 16 * u : ty - 6 * u
+    }
+    // Cancel while a card waits for its target: over the tray, or by the hand on a phone
+    if (s.ph !== 'over' && curtain < 0 && this.target) {
+      const bw = this.narrow ? 132 * u : 170 * u, bh = 50 * u
+      this.button('cancel', T.cancel, W - bw - 12 * u, this.narrow ? handTop - bh - 10 * u : ty - bh - 36 * u, bw, bh, () => this.cancelTarget(), { size: 18 })
     }
     // log
     this.drawLog()
@@ -756,7 +763,24 @@ export class UI {
 
   measure(t, size) { this.g.font = this.font(size * this.u); return this.g.measureText(t).width }
   handHeight() { return this.cardW() * 1.4 * 0.86 + 14 * this.u }
-  cardW() { return this.narrow ? Math.min(150, (this.W - 16) / 2.55) : 150 * this.u }
+  cardW() { return this.narrow ? Math.min(225, (this.W - 16) / 2.55, this.H * 0.26) : 225 * this.u }
+  /** The dice tray: bottom right beside the hand, or on a phone at the left over it. */
+  trayBox() {
+    const u = this.u, W = this.W, H = this.H
+    const w = this.narrow ? THREE.MathUtils.clamp(W * 0.62, 225, 360) : 354 * u, h = w * 0.66
+    return { x: this.narrow ? 14 : W - w - 12 * u, y: this.narrow ? H - this.handHeight() - h - 12 * u : H - h - 46 * u, w, h }
+  }
+  /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
+  handLayout(n) {
+    const u = this.u, cw = this.cardW()
+    const left = this.narrow ? 4 : 10 * u, right = this.narrow ? this.W - 4 : this.trayBox().x - 16 * u
+    let gap = cw * (this.narrow ? 0.76 : 0.92)
+    const room = right - left
+    if (n > 1 && gap * (n - 1) + cw > room) gap = Math.max(cw * 0.3, (room - cw) / (n - 1))
+    const span = gap * Math.max(0, n - 1) + cw
+    const cx = span >= room ? (left + right) / 2 : THREE.MathUtils.clamp(this.W / 2, left + span / 2, right - span / 2)
+    return { cx, gap, left: cx - span / 2, right: cx + span / 2 }
+  }
 
   drawLog() {
     const u = this.u, H = this.H
@@ -768,8 +792,17 @@ export class UI {
     }
     const w = this.narrow ? this.W - 20 * u : 330 * u
     const lh = 19 * u
+    const x = 10 * u
+    // at the bottom left, or over the hand when the hand reaches there
+    const hand = this.cards.filter(c => c.kind === 'hand').length
+    const over = !this.narrow && hand && this.handLayout(hand).left < x + w + 8 * u
+    if (over) {
+      const fit = Math.floor((H - this.handHeight() - 8 * u - (this.panelBottom || 0) - 10 * u - 16 * u) / lh)
+      if (fit < 1) return
+      lines.splice(0, Math.max(0, lines.length - fit))
+    }
     const h = lines.length * lh + 16 * u
-    const x = 10 * u, y = this.narrow ? 120 * u : H - h - 12 * u
+    const y = this.narrow ? 120 * u : over ? H - this.handHeight() - h - 8 * u : H - h - 12 * u
     this.panel(x, y, w, h, { fill: 'rgba(255,255,255,0.82)', r: 10 })
     lines.forEach((l, i) => this.text(l, x + 10 * u, y + 8 * u + lh * (i + 0.5), { size: 12.5, bold: false, max: w - 20 * u, color: i === lines.length - 1 ? P.INK : '#4b453e' }))
     this.hits.push({ key: 'logtoggle', x, y, w, h, action: () => { this.logOpen = !this.logOpen; this.dirty = true } })
@@ -842,9 +875,9 @@ export class UI {
     const hand = this.cards.filter(c => c.kind === 'hand')
     const n = hand.length
     const myTurn = s && me >= 0 && s.cur === me && s.ph !== 'over'
+    const { cx, gap } = this.handLayout(n)
     hand.forEach((c, k) => {
-      const gap = cw * (this.narrow ? 0.76 : 0.92)
-      const x = W / 2 + (k - (n - 1) / 2) * gap
+      const x = cx + (k - (n - 1) / 2) * gap
       const hov = this.hover === 'card' + c.i
       const sel = this.selected === c.i
       const lift = sel ? 0.5 : hov ? 0.32 : 0

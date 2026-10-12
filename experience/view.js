@@ -110,20 +110,17 @@ export class View {
     this.confetti.count = 0
     this.root.add(this.confetti)
     this.popups = []
-    // the dice tray: its own little scene, drawn in a corner of the screen
+    // the dice tray: its own little scene, drawn in a corner of the screen: the dice on white paper, nothing else
     this.tray = new THREE.Scene()
-    this.tray.background = new THREE.Color('#dcebfa')
+    this.tray.background = new THREE.Color('#fbf9f4')
     this.tray.add(new THREE.HemisphereLight(0xffffff, 0x9a9a96, 2.2))
     const tl = new THREE.DirectionalLight(0xffffff, 1.2); tl.position.set(-2, 6, 3); this.tray.add(tl)
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 2.2), new THREE.MeshStandardMaterial({ color: '#f6fbff', map: this.fibre, roughness: 0.95 }))
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(9, 0.1, 7), new THREE.MeshStandardMaterial({ color: '#ffffff', map: this.fibre, roughness: 0.95 }))
     pad.position.y = -0.05
     this.tray.add(pad)
-    const rim = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.08, 2.5), new THREE.MeshStandardMaterial({ color: '#7fb2f0', roughness: 0.95 }))
-    rim.position.y = -0.1
-    this.tray.add(rim)
     this.trayDice = [0, 1].map(() => { const m = new THREE.Mesh(this.dieGeo, this.mat.dice); m.visible = false; this.tray.add(m); return m })
     this.trayCam = new THREE.PerspectiveCamera(35, 1.4, 0.1, 50)
-    this.trayCam.position.set(0, 2.5, 1.55)
+    this.trayCam.position.set(0, 2.155, 1.31) // 15% closer than (0, 2.5, 1.55), so the dice fill more of it
     this.trayCam.lookAt(0, 0.2, -0.05)
     this.trayVisible = 0
     this.trayLabel = ''
