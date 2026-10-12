@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#08090a">
+<meta name="description" content="A monumental diorama: a giant lidded glass canning jar of emerald water with a floating brain and its two eyeballs, 12 × 12 m and 19 m tall.">
+<title>Mind in a Jar</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='14' y='10' width='36' height='8' rx='2' fill='%2390b8a8'/%3E%3Crect x='10' y='18' width='44' height='40' rx='8' fill='%2318a066' stroke='%23b8dccc' stroke-width='3'/%3E%3Cellipse cx='32' cy='36' rx='12' ry='9' fill='%23e7b2b6'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Special+Elite&family=Stardos+Stencil:wght@700&display=swap" rel="stylesheet">
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.186.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
+} }
+</script>
+<style>
+  :root {
+    --bg: #08090a; --panel: rgba(16, 19, 20, 0.78); --ink: #e9eeec; --muted: #8e9a96; --line: rgba(255,255,255,.12);
+    --emerald: #2fcf8a; --emerald-deep: #0f7a4f; --chip: rgba(255,255,255,.06);
+  }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font: 500 14px/1.45 Inter, system-ui, sans-serif; overscroll-behavior: none; }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+  #loading { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 0 16px; background: var(--bg); text-align: center; transition: opacity .8s; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading h2 { margin: 0; font: italic 400 40px 'Instrument Serif', Georgia, serif; color: var(--ink); letter-spacing: .01em; }
+  #label { color: var(--muted); }
+  #loading.error #label { color: #ff7a7a; }
+  .jar { width: 34px; height: 44px; border: 2px solid rgba(190,230,215,.55); border-radius: 6px 6px 9px 9px; position: relative; overflow: hidden; }
+  .jar::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 30%; background: var(--emerald-deep); animation: fill 1.8s ease-in-out infinite alternate; }
+  @keyframes fill { to { height: 78%; background: var(--emerald); } }
+  @media (prefers-reduced-motion: reduce) { .jar::after { animation: none; height: 70%; } }
+
+  #panel { position: fixed; top: 16px; left: 16px; z-index: 2; width: 300px; max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); box-sizing: border-box; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  #panel header { display: flex; align-items: flex-start; gap: 8px; padding: 14px 12px 8px 16px; }
+  #panel h1 { flex: 1; margin: 0; font: italic 400 30px/1.05 'Instrument Serif', Georgia, serif; }
+  #panel h1 small { display: block; margin-top: 5px; font: 500 12px Inter, sans-serif; color: var(--muted); letter-spacing: .02em; }
+  #b-panel { flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 16px; cursor: pointer; transition: transform .2s, background .15s; }
+  #b-panel:hover { background: var(--chip); }
+  #panel.collapsed #b-panel { transform: rotate(180deg); }
+  #panel.collapsed .body { display: none; }
+  .body { padding: 0 16px 14px; }
+  .body p { margin: 0 0 6px; color: var(--muted); }
+  h3 { margin: 14px 0 7px; font: 600 10.5px Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; }
+  .row button { min-height: 30px; padding: 0 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--chip); color: var(--ink); font-weight: 500; font-size: 12.5px; cursor: pointer; transition: background .15s, border-color .15s, transform .08s; }
+  .row button:hover { border-color: rgba(255,255,255,.3); }
+  .row button:active { transform: translateY(1px); }
+  .row button:focus-visible, #b-panel:focus-visible { outline: 2px solid var(--emerald); outline-offset: 2px; }
+  .row button[aria-pressed="true"] { background: rgba(47,207,138,.18); border-color: var(--emerald); color: #c9f5e1; }
+  .row button.act { background: var(--emerald-deep); border-color: var(--emerald-deep); color: #fff; }
+  .row button.act:hover { background: #13915e; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+  dt { color: var(--muted); }
+  dd { margin: 0; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  #hint { position: fixed; right: 16px; bottom: 14px; z-index: 1; padding: 6px 12px; border-radius: 999px; background: rgba(16,19,20,.6); color: var(--muted); font-size: 12px; pointer-events: none; }
+  @media (max-width: 640px) {
+    #panel { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-width: none; max-height: 48vh; }
+    #panel h1 { font-size: 25px; }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0" aria-label="3D view of the jar diorama: drag to orbit, scroll to zoom"></canvas>
+
+<aside id="panel">
+  <header>
+    <h1>Mind in a Jar <small>Monumental diorama · 12 × 12 × 19 m</small></h1>
+    <button id="b-panel" type="button" aria-expanded="true" aria-controls="panel-body" title="Hide or show the panel">▾</button>
+  </header>
+  <div class="body" id="panel-body">
+    <p>A giant lidded canning jar of clear emerald water. A vinyl-smooth brain bobs inside with its two eyes tucked beneath it, among rising bubbles, under a key light that throws shafts and caustics through the water.</p>
+
+    <h3>Camera</h3>
+    <div class="row" id="cams"></div>
+
+    <h3>View</h3>
+    <div class="row">
+      <button type="button" id="t-anim">Motion</button>
+      <button type="button" id="t-spin">Turntable</button>
+      <button type="button" id="t-rays">Light rays</button>
+    </div>
+
+    <h3>Save</h3>
+    <div class="row"><button type="button" class="act" id="b-shot">Snapshot PNG</button></div>
+
+    <h3>Measured</h3>
+    <dl>
+      <dt>Footprint</dt><dd id="m-foot">–</dd>
+      <dt>Height</dt><dd id="m-height">–</dd>
+      <dt>Jar</dt><dd id="m-jar">–</dd>
+      <dt>Water</dt><dd id="m-water">–</dd>
+      <dt>Triangles</dt><dd id="m-tris">–</dd>
+    </dl>
+  </div>
+</aside>
+<div id="hint">Drag to orbit · scroll to zoom · right-drag to pan</div>
+
+<div id="loading">
+  <div class="jar" aria-hidden="true"></div>
+  <h2>Mind in a Jar</h2>
+  <div id="label">Loading…</div>
+</div>
+<script type="module" src="./jar.js"></script>
+</body>
+</html>

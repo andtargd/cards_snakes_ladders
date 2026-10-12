@@ -1,0 +1,26 @@
+{
+  "script": "build.js",
+  "materials": {
+    "Glass": {
+      "vertex": "glass_v.glsl",
+      "surface": "glass.glsl",
+      "transparent": true,
+      "textures": {
+        "causticMap": "caustic.png"
+      },
+      "glow": 0
+    },
+    "Specimen": {
+      "vertex": "specimens_v.glsl",
+      "surface": "specimens.glsl",
+      "textures": {
+        "causticMap": "caustic.png"
+      },
+      "glow": 0
+    },
+    "Lid": {
+      "surface": "lid.glsl",
+      "glow": 0
+    }
+  }
+}
