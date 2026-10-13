@@ -229,6 +229,7 @@ export class UI {
     const sw = sub ? g.measureText(sub).width : 0
     const w = Math.min(1012, Math.max(tw, sw) + 110), h = sub ? 152 : 106
     const x = (1024 - w) / 2, y = (224 - h) / 2
+    b.w = w; b.h = h
     g.fillStyle = 'rgba(45,58,107,0.78)'
     P.roundRect(g, x, y, w, h, sub ? 34 : h / 2); g.fill()
     g.strokeStyle = 'rgba(255,255,255,0.4)'; g.lineWidth = 3; g.stroke()
@@ -261,9 +262,17 @@ export class UI {
     const k = this.u * 32 / 64 // the 64 px letters show about 32 px tall
     const sc = 1024 * k * (0.9 + 0.1 * (1 - Math.pow(1 - b.pop, 3))) * (this.target || discard ? 1 + 0.012 * Math.sin(this.time * 3) : 1)
     b.mesh.scale.set(sc, sc, 1)
-    b.mesh.position.set(this.W / 2, this.H * 0.64, 1)
+    // at the top, under the status and beside the players, so the board and its pieces stay clear to click
+    const half = (b.w || 600) / 2 * k, left = this.gameLeft || 0, right = this.W - 60 * this.u
+    const cx = left + half <= right - half ? THREE.MathUtils.clamp(this.W / 2, left + half, right - half) : (left + right) / 2
+    b.mesh.position.set(cx, this.H - this.bannerTop() - (b.h || 106) / 2 * k, 1)
     b.mesh.material.opacity = b.op * 0.95
     b.mesh.visible = b.op > 0.01
+  }
+  /** Where the messages at the top of the game screen start (CSS px from the top): under the status. */
+  bannerTop() {
+    const u = this.u
+    return this.narrow ? (this.panelBottom || 0) + 50 * u : 72 * u
   }
 
   // ---------- drawing helpers ----------
@@ -330,8 +339,10 @@ export class UI {
       const t = this.toast
       g.font = this.font(16 * this.u)
       const w = g.measureText(t.text).width + 40 * this.u
-      this.panel((W - w) / 2, H * 0.42, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
-      this.text(t.text, W / 2, H * 0.42 + 20 * this.u, { color: '#ffffff', align: 'center' })
+      // in a game it stands at the top, under the message there, clear of the board
+      const ty = app.screen === 'game' ? this.bannerTop() + (this.banner.op > 0.05 ? 84 : 4) * this.u : H * 0.42
+      this.panel((W - w) / 2, ty, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
+      this.text(t.text, W / 2, ty + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
     const used = this.modal || !!this.toast || !!this.peekRect
     if (used || ov.used) ov.tex.needsUpdate = true
@@ -856,6 +867,7 @@ export class UI {
     })
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
     this.panelBottom = panelBottom
+    this.gameLeft = this.narrow ? 0 : px + pw + 10 * u // the messages at the top keep clear of the players
     // status
     let status
     if (s.ph === 'over') status = s.mode === 'champion' ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)

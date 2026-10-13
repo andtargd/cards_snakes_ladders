@@ -11,6 +11,7 @@ const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 const easeOut = t => 1 - Math.pow(1 - t, 3)
 const TILT = 22 * Math.PI / 180
 const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
+const RING_ORDER = 50 // the rings under the pieces go after the other opaque things, the pieces after the rings
 // events that move a piece: who moved
 const MOVER = { move: e => e.p, ladder: e => e.p, snake: e => e.p, tramp: e => e.p, jump: e => e.p, portal: e => e.p, swap: e => e.a }
 
@@ -77,6 +78,7 @@ export class View {
       new THREE.Mesh(arrowRim, new THREE.MeshStandardMaterial({ color: '#1b5e20', roughness: 0.6 })),
       new THREE.Mesh(face, new THREE.MeshStandardMaterial({ color: '#43c759', roughness: 0.45, emissive: new THREE.Color('#2e9e44'), emissiveIntensity: 0.3 })),
     )
+    for (const m of this.pointerArrow.children) m.renderOrder = RING_ORDER + 1
     this.pointer.add(this.pointerArrow)
     this.pointer.visible = false
     this.pointerFor = null
@@ -223,8 +225,15 @@ export class View {
       const pivot = new THREE.Group()
       group.add(pivot)
       const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.35 }))
+      body.renderOrder = RING_ORDER + 1
       pivot.add(body)
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.31, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.0, depthWrite: false }))
+      // the ring under a piece: blended, but drawn with the opaque things after all of them, so that lit for a
+      // choice it shows through the cut-outs in front (no depth test) while its own piece, drawn after it, covers it
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.24, 0.31, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({
+        color: '#ffffff', opacity: 0.0, depthWrite: false,
+        blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      }))
+      ring.renderOrder = RING_ORDER
       ring.position.y = 0.012
       group.add(ring)
       const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.2, 20).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.18, depthWrite: false }))
@@ -257,7 +266,7 @@ export class View {
       const k = 0.62 / h
       model.scale.setScalar(k)
       model.position.y = -box.min.y * k
-      model.traverse(o => { if (o.isMesh) o.frustumCulled = false })
+      model.traverse(o => { if (o.isMesh) { o.frustumCulled = false; o.renderOrder = RING_ORDER + 1 } })
       const mixer = new THREE.AnimationMixer(model)
       const idleClip = THREE.AnimationClip.findByName(gltf.animations, 'idle')
       const flyClip = THREE.AnimationClip.findByName(gltf.animations, 'fly')
@@ -697,6 +706,7 @@ export class View {
       t.ring.material.opacity = chosen ? 0.95 : valid ? 0.55 + Math.sin(this.time * 6) * 0.3 : active ? 0.55 : 0
       t.ring.material.color.set(chosen ? '#2ecc40' : valid ? '#8fe39a' : t.color)
       t.ring.scale.setScalar(chosen ? 1.25 + Math.sin(this.time * 8) * 0.06 : 1)
+      t.ring.material.depthTest = !(chosen || valid) // lit for a choice it shows through whatever stands in front
       // face where the piece goes; standing, turn back to the camera
       const dx = t.group.position.x - t.prev.x, dz = t.group.position.z - t.prev.z
       t.prev.copy(t.group.position)
@@ -717,9 +727,17 @@ export class View {
     const pt = this.pointerFor != null ? this.tokens[this.pointerFor] : null
     this.pointer.visible = !!pt && pt.group.visible && (this.pointerUntil === Infinity || this.time < this.pointerUntil)
     if (this.pointer.visible) {
-      this.pointer.position.copy(pt.group.position).add(new THREE.Vector3(0, 1.25 + Math.abs(Math.sin(this.time * 5)) * 0.16, 0))
-      // face the camera, leaning towards it so the arrow reads from above
-      this.pointer.quaternion.copy(this.p0.camera.quaternion)
+      // upright on the screen and exactly over the piece there: straight up in the world leans aside in
+      // perspective towards the edges of the screen, so the arrow takes the screen height of the point h over
+      // the piece, the piece's own screen x, and goes along that view ray to the height h over the board
+      const cam = this.p0.camera, feet = pt.group.position
+      const h = 1.25 + Math.abs(Math.sin(this.time * 5)) * 0.16
+      const f = feet.clone().project(cam), o = feet.clone().add(new THREE.Vector3(0, h, 0)).project(cam)
+      const dir = new THREE.Vector3(f.x, o.y, o.z).unproject(cam).sub(cam.position)
+      const t = dir.y < -1e-4 ? (feet.y + h - cam.position.y) / dir.y : -1
+      if (t > 0) this.pointer.position.copy(cam.position).addScaledVector(dir, t)
+      else this.pointer.position.copy(feet).y += h
+      this.pointer.quaternion.copy(cam.quaternion)
     }
     // highlights pulse
     this.mat.frame.opacity = 0.8 + Math.sin(this.time * 5) * 0.2

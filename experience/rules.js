@@ -430,18 +430,26 @@ export function landing(s, pi, pos, total, els = effectiveElements(s)) {
     if (!p.fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
   }
   if (stopped) return { pos: c, finished: false }
-  const el = els.find(e => e[1] === c)
-  if (el) {
-    if (el[0] === 1) return { pos: el[2], finished: el[2] >= s.n }
-    if (p.fx.sh) return { pos: c, finished: false }
-    let fall = el[1] - el[2]
-    if (p.fx.pa) fall = parachute(fall)
-    return { pos: c - fall, finished: false }
+  // the cell takes effect; a trampoline throws the piece on, and the cell it lands on takes effect in turn
+  const settle = (c, bounced) => {
+    if (bounced && !p.fx.bo && markerAt(s, c, 'sw')) return { pos: c, finished: false }
+    const el = els.find(e => e[1] === c)
+    if (el) {
+      if (el[0] === 1) return { pos: el[2], finished: el[2] >= s.n }
+      if (p.fx.sh) return { pos: c, finished: false }
+      let fall = el[1] - el[2]
+      if (p.fx.pa) fall = parachute(fall)
+      return { pos: c - fall, finished: false }
+    }
+    const m = markerAt(s, c)
+    if (m && m.k === 'tr') {
+      const to = c + CARD.B4.spaces
+      return to >= s.n ? { pos: s.n, finished: true } : settle(to, true)
+    }
+    if (m && m.k === 'po') return { pos: m.c[0] === c ? m.c[1] : m.c[0], finished: false }
+    return { pos: c, finished: false }
   }
-  const m = markerAt(s, c)
-  if (m && m.k === 'tr') return { pos: Math.min(s.n, c + CARD.B4.spaces), finished: c + CARD.B4.spaces >= s.n }
-  if (m && m.k === 'po') return { pos: m.c[0] === c ? m.c[1] : m.c[0], finished: false }
-  return { pos: c, finished: false }
+  return settle(c, false)
 }
 
 const parachute = fall => Math.max(0, Math.min(fall, Math.floor(fall * CARD.P1.slide)))
@@ -493,6 +501,7 @@ function rollAndMove(s, pi, value, ev, bonus) {
   resolveLanding(s, pi, ev)
 }
 
+/** The cell a piece stops on takes effect: a ladder, a snake, a trampoline or a portal. */
 function resolveLanding(s, pi, ev) {
   const p = s.pl[pi], c = p.pos
   const els = effectiveElements(s)
@@ -525,7 +534,10 @@ function resolveLanding(s, pi, ev) {
     p.pos = Math.min(s.n, c + CARD.B4.spaces)
     ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
     log(s, ev, `${p.n} bounced on a trampoline to ${p.pos}`)
-    if (p.pos >= s.n) finish(s, pi, ev)
+    if (p.pos >= s.n) { finish(s, pi, ev); return }
+    // the cell it throws the piece onto takes effect too (always further on, so the chain ends)
+    if (!p.fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+    resolveLanding(s, pi, ev)
     return
   }
   if (m && m.k === 'po') {
@@ -598,6 +610,7 @@ function structuralOk(els, blocked, n) {
 /** Every target a card can be played on now: player indices, cells, [cell, cell] or element indices. */
 export function targetsFor(s, pi, cardId) {
   const card = CARD[cardId]
+  if (cardId === 'M3' && s.rolled) return [] // Swap Places takes the place of the roll
   const live = onBoard(s)
   switch (card.tgt) {
     case 'any': return live
@@ -643,6 +656,7 @@ export function whyNot(s, pi, cardId) {
   if (s.ph === 'disc') return 'Choose a card to discard'
   if (s.frozen) return "You can't play cards this turn"
   if (s.played) return 'One card per turn'
+  if (cardId === 'M3' && s.rolled) return 'Only instead of the roll'
   if (!targetsFor(s, pi, cardId).length) return 'No valid targets'
   return null
 }
@@ -725,6 +739,8 @@ function playCard(s, pi, i, tg, ev) {
     case 'M2': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'setback'); break
     case 'M3': {
       // both land on their new cells: the player who played the card first, then the other
+      // it takes the place of this turn's roll
+      s.rolled = true
       const a = p.pos
       p.pos = who.pos; who.pos = a
       ev.push({ e: 'swap', a: pi, b: target })
@@ -894,6 +910,8 @@ function evaluateOption(s, pi, i, tg, level) {
   c.rolled = false // judge the board as it stands, without ending the turn in the copy
   const r = apply(c, pi, { t: 'play', i, tg })
   if (!r.ok) return -99
+  // Swap Places gives up this turn's roll
+  if (cardId === 'M3') return utility(c, pi) - before + 0.6 * CARD_VALUE[CARD[cardId].rar] - (expectedNext(s, pi, effectiveElements(s)) - s.pl[pi].pos)
   // a portal back up to where I stand insures against a snake later
   if (cardId === 'B5') return utility(c, pi) - before + 0.6 * CARD_VALUE.R + 0.07 * Math.abs(tg[1] - tg[0])
   // the card itself leaves the hand; do not count that as a loss
@@ -953,7 +971,7 @@ export function botAction(s, pi) {
   if (!s.rolled) {
     if (canPlay) {
       // cards that shape this turn's roll go before it
-      const o = bestOption(s, pi, level, c => ROLL_CARDS.has(c))
+      const o = bestOption(s, pi, level, c => ROLL_CARDS.has(c) || c === 'M3')
       if (o && o.gain > threshold && !hold(o) && (CARD[o.card].tgt !== 'any' || o.tg === pi)) return { t: 'play', i: o.i, tg: o.tg }
     }
     return rollAction()

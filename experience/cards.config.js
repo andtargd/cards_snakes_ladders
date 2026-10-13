@@ -43,7 +43,7 @@ export default {
     },
     M3: {
       name: 'Swap Places', rarity: 'R', weight: 1, enabled: true,
-      text: 'Swap places with another player.',
+      text: 'Instead of rolling, swap places with another player.',
     },
     M4: {
       name: 'Dethrone', rarity: 'L', weight: 1, enabled: true,
