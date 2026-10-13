@@ -76,6 +76,10 @@ export default {
       max: 6, // the player picks a value from 1 to this
       text: 'A player picks any value from 1 to {max} instead of rolling.',
     },
+    D5: {
+      name: 'Choose Your Roll', rarity: 'U', weight: 1, enabled: true,
+      text: "A player's next roll uses 2 dice: they move by the one they pick.",
+    },
 
     // ---------- Board ----------
     B1: {
@@ -125,6 +129,10 @@ export default {
       name: 'Skip Turn', rarity: 'R', weight: 1, enabled: true,
       text: 'A player skips their next turn.',
     },
+    H4: {
+      name: 'Going Backwards', rarity: 'R', weight: 1, enabled: true,
+      text: "A player's next roll moves them back instead of forward (never past cell 1).",
+    },
 
     // ---------- Protection ----------
     P1: {
@@ -161,6 +169,11 @@ export default {
     C4: {
       name: 'Swap Hands', rarity: 'R', weight: 1, enabled: true,
       text: 'Swap hands with another player.',
+    },
+    C5: {
+      name: 'Choose Your Card', rarity: 'U', weight: 1, enabled: true,
+      draw: 3, // cards offered at the start of the next turn (1 to 5); the player keeps one
+      text: 'On your next turn draw {draw} cards instead of one and keep the one you choose.',
     },
   },
 }

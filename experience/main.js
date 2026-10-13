@@ -205,8 +205,8 @@ class SharedTable {
       return
     }
     if (this.turnStart > TURN_SECONDS) {
-      // out of time: discard the card just drawn, roll if not rolled, then end the turn
-      const a = s.ph === 'disc' ? { t: 'disc', i: p.h.length - 1 } : !s.rolled ? { t: 'roll' } : { t: 'end' }
+      // out of time: discard the card just drawn, take a card or a die as a bot would, roll if not rolled, then end the turn
+      const a = s.ph === 'disc' ? { t: 'disc', i: p.h.length - 1 } : s.ph === 'pick' || s.ph === 'take' ? R.botAction(s, s.cur) : !s.rolled ? { t: 'roll' } : { t: 'end' }
       const r = R.apply(s, s.cur, a)
       if (r.ok) this.publish(r.ev)
       this.turnStart = TURN_SECONDS - 2
@@ -245,6 +245,7 @@ class App {
     this.invSent = new Map() // id -> when I last invited them
     const v = this.view
     v.on('draw', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.4); this.ui.dirty = true })
+    v.on('offer', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.5); this.ui.dirty = true })
     for (const name of ['turn', 'mustdisc', 'roll', 'redraw', 'steal', 'swaphands', 'peek', 'settled']) v.on(name, () => { this.ui.dirty = true })
     v.on('discard', e => { this.ui.burnDiscard(e); this.ui.dirty = true })
     v.on('log', text => this.ui.log(text))
@@ -599,6 +600,7 @@ export default async function start(p0) {
     const mine = s && me >= 0 && s.cur === me && s.ph === 'main'
     if (e.code === 'Space' && mine && !s.rolled && !R.choiceMax(s.pl[me].fx)) app.act({ t: 'roll' })
     else if (e.code === 'Space' && mine && s.rolled && !app.view.busy && !app.menuOpen) { if (app.ui.target) app.ui.cancelTarget(); app.act({ t: 'end' }) }
+    else if (/^Digit[1-5]$/.test(e.code) && s && me >= 0 && s.cur === me && (s.ph === 'pick' || s.ph === 'take')) app.ui.choose(s.ph, +e.code.slice(5) - 1)
     else if (/^Digit[1-4]$/.test(e.code) && s && me >= 0) { const c = app.ui.cards.find(k => k.kind === 'hand' && k.i === +e.code.slice(5) - 1); if (c) app.ui.cardClicked(c) }
     else if (e.code === 'Escape' && app.ui.target) app.ui.cancelTarget()
     else if (e.code === 'Escape') app.ui.closePeek()

@@ -9,6 +9,11 @@ import { effectiveElements, FX, CFG, CARD } from './rules.js'
 const SLOTS = [[0, 0], [-0.24, -0.2], [0.24, -0.2], [-0.24, 0.22], [0.24, 0.22], [0, -0.38]]
 const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
 const easeOut = t => 1 - Math.pow(1 - t, 3)
+/** What the tray says under a roll: the sum of two dice, a total cut by Slow Down, a move backwards. */
+const rollLabel = (raw, total, sum, slowed, back) => {
+  const t = slowed ? `${raw} → ${total}` : sum ? `= ${total}` : ''
+  return back ? `${t ? t + ' ' : ''}← back` : t
+}
 const TILT = 22 * Math.PI / 180
 const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
 const RING_ORDER = 50 // the rings under the pieces go after the other opaque things, the pieces after the rings
@@ -129,6 +134,7 @@ export class View {
     this.trayVisible = 0
     this.trayLabel = ''
     this.trayPrompt = 0 // dice waiting in the tray for my click (the screen layer sets it every frame)
+    this.trayPick = null // while I pick one of two dice: the one under the pointer (0, 1) or -1 (the screen layer sets it)
     this.trayRolling = false
   }
 
@@ -373,7 +379,9 @@ export class View {
       case 'discard': this.tasks.push({ dur: 0.5, start: () => this.emit('discard', e) }); break
       case 'mustdisc': this.tasks.push({ dur: 0, start: () => this.emit('mustdisc', e) }); break
       case 'play': this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); if (typeof e.tg === 'number' && ['any', 'other', 'leader'].includes(CARD[e.card].tgt)) { this.focusOn(e.tg); this.pointAt(e.tg, 1.6); this.sfx('target', 0.5) } } }); break
-      case 'roll': this.queueRoll(e); break
+      case 'roll': this.queueRoll(e); if (e.back) this.popupTask(e.p, 'Backwards!', '#d64545', 'skip'); break
+      case 'pick': this.queuePick(e); if (e.back) this.popupTask(e.p, 'Backwards!', '#d64545', 'skip'); break
+      case 'offer': this.tasks.push({ dur: 0.35, start: () => this.emit('offer', e) }); break
       case 'move': {
         let from = null
         this.tasks.push({ dur: 0, start: () => { from = tok(e.p).pos; this.focusOn(e.p) } })
@@ -545,13 +553,42 @@ export class View {
       },
       end: () => {
         const total = e.total
-        this.trayLabel = e.dice.length > 1 || e.slowed ? (e.slowed ? `${e.dice.reduce((a, b) => a + b, 0)} → ${total}` : `= ${total}`) : ''
+        this.trayLabel = e.pick ? '' : rollLabel(e.dice.reduce((a, b) => a + b, 0), total, e.dice.length > 1, e.slowed, e.back)
         e.dice.forEach((v, i) => { this.padDice[i].visible = true; this.padDice[i].quaternion.copy(P.dieQuaternion(v, 0.3 + i)) })
         this.padDice[1].visible = e.dice.length > 1
         this.trayRolling = false
       },
     })
     this.tasks.push({ dur: 0.25 })
+  }
+
+  /** Choose Your Roll: the picked die hops to the middle of the tray, the other sinks away. */
+  queuePick(e) {
+    let a, b, from
+    this.tasks.push({
+      dur: 0.55,
+      start: () => {
+        this.trayVisible = 3.2
+        this.trayLabel = ''
+        a = this.trayDice[e.i]; b = this.trayDice[1 - e.i]
+        // (another player's bonus roll: the dice may not lie in the tray yet)
+        if (!a.visible) { a.visible = true; a.position.set(e.i ? 0.5 : -0.5, 0.23, e.i ? 0.15 : -0.1); a.quaternion.copy(P.dieQuaternion(e.dice[e.i], 0)) }
+        from = a.position.clone()
+        this.sfx('select', 0.5)
+      },
+      update: k => {
+        a.position.lerpVectors(from, new THREE.Vector3(0, 0.23, 0), easeOut(k))
+        a.position.y += Math.sin(k * Math.PI) * 0.35
+        b.scale.setScalar(Math.max(0.01, 1 - easeOut(k)))
+      },
+      end: () => {
+        b.visible = false; b.scale.setScalar(1)
+        this.trayLabel = rollLabel(e.dice[e.i], e.total, false, e.slowed, e.back)
+        this.padDice[0].visible = true; this.padDice[0].quaternion.copy(P.dieQuaternion(e.dice[e.i], 0.3))
+        this.padDice[1].visible = false
+      },
+    })
+    this.tasks.push({ dur: 0.2 })
   }
 
   // ---------- effects ----------
@@ -759,6 +796,7 @@ export class View {
     if (this.manual > 0) this.manual -= dt
     this.trayVisible = Math.max(0, this.trayVisible - dt)
     this.idleDice(dt)
+    this.pickDice(dt)
     this.updateCamera(dt)
   }
 
@@ -783,6 +821,19 @@ export class View {
       m.position.lerp(rest.setY(rest.y + hop * 0.32), 1 - Math.exp(-18 * dt))
       const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0.6).normalize(), hop * 0.5 * Math.sin(k * Math.PI * 2))
       m.quaternion.copy(tilt.multiply(this.idleQ[i]))
+    })
+  }
+
+  /** The two dice of Choose Your Roll wait in the tray: they bob in turn, the one under the pointer stands up, golden. */
+  pickDice(dt) {
+    const h = this.trayPick
+    if (h == null || this.trayRolling || this.busy) return
+    this.trayDice.forEach((m, i) => {
+      if (!m.visible) return
+      const bob = Math.max(0, Math.sin(this.time * 4 - i * 1.6)) * 0.06
+      const want = 0.23 + (i === h ? 0.3 : bob)
+      m.material = i === h ? this.mat.gold : this.mat.dice
+      m.position.y += (want - m.position.y) * (1 - Math.exp(-14 * dt))
     })
   }
 

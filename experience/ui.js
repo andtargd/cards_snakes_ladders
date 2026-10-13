@@ -182,7 +182,7 @@ export class UI {
   }
   updateTrayFrame(dt) {
     const m = this.trayFrame, un = m.material.uniforms, r = this.trayRect
-    const want = (this.promptN || this.trayMode === 'end') && r ? 1 : 0
+    const want = (this.promptN || this.trayMode === 'end' || this.trayMode === 'pick') && r ? 1 : 0
     un.opacity.value += (want - un.opacity.value) * (1 - Math.exp(-(want ? 8 : 14) * dt))
     m.visible = un.opacity.value > 0.01 && !!r
     if (!m.visible) return
@@ -204,7 +204,7 @@ export class UI {
     // (it stays up while my roll is on its way to the table's host, so the dice are tossed from where they lie)
     if (app.view.busy || app.curtain() >= 0 || app.menuOpen || app.invite) return 0
     const fx = s.pl[me].fx
-    return fx.gd || fx.cf ? 0 : fx.x ? 2 : 1
+    return fx.gd || fx.cf ? 0 : fx.x || fx.pk ? 2 : 1
   }
 
   // ---------- the soft message in the middle of the screen: "Your turn", "Choose any player" ----------
@@ -311,7 +311,7 @@ export class UI {
     this.modal = false // a window is open over the cards: they take no clicks
     this.trayRect = null // the tray on screen
     this.trayDice = null // where the view draws the dice: the tray, unless it shows End Turn or values to choose
-    this.trayMode = null // 'roll', 'end', 'choose' or 'show'
+    this.trayMode = null // 'roll', 'end', 'choose', 'pick' (one of two dice) or 'show'
     const app = this.app
     // the board stands in the middle, unless a title screen moves it aside
     app.view.aside.side = 0; app.view.aside.scale = 1
@@ -344,7 +344,7 @@ export class UI {
       this.panel((W - w) / 2, ty, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
       this.text(t.text, W / 2, ty + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
-    const used = this.modal || !!this.toast || !!this.peekRect
+    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect
     if (used || ov.used) ov.tex.needsUpdate = true
     ov.used = used
     this.g = this.base.g
@@ -874,6 +874,8 @@ export class UI {
     else if (curtain >= 0) status = T.passTo(s.pl[curtain].n)
     else if (this.target) status = this.target.kind === 'cell2' ? T.chooseTwoCells : T.chooseTarget
     else if (myTurn && s.ph === 'disc') status = T.chooseDiscard
+    else if (myTurn && s.ph === 'pick') status = T.chooseDie
+    else if (myTurn && s.ph === 'take') status = T.chooseCard
     else if (myTurn && s.frozen && !s.rolled) status = T.cantPlay
     else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(s.pl[me].n) : T.yourTurn
     else status = T.waitingFor(s.pl[s.cur].n)
@@ -902,13 +904,14 @@ export class UI {
     const ready = myTurn && s.ph === 'main' && curtain < 0 && !busy && !app.menuOpen && !app.invite
     const choose = ready && !s.rolled && !this.target ? choiceMax(pmy.fx) : 0
     const prompt = this.promptN > 0 && s.cur === me
-    this.trayMode = prompt ? 'roll' : ready && s.rolled ? 'end' : choose ? 'choose' : 'show' // the tray always stands in its corner
+    const picking = myTurn && s.ph === 'pick' && s.pick && curtain < 0 && !busy && !app.menuOpen && !app.invite
+    this.trayMode = prompt ? 'roll' : picking ? 'pick' : ready && s.rolled ? 'end' : choose ? 'choose' : 'show' // the tray always stands in its corner
     this.trayTop = null
     if (this.trayMode) {
       const g = this.g, mode = this.trayMode
       this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: '#fffdf8', stroke: mode === 'roll' || mode === 'end' ? null : undefined, r: 12 })
       this.trayRect = { x: tx, y: ty, w: tw, h: th }
-      if (mode === 'roll' || mode === 'show') this.trayDice = this.trayRect
+      if (mode === 'roll' || mode === 'show' || mode === 'pick') this.trayDice = this.trayRect
       const k = tw / (354 * u) // the tray's size against the desktop one
       // labels go under the tray, or over it on a phone where the hand is under it
       const ly = this.narrow ? ty - 22 * u : ty + th + 18 * u
@@ -930,8 +933,12 @@ export class UI {
         g.restore()
         if (!this.narrow) pill(T.clickToEnd)
         hit(() => { if (this.target) this.cancelTarget(); app.act({ t: 'end' }) })
+      } else if (mode === 'pick') {
+        // Choose Your Roll: the two dice lie in the tray, the left one and the right one each take a click
+        pill(this.narrow ? T.tapDie : T.pickDie)
+        for (const i of [0, 1]) this.hits.push({ key: 'die' + i, x: tx - 10 * u + i * (tw / 2 + 10 * u), y: ty - 10 * u, w: tw / 2 + 10 * u, h: th + 20 * u, action: () => this.choose('pick', i) })
       } else if (mode === 'choose') {
-        this.text(T.chooseValue, tx + tw / 2, ty + th * 0.24, { size: 20 * k, align: 'center', color: '#2d3a6b' })
+        this.text(pmy.fx.bk ? T.chooseBack : T.chooseValue, tx + tw / 2, ty + th * 0.24, { size: 20 * k, align: 'center', color: '#2d3a6b' })
         const n = choose, gap = 6 * u, w = Math.min((tw - 16 * u) / n - gap, 64 * u * k), bh = Math.min(th * 0.44, 62 * u * k)
         const x0 = tx + (tw - n * (w + gap) + gap) / 2
         for (let v = 1; v <= n; v++) this.button('v' + v, String(v), x0 + (v - 1) * (w + gap), ty + th * 0.42, w, bh, () => app.act({ t: 'roll', v }), { primary: true, color: pmy.fx.gd ? '#c99400' : '#7b5ce0', size: 24 * k })
@@ -963,6 +970,12 @@ export class UI {
       if (r.empty) this.text(T.noCards, r.x + r.w / 2, r.y + r.h / 2, { size: 14, align: 'center', bold: false, color: '#5b544c' })
       const cb = 34 * u
       this.button('peekx', '✕', r.x + r.w + 12 * u - cb - 2 * u, r.y - 34 * u + 2 * u, cb, cb, () => this.closePeek(), { size: 15 })
+    }
+    if (this.offerRect && s.ph === 'take') {
+      const r = this.offerRect
+      this.panel(r.x - 14 * u, r.y - 52 * u, r.w + 28 * u, r.h + 66 * u, { fill: 'rgba(255,253,248,0.96)', stroke: P.CAT_COLORS.C, lw: 3 })
+      this.text(T.chooseCard, r.x + r.w / 2, r.y - 33 * u, { size: 17, align: 'center', color: '#2d3a6b' })
+      this.text(T.chooseCardHint, r.x + r.w / 2, r.y - 14 * u, { size: 12, align: 'center', bold: false, color: '#5b544c', max: r.w + 20 * u })
     }
     const curtain = app.curtain()
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
@@ -1147,6 +1160,9 @@ export class UI {
     if (peeking) {
       s.pl[s.peek.tg].h.forEach((id, i) => want.push({ id, key: 'p' + i + id, i, kind: 'peek', n: s.pl[s.peek.tg].h.length }))
     }
+    // Choose Your Card: the cards offered, in a window over the hand
+    const offering = app.screen === 'game' && s && s.ph === 'take' && s.offer && me >= 0 && s.cur === me && !hide && !app.menuOpen && !(this.took && this.took.seq === s.seq && this.time - this.took.at < 3)
+    if (offering) s.offer.forEach((id, i) => want.push({ id, key: 'o' + i + id, i, kind: 'offer' }))
     if (app.screen === 'help' && this.helpPage === 1) CARDS.forEach((c, i) => want.push({ id: c.id, key: 'c' + c.id, i, kind: 'catalog' }))
     // keep meshes whose key stays, add new ones, drop the rest
     const next = []
@@ -1154,7 +1170,9 @@ export class UI {
       let c = this.cards.find(c => c.key === w.key && !next.includes(c))
       if (!c) {
         c = { ...w, mesh: this.makeCard(w.id), x: this.W + 80 * this.u, y: this.H - 60 * this.u, s: 0.4 }
-        if (w.kind === 'catalog' || w.kind === 'peek') { c.x = this.W / 2; c.y = this.H / 2; c.s = 0.2 }
+        if (w.kind === 'catalog' || w.kind === 'peek' || w.kind === 'offer') { c.x = this.W / 2; c.y = this.H / 2; c.s = 0.2 }
+        // the card kept from an offer comes down from where it lay
+        if (w.kind === 'hand' && this.took && this.took.id === w.id && this.time - this.took.at < 3) { c.x = this.took.x; c.y = this.took.y; c.s = this.took.s; this.took = null }
       }
       Object.assign(c, w)
       next.push(c)
@@ -1195,6 +1213,25 @@ export class UI {
     } else if (peeking) {
       this.peekRect = { x: W / 2 - 90 * u, y: H * 0.38 - 12 * u, w: 180 * u, h: 24 * u, empty: true }
     }
+    const offer = this.cards.filter(c => c.kind === 'offer')
+    this.offerRect = null
+    if (offer.length) {
+      const n = offer.length
+      // over the board, clear of the status at the top and of my hand at the bottom
+      const room = H - cw * 1.4 * 0.62 - this.bannerTop() - 8 * u
+      const pw = Math.min(cw * 0.95, (W - 40 * u) / (n * 1.08), (room - 78 * u) / 1.4)
+      const top = this.bannerTop() + Math.max(0, (room - pw * 1.4 - 70 * u) / 2)
+      const x0 = W / 2 - (n - 1) / 2 * pw * 1.08
+      const y = top + 52 * u + pw * 0.7
+      offer.forEach((c, k) => {
+        const hov = this.hover === 'offer' + c.i
+        c.tx = x0 + k * pw * 1.08; c.ty = y - (hov ? 8 * u : 0); c.ts = pw * (hov ? 1.06 : 1); c.rot = 0; c.dim = 0; c.lift = hov ? 0.6 : 0; c.z = 60
+      })
+      this.offerRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * 1.08 + pw, h: pw * 1.4 }
+    }
+    // the window behind the cards is drawn only on a redraw: one when it moves (a resize)
+    const offerKey = this.offerRect ? [this.offerRect.x, this.offerRect.y, this.offerRect.w].map(Math.round).join() : ''
+    if (offerKey !== this.offerKey) { this.offerKey = offerKey; this.dirty = true }
     const cat = this.cards.filter(c => c.kind === 'catalog')
     if (cat.length) {
       const pw = Math.min(W - 20 * u, 780 * u), ph = Math.min(H - 20 * u, 600 * u)
@@ -1272,6 +1309,23 @@ export class UI {
     const s0 = (this.narrow ? 38 : 52) * u
     this.flyers.push({ mesh, burn: true, t: 0, x0: r ? r.x + r.w + s0 * 0.7 : this.W / 2, y0: r ? r.y + r.h / 2 : this.H * 0.3, s0, rot: -0.12, card: 'back' })
     this.app.sfx('fold', 0.3)
+  }
+  /** A die of Choose Your Roll ('pick') or a card that Choose Your Card offers ('take'): the others burn. */
+  choose(kind, i) {
+    const app = this.app, s = app.view.state
+    if (!s || app.view.busy || app.waiting > 0 || s.ph !== kind) return
+    if (kind === 'pick') { if (s.pick && i < s.pick.d.length) { app.sfx('select', 0.45); app.act({ t: 'pick', i }) } return }
+    const offer = this.cards.filter(c => c.kind === 'offer'), c = offer.find(k => k.i === i)
+    if (!c) return
+    if (app.act({ t: 'take', i }) === false) return
+    this.took = { id: c.id, x: c.x, y: c.y, s: c.s, seq: s.seq, at: this.time }
+    for (const k of offer) {
+      this.cards = this.cards.filter(x => x !== k)
+      if (k === c) this.dropCard(k.mesh)
+      else this.flyers.push({ mesh: k.mesh, burn: true, t: 0, x0: k.x, y0: k.y, s0: k.s, rot: 0, card: k.id })
+    }
+    app.sfx('select', 0.45)
+    this.dirty = true
   }
   /** A card of my hand leaves it and burns where it is. */
   burnCard(c) {
@@ -1400,7 +1454,7 @@ export class UI {
     let key = h ? h.key : null
     if (!key) {
       const c = this.cardAt(x, y)
-      if (c) key = c.kind === 'hand' ? 'card' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null
+      if (c) key = c.kind === 'hand' ? 'card' + c.i : c.kind === 'offer' ? 'offer' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null
     }
     if (key !== this.hover) { this.hover = key; this.dirty = true }
     if (this.target?.kind === 'player' && key) this.hoverTarget(null, key.startsWith('pl') ? +key.slice(2) : null)
@@ -1411,6 +1465,7 @@ export class UI {
     const h = this.hitAt(x, y)
     if (h) { h.action(); this.dirty = true; return true }
     const c = this.cardAt(x, y)
+    if (c && c.kind === 'offer') { this.choose('take', c.i); return true }
     if (c && c.kind === 'hand') {
       if (long) { this.selected = this.selected === c.i ? -1 : c.i; this.dirty = true }
       else this.cardClicked(c)
@@ -1446,6 +1501,7 @@ export class UI {
     this.updateBanner(dt)
     if (this.dirty) this.draw()
     this.app.view.trayPrompt = n && this.trayRect ? n : 0
+    this.app.view.trayPick = this.trayMode === 'pick' ? (this.hover === 'die0' ? 0 : this.hover === 'die1' ? 1 : -1) : null
     this.updateTrayFrame(dt)
   }
 }

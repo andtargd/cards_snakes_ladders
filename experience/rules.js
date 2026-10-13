@@ -33,13 +33,13 @@ export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 
 // (automatic), cell, cell2 (two cells), ladder, snake, board, none
 const KINDS = {
   M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'leader'], M5: ['M', 'any'],
-  D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'],
+  D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
   B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
-  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'],
+  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'],
   P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
-  C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'],
+  C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'],
 }
-const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1 }
+const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3 }
 /** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
 const ALL = Object.entries(KINDS).map(([id, [cat, tgt]]) => {
   const c = { ...DEFAULTS, ...DECK.cards[id] }
@@ -53,7 +53,7 @@ const BY_RARITY = { C: [], U: [], R: [], L: [] }
 for (const c of CARDS) BY_RARITY[c.rar].push(c.id)
 
 // effects shown over a player: key in fx -> label
-export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', sl: 'H1', fz: 'H2', sk: 'H3', pa: 'P1', bo: 'P2', sh: 'P3' })
+export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', pk: 'D5', sl: 'H1', fz: 'H2', sk: 'H3', bk: 'H4', pa: 'P1', bo: 'P2', sh: 'P3', cc: 'C5' })
   .map(([k, card]) => [k, { name: CARD[card].name, card }]))
 const TIMED = ['pa', 'bo', 'sh']
 
@@ -245,7 +245,7 @@ export function createGame({ seed, mode = 'champion', players, cells = CFG.cells
     v: 1, seed: seed >>> 0, mode, n: cells, r: (seed ^ 0x9e3779b9) >>> 0,
     base: generateBoard(seed >>> 0, cells), mods: [], quake: null, mk: [],
     pl: [], cur: 0, round: 1, ph: 'main', rolled: false, played: false, frozen: false,
-    peek: null, fin: [], res: null, log: [], seq: 0, turnNo: 0,
+    peek: null, pick: null, offer: null, fin: [], res: null, log: [], seq: 0, turnNo: 0,
   }
   const order = players.map((p, i) => i)
   for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
@@ -276,12 +276,23 @@ function drawCard(s) {
   return list[list.length - 1]
 }
 
+/** The cards Choose Your Card offers: as many as the card says, different ones while the deck allows. */
+function drawOffer(s) {
+  const n = Math.max(1, Math.min(5, CARD.C5.draw | 0)), out = []
+  for (let k = 0; k < n; k++) {
+    let id = drawCard(s)
+    for (let tries = 0; tries < 8 && out.includes(id); tries++) id = drawCard(s)
+    out.push(id)
+  }
+  return out
+}
+
 function beginTurn(s, ev) {
   for (let guard = 0; guard < 12; guard++) {
     if (s.ph === 'over') return
     const pi = s.cur, p = s.pl[pi]
     s.turnNo++
-    s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.ph = 'main'
+    s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
     ev.push({ e: 'turn', p: pi, round: s.round })
     if (p.fx.sk) {
       delete p.fx.sk
@@ -292,6 +303,13 @@ function beginTurn(s, ev) {
       continue
     }
     if (p.fx.fz) { delete p.fx.fz; s.frozen = true; ev.push({ e: 'frozen', p: pi }) }
+    if (p.fx.cc) { // Choose Your Card: several cards are offered, the player keeps one
+      delete p.fx.cc
+      s.offer = drawOffer(s)
+      s.ph = 'take'
+      ev.push({ e: 'offer', p: pi, n: s.offer.length })
+      return
+    }
     const card = drawCard(s)
     p.h.push(card)
     ev.push({ e: 'draw', p: pi, card })
@@ -412,24 +430,30 @@ export function rollDistribution(fx) {
     sums = next
   }
   const out = new Map()
-  for (const [t, p] of sums) { const v = fx.sl ? Math.min(CARD.H1.max, t) : t; out.set(v, (out.get(v) || 0) + p) }
+  for (const [t, p] of sums) { const v = slowTotal(fx, t); out.set(v, (out.get(v) || 0) + p) }
   return [...out]
 }
+/** A roll's total as it moves the piece: Slow Down caps it. */
+const slowTotal = (fx, t) => (fx.sl ? Math.min(CARD.H1.max, t) : t)
 const diceCount = fx => (fx.x ? Math.max(1, CARD.D1.dice | 0) : 1)
 const heavyMin = () => Math.max(1, Math.min(6, CARD.D3.min | 0))
 /** The highest value a chosen roll may take (Golden Die, Choose a Face), or 0 for a roll of the dice. */
 export const choiceMax = fx => (fx.gd ? CARD.D4.max : fx.cf ? CARD.D2.max : 0)
 
-/** Where a roll of `total` from `pos` ends, without changing anything: { pos, finished }. */
+/**
+ * Where a roll of `total` from `pos` ends, without changing anything: { pos, finished }. Going Backwards
+ * turns the move round (never past cell 1).
+ */
 export function landing(s, pi, pos, total, els = effectiveElements(s)) {
-  const p = s.pl[pi]
+  const p = s.pl[pi], back = !!p.fx.bk
   let c = pos, stopped = false
   for (let k = 0; k < total; k++) {
-    c++
+    if (back && c <= 1) break
+    c += back ? -1 : 1
     if (c >= s.n) return { pos: s.n, finished: true }
     if (!p.fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
   }
-  if (stopped) return { pos: c, finished: false }
+  if (stopped || c === pos) return { pos: c, finished: false }
   // the cell takes effect; a trampoline throws the piece on, and the cell it lands on takes effect in turn
   const settle = (c, bounced) => {
     if (bounced && !p.fx.bo && markerAt(s, c, 'sw')) return { pos: c, finished: false }
@@ -458,14 +482,28 @@ const parachute = fall => Math.max(0, Math.min(fall, Math.floor(fall * CARD.P1.s
 export function bestChoice(s, pi, max) {
   let best = 1, bestPos = -1
   for (let v = 1; v <= max; v++) {
-    const l = landing(s, pi, s.pl[pi].pos, v)
+    const l = landing(s, pi, s.pl[pi].pos, slowTotal(s.pl[pi].fx, v))
     const score = l.finished ? 1000 : l.pos
     if (score > bestPos) { bestPos = score; best = v }
   }
   return best
 }
 
-/** Rolls for a player with their next-roll effects and moves them. Returns the events' roll entry. */
+/** The better die of a Choose Your Roll for the player: the one whose move ends furthest. */
+export function bestPick(s, pi, dice) {
+  let best = 0, bestPos = -Infinity
+  dice.forEach((v, i) => {
+    const l = landing(s, pi, s.pl[pi].pos, slowTotal(s.pl[pi].fx, v))
+    const score = l.finished ? 1000 : l.pos
+    if (score > bestPos) { bestPos = score; best = i }
+  })
+  return best
+}
+
+/**
+ * Rolls for a player with their next-roll effects and moves them. With Choose Your Roll the player whose
+ * turn it is picks one of the dice first (the 'pick' phase); anyone else's bonus roll takes the better die.
+ */
 function rollAndMove(s, pi, value, ev, bonus) {
   const p = s.pl[pi], fx = p.fx
   let dice, chosen = false
@@ -474,26 +512,49 @@ function rollAndMove(s, pi, value, ev, bonus) {
     const v = Number.isInteger(value) && value >= 1 && value <= max ? value : bestChoice(s, pi, max)
     dice = [v]; chosen = true
   } else {
-    const n = diceCount(fx), lo = fx.hv ? heavyMin() : 1
+    const n = fx.pk ? 2 : diceCount(fx), lo = fx.hv ? heavyMin() : 1
     dice = []
     for (let k = 0; k < n; k++) dice.push(lo + rint(s, 7 - lo))
   }
-  let total = dice.reduce((a, b) => a + b, 0)
+  const pick = !!fx.pk && !chosen
+  // the dice are thrown: what shaped them is spent; Slow Down and Going Backwards wait for the move
+  delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.pk
+  if (pick) {
+    ev.push({ e: 'roll', p: pi, dice, total: 0, chosen: false, slowed: false, bonus: !!bonus, pick: true })
+    log(s, ev, `${p.n} rolled ${dice.join(' and ')}`)
+    if (pi === s.cur) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
+    moveBy(s, pi, dice, ev, bonus, bestPick(s, pi, dice))
+    return
+  }
+  moveBy(s, pi, dice, ev, bonus, -1, chosen)
+}
+
+/** The piece moves by the dice (or by the one picked of them), forward, or back with Going Backwards. */
+function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
+  const p = s.pl[pi], fx = p.fx
+  const raw = picked >= 0 ? dice[picked] : dice.reduce((a, b) => a + b, 0)
+  const total = slowTotal(fx, raw)
+  const slowed = total < raw, back = !!fx.bk
   const slow = CARD.H1.max
-  const slowed = !!fx.sl && total > slow
-  if (fx.sl) total = Math.min(slow, total)
-  delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.sl
-  ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus })
-  log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + dice.reduce((a, b) => a + b, 0) : ''}${slowed ? ', slowed to ' + slow : ''}`)
-  // step by step: a swamp on the way stops the move
+  delete fx.sl; delete fx.bk
+  if (picked >= 0) {
+    ev.push({ e: 'pick', p: pi, i: picked, dice, total, slowed, back })
+    log(s, ev, `${p.n} took the ${dice[picked]}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
+  } else {
+    ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus, back })
+    log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + raw : ''}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
+  }
+  // step by step: a swamp on the way stops the move; going back stops on cell 1
   const path = []
   let c = p.pos, stopped = false
   for (let k = 0; k < total; k++) {
-    c++
+    if (back && c <= 1) break
+    c += back ? -1 : 1
     path.push(Math.min(c, s.n))
     if (c >= s.n) break
     if (!fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
   }
+  if (!path.length) return
   p.pos = Math.min(c, s.n)
   ev.push({ e: 'move', p: pi, path })
   if (p.pos >= s.n) { finish(s, pi, ev); return }
@@ -654,6 +715,8 @@ export function whyNot(s, pi, cardId) {
   if (s.ph === 'over') return 'The game is over'
   if (s.cur !== pi) return 'Not your turn'
   if (s.ph === 'disc') return 'Choose a card to discard'
+  if (s.ph === 'pick') return 'Choose a die'
+  if (s.ph === 'take') return 'Choose a card'
   if (s.frozen) return "You can't play cards this turn"
   if (s.played) return 'One card per turn'
   if (cardId === 'M3' && s.rolled) return 'Only instead of the roll'
@@ -663,9 +726,10 @@ export function whyNot(s, pi, cardId) {
 
 // ---------- actions ----------
 /**
- * a: { t: 'roll', v? } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i }
- * A turn: draw a card, roll once and play at most one card in either order, then (holding more than
- * the hand's 3) discard down to 3 at the end. Returns { ok, err, ev }. The state is changed in place
+ * a: { t: 'roll', v? } | { t: 'pick', i } | { t: 'take', i } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i }
+ * A turn: draw a card (with Choose Your Card take one of those offered), roll once (with Choose Your Roll
+ * pick one of the two dice) and play at most one card in either order, then (holding more than the
+ * hand's 3) discard down to 3 at the end. Returns { ok, err, ev }. The state is changed in place
  * (clone it first to keep the old one).
  */
 export function apply(s, pi, a) {
@@ -682,7 +746,23 @@ export function apply(s, pi, a) {
     const [card] = p.h.splice(i, 1)
     ev.push({ e: 'discard', p: pi, card })
     if (p.h.length <= CFG.hand) endTurn(s, ev)
-  } else if (s.ph !== 'main') return fail('Choose a card to discard')
+  } else if (a.t === 'pick') {
+    if (s.ph !== 'pick' || !s.pick) return fail('Nothing to pick')
+    const i = a.i | 0
+    if (i < 0 || i >= s.pick.d.length) return fail('bad die')
+    const { d, b } = s.pick
+    s.pick = null; s.ph = 'main'
+    moveBy(s, pi, d, ev, b, i)
+    afterAction(s, pi, ev)
+  } else if (a.t === 'take') {
+    if (s.ph !== 'take' || !s.offer) return fail('Nothing to take')
+    const i = a.i | 0
+    if (i < 0 || i >= s.offer.length) return fail('bad card')
+    const card = s.offer[i]
+    s.offer = null; s.ph = 'main'
+    p.h.push(card)
+    ev.push({ e: 'draw', p: pi, card, took: true })
+  } else if (s.ph !== 'main') return fail(s.ph === 'pick' ? 'Choose a die' : s.ph === 'take' ? 'Choose a card' : 'Choose a card to discard')
   else if (a.t === 'roll') {
     if (s.rolled) return fail('Already rolled')
     s.rolled = true
@@ -706,7 +786,7 @@ export function apply(s, pi, a) {
 }
 
 function afterAction(s, pi, ev) {
-  if (s.ph === 'over') return
+  if (s.ph === 'over' || s.ph === 'pick') return
   if (s.pl[pi].d) { endTurn(s, ev); return } // finished mid-turn (Fool): the turn ends at once
   // a peeked hand stays open until the player ends the turn
   if (s.rolled && !s.peek && (s.played || !hasPlayable(s, pi))) finishTurn(s, ev)
@@ -754,12 +834,15 @@ function playCard(s, pi, i, tg, ev) {
     case 'M4': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
     case 'M5': rollAndMove(s, target, undefined, ev, true); break
     case 'D1': setFx('x'); break
-    case 'D2': delete who.fx.gd; setFx('cf'); break
+    // the dice that are chosen or picked from replace each other: the last one played counts
+    case 'D2': delete who.fx.gd; delete who.fx.pk; setFx('cf'); break
     case 'D3': setFx('hv'); break
-    case 'D4': delete who.fx.cf; setFx('gd'); break
+    case 'D4': delete who.fx.cf; delete who.fx.pk; setFx('gd'); break
+    case 'D5': delete who.fx.cf; delete who.fx.gd; setFx('pk'); break
     case 'H1': setFx('sl'); break
     case 'H2': setFx('fz'); break
     case 'H3': setFx('sk'); break
+    case 'H4': setFx('bk'); break
     case 'P1': timed('pa'); break
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
@@ -792,6 +875,7 @@ function playCard(s, pi, i, tg, ev) {
       ev.push({ e: 'redraw', p: pi, n: draw })
       break
     }
+    case 'C5': p.fx.cc = 1; break
     case 'C2': s.peek = { by: pi, tg: target }; ev.push({ e: 'peek', p: pi, tg: target }); break
     case 'C3': {
       const k = rint(s, who.h.length)
@@ -823,8 +907,16 @@ function expectedNext(s, q, els) {
   if (p.fx.gd || p.fx.cf) {
     const max = choiceMax(p.fx)
     let best = 0
-    for (let v = 1; v <= max; v++) best = Math.max(best, scoreOf(landing(s, q, p.pos, v, els)))
+    for (let v = 1; v <= max; v++) best = Math.max(best, scoreOf(landing(s, q, p.pos, slowTotal(p.fx, v), els)))
     return best
+  }
+  if (p.fx.pk) { // Choose Your Roll: the better of two dice
+    const lo = p.fx.hv ? heavyMin() : 1, n = 7 - lo
+    const at = []
+    for (let f = lo; f <= 6; f++) at[f] = scoreOf(landing(s, q, p.pos, slowTotal(p.fx, f), els))
+    let ex = 0
+    for (let a = lo; a <= 6; a++) for (let b = lo; b <= 6; b++) ex += Math.max(at[a], at[b]) / (n * n)
+    return ex
   }
   let ex = 0
   for (const [t, pr] of rollDistribution(p.fx)) ex += pr * scoreOf(landing(s, q, p.pos, t, els))
@@ -907,6 +999,7 @@ function evaluateOption(s, pi, i, tg, level) {
     return (0.6 * handValue(h) / h.length) * (1 + (level >= 3 ? 0.3 : 0)) - 0.6 * CARD_VALUE[CARD[cardId].rar] * 0.2
   }
   if (cardId === 'C2') return level >= 3 ? 0.3 : 0.05
+  if (cardId === 'C5') return level >= 3 ? 1.1 : 1 // a better card next turn
   c.rolled = false // judge the board as it stands, without ending the turn in the copy
   const r = apply(c, pi, { t: 'play', i, tg })
   if (!r.ok) return -99
@@ -933,7 +1026,15 @@ function bestOption(s, pi, level, filter = () => true) {
   return best
 }
 
-const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'M5'])
+const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M5'])
+/** The card a bot keeps of those Choose Your Card offers. */
+function bestOffer(s, pi, level) {
+  const offer = s.offer || []
+  if (level === 1) return rint(s, offer.length)
+  let best = 0, bestV = -Infinity
+  offer.forEach((c, i) => { const v = CARD_VALUE[CARD[c].rar] + rnd(s) * 0.2; if (v > bestV) { bestV = v; best = i } })
+  return best
+}
 /** The next action of a bot whose turn it is (or who must discard). */
 export function botAction(s, pi) {
   const p = s.pl[pi], level = p.b || 2
@@ -946,6 +1047,8 @@ export function botAction(s, pi) {
     })
     return { t: 'disc', i: worst }
   }
+  if (s.ph === 'pick') return { t: 'pick', i: level === 1 ? rint(s, s.pick.d.length) : bestPick(s, pi, s.pick.d) }
+  if (s.ph === 'take') return { t: 'take', i: bestOffer(s, pi, level) }
   const rollAction = () => {
     if (p.fx.gd || p.fx.cf) return { t: 'roll', v: bestChoice(s, pi, choiceMax(p.fx)) }
     return { t: 'roll' }

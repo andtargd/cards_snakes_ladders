@@ -326,6 +326,12 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.fillStyle = '#fff6c8'; star(g, x + s * 0.3, y - s * 0.3, s * 0.12, s * 0.05, 4); g.fill()
       break
     }
+    case 'D5': // choose your roll: two dice, the picked one raised with a tick under it
+      g.globalAlpha = 0.4; die(g, x - s * 0.2, y + s * 0.06, s * 0.32, 2); g.globalAlpha = 1
+      die(g, x + s * 0.18, y - s * 0.1, s * 0.36, 5)
+      g.lineWidth = w * 0.9
+      g.beginPath(); g.moveTo(x + s * 0.06, y + s * 0.24); g.lineTo(x + s * 0.15, y + s * 0.33); g.lineTo(x + s * 0.32, y + s * 0.14); g.stroke()
+      break
     case 'B1': // swamp: blob and ripples
       g.beginPath(); g.ellipse(x, y + s * 0.08, s * 0.38, s * 0.2, 0, 0, Math.PI * 2); g.globalAlpha = 0.35; g.fill(); g.globalAlpha = 1
       for (const r of [0.14, 0.26]) { g.beginPath(); g.ellipse(x, y + s * 0.08, s * r * 1.3, s * r * 0.65, 0, 0, Math.PI * 2); g.stroke() }
@@ -368,6 +374,10 @@ export function drawIcon(g, id, x, y, s, col = INK) {
     case 'H3': // skip turn
       g.beginPath(); g.arc(x, y, s * 0.34, 0, Math.PI * 2); g.stroke()
       g.beginPath(); g.moveTo(x - s * 0.24, y + s * 0.24); g.lineTo(x + s * 0.24, y - s * 0.24); g.stroke()
+      break
+    case 'H4': // going backwards: a die over an arrow pointing back
+      die(g, x + s * 0.06, y - s * 0.16, s * 0.34, 4)
+      arrow(g, x + s * 0.34, y + s * 0.26, x - s * 0.36, y + s * 0.26, w)
       break
     case 'P1': // parachute
       g.beginPath(); g.arc(x, y - s * 0.05, s * 0.36, Math.PI, 0); g.closePath(); g.globalAlpha = 0.3; g.fill(); g.globalAlpha = 1; g.stroke()
@@ -415,6 +425,18 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.save(); g.translate(x + s * 0.12, y); g.rotate(0.25); roundRect(g, -s * 0.13, -s * 0.2, s * 0.26, s * 0.38, s * 0.04); g.stroke(); g.restore()
       arrow(g, x - s * 0.3, y - s * 0.34, x + s * 0.3, y - s * 0.34, w * 0.7)
       break
+    case 'C5': { // choose your card: three cards fanned out, the middle one raised with a star
+      const cw = s * 0.24, ch = s * 0.34
+      g.lineWidth = w * 0.6
+      for (const [dx, a] of [[-0.2, -0.32], [0.2, 0.32]]) {
+        g.save(); g.translate(x + dx * s, y + s * 0.1); g.rotate(a)
+        roundRect(g, -cw / 2, -ch / 2, cw, ch, s * 0.03); g.globalAlpha = 0.35; g.fill(); g.globalAlpha = 1; g.stroke()
+        g.restore()
+      }
+      g.fillStyle = '#ffffff'; roundRect(g, x - cw / 2, y - s * 0.08 - ch / 2, cw, ch, s * 0.03); g.fill(); g.stroke()
+      g.fillStyle = col; star(g, x, y - s * 0.08, s * 0.08, s * 0.035, 5); g.fill()
+      break
+    }
     // categories
     case 'cat-M': arrow(g, x - s * 0.3, y, x + s * 0.32, y, w * 1.4); break
     case 'cat-D': die(g, x, y, s * 0.6, 5); break
