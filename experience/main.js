@@ -13,7 +13,9 @@ const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
 const BOT_DELAY = 1.1
 const TURN_SECONDS = 45
 const INVITE_SECONDS = 45
+const ABSENT_SECONDS = 20 // a seated player missing from the session this long gets a bot in their seat
 const SETTINGS_KEY = 'csl-settings'
+const GAME_KEY = 'csl-game' // the game being played in this browser, so a reload carries on with it
 
 /** The menu's choices and the sound, as last left (kept in this browser, where it lets us). */
 function loadSettings() {
@@ -30,26 +32,45 @@ function loadSettings() {
   return { cfg, sound }
 }
 
+/** The game saved by the last LocalTable here, or null. */
+function loadGame() {
+  try {
+    const g = JSON.parse(globalThis.localStorage?.getItem(GAME_KEY) || 'null')
+    const s = g?.s
+    if (g?.v !== 1 || !s || !Array.isArray(s.pl) || s.pl.length < 2 || s.ph === 'over' || !Number.isInteger(s.cur) || !s.pl[s.cur]) return null
+    return g
+  } catch { return null }
+}
+function clearGame() { try { globalThis.localStorage?.removeItem(GAME_KEY) } catch { /* no storage here */ } }
+
 // ---------- a game played in this browser: one player or several taking turns at it, and bots ----------
 class LocalTable {
-  constructor(app, { kind, mode, humans = 1, bots, level, size = 100 }) {
+  /** `saved` (from loadGame) carries on with a game from before the page was reloaded. */
+  constructor(app, { kind, mode, humans = 1, bots, level, size = 100 }, saved = null) {
     this.app = app
     this.kind = kind
     this.humans = humans
     this.shown = -1 // with several players at one computer: whose hand was last shown
     const p0 = app.p0
-    const seed = (Math.random() * 2 ** 31) >>> 0
-    const names = shuffle([...BOT_NAMES], seed)
-    const players = []
-    for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: T.playerN(i + 1), b: 0, id: null, c: i })
-    for (let i = 0; i < bots; i++) players.push({ n: names[i], b: level, c: players.length })
     this.cfg = { mode, humans, bots, level, size }
-    this.s = R.createGame({ seed, mode, players, cells: size })
-    this.s.gid = seed
+    if (saved) {
+      this.s = R.unpack(saved.s)
+      // my seat: the session's id can be new after a reload
+      const mine = this.s.pl.find(p => !p.b && p.id != null)
+      if (mine) mine.id = p0.me.id
+    } else {
+      const seed = (Math.random() * 2 ** 31) >>> 0
+      const names = shuffle([...BOT_NAMES], seed)
+      const players = []
+      for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: T.playerN(i + 1), b: 0, id: null, c: i })
+      for (let i = 0; i < bots; i++) players.push({ n: names[i], b: level, c: players.length })
+      this.s = R.createGame({ seed, mode, players, cells: size })
+      this.s.gid = seed
+    }
     this.wait = 1.4
     app.view.tasks = []
     app.view.setState(R.clone(this.s), { players: p0.players })
-    for (const l of this.s.log) app.ui.log(l)
+    for (const l of saved ? (Array.isArray(saved.log) ? saved.log.slice(-60).map(String) : this.s.log) : this.s.log) app.ui.log(l)
     app.view.distWant = 7.5
     app.view.focusWant.copy(app.view.tokens[this.s.cur].group.position)
   }
@@ -67,6 +88,14 @@ class LocalTable {
     return me >= 0 && me !== this.shown ? me : -1
   }
   reveal() { this.shown = this.mySeat() }
+  /** Keeps the game in this browser until it ends, so a reload carries on with it. */
+  save() {
+    if (this.kind !== 'solo' || this.app.table !== this) return
+    if (this.s.ph === 'over') { clearGame(); return }
+    try {
+      globalThis.localStorage?.setItem(GAME_KEY, JSON.stringify({ v: 1, cfg: this.cfg, s: R.pack(this.s), log: this.app.ui.logLines.slice(-60), speed: this.app.speedIdx }))
+    } catch { /* no storage here */ }
+  }
   act(a) {
     if (this.app.view.busy || this.curtain() >= 0) return false
     const pi = this.mySeat()
@@ -78,6 +107,7 @@ class LocalTable {
   }
   after(ev) {
     this.app.view.play(ev, R.clone(this.s), { players: this.app.p0.players })
+    this.save()
     // a game shared at one computer does not count for the week's table
     if (this.s.ph === 'over') this.app.gameOver(this.s, this.humans > 1 ? -1 : this.mySeat())
   }
@@ -146,6 +176,9 @@ class SharedTable {
   act(a) {
     if (this.app.view.busy || this.app.waiting > 0) return false
     if (this.p0.room.isHost) return this.applyFrom(this.p0.me.id, a)
+    // the host checks it again; a move made out of turn is not sent at all
+    const s = this.s, me = this.mySeat()
+    if (s.ph === 'over' || me < 0 || s.cur !== me) { this.app.ui.say(s.ph === 'over' ? 'The game is over' : 'Not your turn'); return false }
     this.p0.room.sendTo(this.p0.room.host, { t: 'act', gid: this.s.gid, seq: this.s.seq, a })
     this.app.waiting = 2.5
     return true
@@ -176,16 +209,39 @@ class SharedTable {
     this.app.waiting = 0
     this.load(g, false)
   }
-  /** Host: a seated player left the session; a bot takes the seat with the same hand. */
+  /** Host: a seated player left the session; a bot takes the seat with the same hand (until they come back). */
   replace(id) {
     const s = this.s
     const i = s.pl.findIndex(p => p.id === id && !p.b)
     if (i < 0 || s.ph === 'over') return
     s.pl[i].b = 2
-    s.log.push(T.replacedByBot(s.pl[i].n)); if (s.log.length > 6) s.log.shift()
-    this.app.ui.log(T.replacedByBot(s.pl[i].n))
+    s.pl[i].rb = 1
+    const text = T.replacedByBot(s.pl[i].n)
+    s.log.push(text); if (s.log.length > 6) s.log.shift()
     s.seq++
-    this.publish([])
+    this.publish([{ e: 'log', text }])
+  }
+  /** Host: a player whose seat a bot took came back (after reloading the page, say): the seat is theirs again. */
+  restore(id) {
+    const s = this.s
+    const p = s.pl.find(q => q.id === id && q.rb)
+    if (!p || s.ph === 'over') return
+    p.b = 0
+    delete p.rb
+    const text = T.seatBack(p.n)
+    s.log.push(text); if (s.log.length > 6) s.log.shift()
+    s.seq++
+    this.publish([{ e: 'log', text }])
+  }
+  /** Host: seated players who are not in the session (the table was opened again after a reload) get a while to come back. */
+  checkAbsent(dt) {
+    this.absent ||= new Map()
+    for (const p of this.s.pl) {
+      if (p.b || p.id == null || p.id === this.p0.me.id || this.p0.players.has(p.id)) { this.absent.delete(p.id); continue }
+      const t = (this.absent.get(p.id) || 0) + dt
+      this.absent.set(p.id, t)
+      if (t > ABSENT_SECONDS) { this.absent.delete(p.id); this.replace(p.id) }
+    }
   }
   update(dt) {
     const s = this.s, view = this.app.view
@@ -194,7 +250,9 @@ class SharedTable {
     if (!view.busy) this.turnStart += dt
     const human = !s.pl[s.cur].b && s.ph !== 'over'
     this.app.turnLeft = human ? Math.max(0, TURN_SECONDS - this.turnStart) : null
-    if (!this.p0.room.isHost || s.ph === 'over' || view.busy) return
+    if (!this.p0.room.isHost || s.ph === 'over') return
+    this.checkAbsent(dt)
+    if (view.busy) return
     const p = s.pl[s.cur]
     if (p.b) {
       this.wait -= dt * view.speed
@@ -211,6 +269,44 @@ class SharedTable {
       if (r.ok) this.publish(r.ev)
       this.turnStart = TURN_SECONDS - 2
     }
+  }
+}
+
+/**
+ * The drawing resolution: it steps down when the frames are slow for a few seconds running and back up
+ * when they are quick again. A single long frame (a hitch, a tab in the background, a window being
+ * moved) does not count: only the average over a window of visible frames does.
+ */
+function resolution(renderer, p0) {
+  const WINDOW = 2, SLOW = 1 / 24, FAST = 1 / 50, MIN = 0.5
+  const top = () => Math.min(p0.pixelRatio || 1, 2)
+  let max = top(), ratio = max, sum = 0, n = 0, slowRuns = 0, fastRuns = 0, settle = 1, upBlocked = 0
+  renderer.setPixelRatio(ratio)
+  const set = r => { ratio = r; renderer.setPixelRatio(r); sum = 0; n = 0; slowRuns = 0; fastRuns = 0; settle = 1 }
+  return {
+    get ratio() { return ratio },
+    frame(dt) {
+      // the screen changed (another monitor, the browser's zoom): start from its full resolution
+      if (top() !== max) { max = top(); set(max); upBlocked = 0; return }
+      upBlocked = Math.max(0, upBlocked - dt)
+      // hidden, or just shown again: these frames say nothing about the machine
+      if (globalThis.document?.hidden || dt > 0.25) { settle = 1; sum = 0; n = 0; return }
+      if (settle > 0) { settle -= dt; return }
+      sum += dt; n++
+      if (sum < WINDOW) return
+      const avg = sum / n
+      sum = 0; n = 0
+      slowRuns = avg > SLOW ? slowRuns + 1 : 0
+      fastRuns = avg < FAST ? fastRuns + 1 : 0
+      if (slowRuns >= 2 && ratio > MIN) {
+        // stepping down right after a step up: the higher one was too much, stay here a while
+        if (upBlocked > 0) upBlocked = 120
+        set(Math.max(MIN, ratio * 0.8))
+      } else if (fastRuns >= 3 && ratio < max && upBlocked <= 0) {
+        set(Math.min(max, ratio * 1.25))
+        upBlocked = 20
+      }
+    },
   }
 }
 
@@ -251,6 +347,8 @@ class App {
     v.on('log', text => this.ui.log(text))
     v.on('play', e => { this.ui.showPlayed(e); this.sfx('card', 0.6); this.ui.dirty = true })
     v.on('over', () => { this.ui.dirty = true })
+    // the log has caught up with the game: keep it with the saved game
+    v.on('settled', () => { if (this.table?.kind === 'solo') this.table.save() })
     v.on('sfx', (name, vol) => this.sfx(name, vol))
   }
   sfx(name, volume = 0.5) {
@@ -296,6 +394,21 @@ class App {
     this.table = new IdleTable(this)
     this.view.speed = 1
   }
+  /** Carries on with the game this browser was playing before the page was reloaded; false when there is none. */
+  resumeSolo() {
+    const g = loadGame()
+    if (!g) return false
+    const c = g.cfg || {}
+    try {
+      this.table = new LocalTable(this, { kind: 'solo', mode: g.s.mode, humans: c.humans | 0 || 1, bots: c.bots | 0, level: c.level | 0 || 2, size: g.s.n }, g)
+    } catch (e) { this.p0.log('resume', String(e)); clearGame(); return false }
+    this.reward = null
+    if (Number.isInteger(g.speed) && SPEEDS[g.speed]) this.speedIdx = g.speed
+    this.view.speed = SPEEDS[this.speedIdx][0]
+    this.screen = 'game'
+    this.ui.dirty = true
+    return true
+  }
   startSolo() {
     this.saveSettings()
     this.reward = null
@@ -303,12 +416,14 @@ class App {
     this.ui.selected = -1; this.ui.cancelTarget()
     const c = this.cfg
     this.table = new LocalTable(this, { kind: 'solo', mode: c.mode, humans: c.humans, bots: c.bots, level: c.level, size: c.size })
+    this.table.save()
     this.view.speed = SPEEDS[this.speedIdx][0]
     this.screen = 'game'
     this.ui.dirty = true
     this.sfx('draw', 0.4)
   }
   toMenu() {
+    if (this.table?.kind === 'solo') clearGame()
     if (this.table?.kind === 'shared') {
       if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.pruneSeats(lob); this.p0.room.set('lob', lob) }
       else this.p0.room.sendTo(this.p0.room.host, { t: 'leaveSeat' })
@@ -385,6 +500,7 @@ class App {
     this.joinShared(g)
   }
   joinShared(g) {
+    if (this.table?.kind === 'solo') clearGame()
     this.reward = null
     this.ui.logLines = []
     this.ui.selected = -1; this.ui.cancelTarget()
@@ -558,7 +674,7 @@ export default async function start(p0) {
   const app = new App(p0)
   globalThis.__csl = app // for local testing from the console
   p0.loading(0.5, 'setting the table')
-  app.startAttract()
+  if (!app.resumeSolo()) app.startAttract()
 
   // input
   let down = null
@@ -612,6 +728,7 @@ export default async function start(p0) {
   p0.room.on('state', (k, v, from) => app.onRoomState(k, v, from))
   p0.room.on('message', (m, from) => app.onMessage(m, from))
   p0.on('join', p => {
+    if (p && p0.room.isHost && app.shared) app.shared.restore(p.id)
     // tell the newcomer what I am doing, for their invite list
     if (p && p.id !== p0.me.id && app.statusSent) { try { p0.room.sendTo(p.id, { t: 'st', s: app.statusSent }) } catch { /* they ask again */ } }
     app.ui.dirty = true
@@ -631,12 +748,10 @@ export default async function start(p0) {
   await renderer.compileAsync(app.view.tray, app.view.trayCam)
   p0.loading(0.95, 'ready')
 
-  // frame: board, screen layer, dice tray; resolution steps down on slow machines
-  let slow = 0, ratio = Math.min(p0.pixelRatio, 2)
-  renderer.setPixelRatio(ratio)
+  // frame: board, screen layer, dice tray; resolution follows the machine's speed
+  const res = resolution(renderer, p0)
   p0.loop(dt => {
-    if (dt > 0.065) slow++; else slow = Math.max(0, slow - 0.25)
-    if ((slow > 4 || dt > 0.25) && ratio > 0.5) { ratio = Math.max(0.5, ratio * 0.75); renderer.setPixelRatio(ratio); slow = 0 }
+    res.frame(dt)
     app.update(dt)
     app.view.update(dt)
     app.ui.update(dt)

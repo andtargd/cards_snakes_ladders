@@ -298,14 +298,14 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       arrow(g, x - s * 0.32, y - s * 0.12, x + s * 0.32, y - s * 0.12, w)
       arrow(g, x + s * 0.32, y + s * 0.14, x - s * 0.32, y + s * 0.14, w)
       break
-    case 'M4': // dethrone: crown and a down arrow
+    case 'H5': // dethrone: crown and a down arrow
       g.beginPath()
       g.moveTo(x - s * 0.3, y - s * 0.02); g.lineTo(x - s * 0.3, y - s * 0.3); g.lineTo(x - s * 0.15, y - s * 0.16)
       g.lineTo(x, y - s * 0.34); g.lineTo(x + s * 0.15, y - s * 0.16); g.lineTo(x + s * 0.3, y - s * 0.3); g.lineTo(x + s * 0.3, y - s * 0.02)
       g.closePath(); g.fill()
       arrow(g, x, y + s * 0.04, x, y + s * 0.38, w)
       break
-    case 'M5': // double move
+    case 'M4': // double move
       g.font = `bold ${s * 0.42}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
       g.fillText('x2', x - s * 0.08, y + s * 0.02)
       arrow(g, x + s * 0.16, y + s * 0.28, x + s * 0.4, y + s * 0.28, w * 0.8)

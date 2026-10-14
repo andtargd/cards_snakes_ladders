@@ -32,10 +32,10 @@ export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 
 // cards.config.js. tgt: any (any player on the board, self included), other (another player), leader
 // (automatic), cell, cell2 (two cells), ladder, snake, board, none
 const KINDS = {
-  M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'leader'], M5: ['M', 'any'],
+  M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'any'],
   D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
   B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
-  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'],
+  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'], H5: ['H', 'leader'],
   P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
   C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'],
 }
@@ -216,7 +216,7 @@ export function generateBoard(seed, n = CFG.cells) {
   return els
 }
 
-/** The snakes and ladders as they work right now: the base board, shifted by an earthquake, flipped by cards. */
+/** The snakes and ladders as they work right now: the base board, shifted for good by earthquakes, flipped by cards. */
 export function effectiveElements(s) {
   const src = s.quake ? s.quake.els : s.base
   return src.map((e, i) => (s.mods.some(m => m.i === i) ? [1 - e[0], e[2], e[1]] : e))
@@ -340,7 +340,6 @@ function tickTimers(s, pi, ev) {
   let board = false
   s.mk = s.mk.filter(m => (m.o !== pi || step(m)) || ((board = true), false))
   s.mods = s.mods.filter(m => (m.o !== pi || step(m)) || ((board = true), false))
-  if (s.quake && s.quake.o === pi && !step(s.quake)) { s.quake = null; board = true }
   if (board) ev.push(boardEvent(s, 'expire'))
 }
 const boardEvent = (s, why) => ({ e: 'board', why, els: effectiveElements(s), mk: s.mk.map(m => [m.k, m.c, m.t]), mods: s.mods.map(m => m.i) })
@@ -624,11 +623,13 @@ function jump(s, pi, to, ev, why) {
 }
 
 // ---------- quake ----------
+/** The board after an earthquake: it shifts the snakes and ladders as they stand now (after earlier quakes), for good. */
 function quakeElements(s) {
   const blocked = new Set(s.mk.flatMap(m => m.c))
+  const src = s.quake ? s.quake.els : s.base
   let best = null
   for (let attempt = 0; attempt < 30; attempt++) {
-    const els = s.base.map(e => [...e])
+    const els = src.map(e => [...e])
     const order = els.map((e, i) => i)
     for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
     for (const i of order) {
@@ -649,7 +650,7 @@ function quakeElements(s) {
     const bc = boardCfg(s.n)
     if (mean >= bc.simMin && mean <= bc.simMax) return els
   }
-  return best || s.base.map(e => [...e])
+  return best || src.map(e => [...e])
 }
 function structuralOk(els, blocked, n) {
   const bc = boardCfg(n)
@@ -831,8 +832,7 @@ function playCard(s, pi, i, tg, ev) {
       }
       break
     }
-    case 'M4': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
-    case 'M5': rollAndMove(s, target, undefined, ev, true); break
+    case 'M4': rollAndMove(s, target, undefined, ev, true); break
     case 'D1': setFx('x'); break
     // the dice that are chosen or picked from replace each other: the last one played counts
     case 'D2': delete who.fx.gd; delete who.fx.pk; setFx('cf'); break
@@ -843,6 +843,7 @@ function playCard(s, pi, i, tg, ev) {
     case 'H2': setFx('fz'); break
     case 'H3': setFx('sk'); break
     case 'H4': setFx('bk'); break
+    case 'H5': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
     case 'P1': timed('pa'); break
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
@@ -864,7 +865,7 @@ function playCard(s, pi, i, tg, ev) {
       ev.push({ ...boardEvent(s, 'flip'), flip: target })
       break
     case 'B6':
-      s.quake = { o: pi, t: card.turns, f: 1, els: quakeElements(s) }
+      s.quake = { els: quakeElements(s) }
       ev.push(boardEvent(s, 'quake'))
       break
     case 'C1': {
@@ -988,7 +989,7 @@ function evaluateOption(s, pi, i, tg, level) {
   const c = clone(s)
   c.r = (s.r ^ 0xa5a5a5a5) >>> 0 // bots do not see the real future rolls
   const before = utility(s, pi)
-  if (cardId === 'M5') { // Double Move: expected, not sampled
+  if (cardId === 'M4') { // Double Move: expected, not sampled
     c.pl[pi].h.splice(i, 1); c.played = true
     c.pl[tg].fx.dm = 1
     return utility(c, pi) - before
@@ -1026,7 +1027,7 @@ function bestOption(s, pi, level, filter = () => true) {
   return best
 }
 
-const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M5'])
+const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M4'])
 /** The card a bot keeps of those Choose Your Card offers. */
 function bestOffer(s, pi, level) {
   const offer = s.offer || []

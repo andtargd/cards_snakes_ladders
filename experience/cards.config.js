@@ -46,11 +46,6 @@ export default {
       text: 'Instead of rolling, swap places with another player.',
     },
     M4: {
-      name: 'Dethrone', rarity: 'L', weight: 1, enabled: true,
-      spaces: 10, // spaces back for the leader (never past cell 1)
-      text: 'The player closest to the finish moves {spaces} spaces back.',
-    },
-    M5: {
       name: 'Double Move', rarity: 'L', weight: 1, enabled: true,
       text: 'Any player immediately rolls again and moves.',
     },
@@ -110,9 +105,8 @@ export default {
     },
     B6: {
       name: 'Earthquake', rarity: 'L', weight: 1, enabled: true,
-      shift: 2, // each end of every snake and ladder moves 1 to this many cells
-      turns: 3,
-      text: 'Every snake and ladder shifts 1–{shift} spaces for {turns} turns.',
+      shift: 2, // each end of every snake and ladder moves 1 to this many cells, for the rest of the game
+      text: 'Every snake and ladder shifts 1–{shift} spaces for the rest of the game.',
     },
 
     // ---------- Hinder ----------
@@ -122,7 +116,7 @@ export default {
       text: "A player's next roll totals {max} at most.",
     },
     H2: {
-      name: 'Freeze', rarity: 'U', weight: 1, enabled: true,
+      name: 'Vanilla play', rarity: 'U', weight: 1, enabled: true,
       text: "A player can't play cards on their next turn.",
     },
     H3: {
@@ -130,8 +124,13 @@ export default {
       text: 'A player skips their next turn.',
     },
     H4: {
-      name: 'Going Backwards', rarity: 'R', weight: 1, enabled: true,
+      name: 'Moonwalk', rarity: 'R', weight: 1, enabled: true,
       text: "A player's next roll moves them back instead of forward (never past cell 1).",
+    },
+    H5: {
+      name: 'Dethrone', rarity: 'L', weight: 1, enabled: true,
+      spaces: 10, // spaces back for the leader (never past cell 1)
+      text: 'The player closest to the finish moves {spaces} spaces back.',
     },
 
     // ---------- Protection ----------

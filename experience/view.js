@@ -219,7 +219,6 @@ export class View {
     const els = effectiveElements(s)
     for (const m of s.mods) add(G.cellPos(els[m.i][1]).add(new THREE.Vector3(0.38, 0.35, 0)), m.t, '#e65100')
     for (const m of s.mk) for (const c of m.c) add(G.cellPos(c).add(new THREE.Vector3(0.36, 0.3, -0.3)), m.t, m.k === 'sw' ? '#5d7d22' : m.k === 'tr' ? '#1e6fb3' : '#7b1fa2')
-    if (s.quake) add(new THREE.Vector3(4.9, G.tierTop(G.B.tiers - 1) + 0.6, G.backZ() + 0.3), s.quake.t, '#6d4c41')
   }
 
   buildTokens(s, players) {

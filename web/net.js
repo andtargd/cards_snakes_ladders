@@ -146,10 +146,47 @@ export class Net {
     this.code = null
     this.s.reset()
   }
+  /**
+   * Back to the room this tab was in before a reload: join it as before, or, when no one keeps it any
+   * more (I held it alone), open it again with the room's state as it was.
+   */
+  rejoin(code, quick, state) {
+    return this.run(async gen => {
+      const alive = () => { if (gen !== this.gen) throw fail('cancelled') }
+      const probe = await this.openPeer()
+      const t0 = Date.now()
+      try {
+        for (;;) {
+          alive()
+          try {
+            const r = await this.dial(probe, code, this.hello(true), 5000)
+            alive()
+            this.attachMember(probe, r.conn, r.msg, true)
+            return code
+          } catch (e) { if (e.type === 'deny' || e.type === 'cancelled') throw e }
+          alive()
+          // when there are others, one of them takes the room over within a few seconds
+          if (Date.now() - t0 > 6000) {
+            let p = null
+            try { p = await this.openPeer(code) } catch (e) { if (e.type !== 'unavailable-id') throw e }
+            if (p) {
+              if (gen !== this.gen) { p.destroy(); throw fail('cancelled') }
+              probe.destroy()
+              for (const [k, v] of Object.entries(state && typeof state === 'object' ? state : {})) this.s.applyState(k, v, this.s.me.id)
+              this.attachRelay(p, code, quick, false)
+              return code
+            }
+          }
+          if (Date.now() - t0 > 30000) throw fail('timeout')
+          await sleep(1000)
+        }
+      } catch (e) { probe.destroy(); throw e }
+    })
+  }
   /** The page is closing: say goodbye and free the room's id at once. */
   unload() {
     const peer = this.peer
-    this.leave()
+    this.leave('unload')
     try { peer?.destroy() } catch { /* gone */ }
   }
 
@@ -230,7 +267,9 @@ export class Net {
       const known = this.roster.get(m.id)
       if (m.id === this.s.me.id) return deny('taken')
       if (!known && this.roster.size >= (this.quick ? 6 : 12)) return deny('full')
-      if (!known && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
+      // a player seated at the table may come back to a quick room that is playing (after a reload)
+      const seated = this.s.state.g?.s?.pl?.some?.(p => p && p.id === m.id)
+      if (!known && !seated && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
       const prev = this.conns.get(id)
       if (prev && prev !== conn) try { prev.close() } catch { /* gone */ }

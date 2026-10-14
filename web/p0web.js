@@ -36,13 +36,23 @@ function getRenderer() {
   return renderer
 }
 
-const myId = Math.floor(Math.random() * 90000) + 1000
+// this tab keeps its player id through a reload, so an online table gives it its seat back
+const ID_KEY = 'csl-id', ROOM_KEY = 'csl-room', ROOM_FRESH_MS = 120000
+const ss = {
+  get(k) { try { return JSON.parse(sessionStorage.getItem(k) || 'null') } catch { return null } },
+  set(k, v) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, JSON.stringify(v)) } catch { /* private mode */ } },
+}
+let myId = ss.get(ID_KEY)
+if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = Math.floor(Math.random() * 90000) + 1000; ss.set(ID_KEY, myId) }
 let savedName = ''
 try { savedName = localStorage.getItem('csl-name') || '' } catch { /* private mode */ }
 const me = { id: myId, name: (q.get('name') || savedName).slice(0, 14), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
 const players = new Map([[myId, me]])
 const state = {}
 let host = myId
+// the online room this tab is in and its shared state, for coming back after a reload
+let unloading = false
+const keepRoom = () => { if (!unloading && web.room) ss.set(ROOM_KEY, { code: web.room.code, quick: web.room.quick, state, at: Date.now() }) }
 
 // the session the network keeps in step: who is here, who hosts, the room's shared state
 const session = {
@@ -56,10 +66,12 @@ const session = {
   },
   removePlayer(id) { const p = players.get(id); if (!p || id === myId) return; players.delete(id); emit('leave', p) },
   setHost(id) { if (id !== host) { host = id; emit('host', id) } },
-  applyState(k, v, from) { if (v == null) delete state[k]; else state[k] = v; emit('state', k, v ?? null, from) },
+  applyState(k, v, from) { if (v == null) delete state[k]; else state[k] = v; keepRoom(); emit('state', k, v ?? null, from) },
   message(d, from) { emit('message', d, from) },
   roomChanged(info, reason) {
+    if (unloading) return
     web.room = info
+    if (info) keepRoom(); else ss.set(ROOM_KEY, null)
     try { history.replaceState(null, '', info ? '?room=' + info.code : location.pathname) } catch { /* fine */ }
     emit('room', info, reason)
   },
@@ -91,7 +103,14 @@ const web = {
   share() { return shareRoom(web.room) },
   leave() { net.leave() },
 }
-addEventListener('pagehide', () => net.unload())
+addEventListener('pagehide', () => {
+  // a reload: the room is kept (with the time it was left) to come back to it
+  keepRoom()
+  unloading = true
+  net.unload()
+})
+// back from the browser's page cache: the room was left on the way out, so start over (and come back to it)
+addEventListener('pageshow', e => { if (e.persisted && unloading) location.reload() })
 
 const input = { keys: new Set(), isDown: c => input.keys.has(c), pointer: { x: 0, y: 0, buttons: 0, locked: false }, lockPointer() {}, unlockPointer() {} }
 const controls = { mode: 'none', enabled: true, speed: 10, vertical: false, distance: 7, yaw: 0, pitch: 0.25 }
@@ -160,9 +179,13 @@ async function boot() {
   await mod.default(p0)
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
-  // a room's link: ask for a name and join
+  // the room this tab was in before a reload: back to it; a room's link: ask for a name and join
   const code = cleanCode(q.get('room'))
-  if (code.length >= 3) dialog.open({ code })
+  const back = ss.get(ROOM_KEY)
+  ss.set(ROOM_KEY, null)
+  if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
+    dialog.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
+  } else if (code.length >= 3) dialog.open({ code })
   // a hidden tab gets no animation frames: a timer keeps the game (and an online table it hosts) going
   let prev = performance.now()
   const next = () => (document.hidden ? setTimeout(() => frame(performance.now()), 100) : requestAnimationFrame(frame))

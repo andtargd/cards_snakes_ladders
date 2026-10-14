@@ -1372,7 +1372,7 @@ export class UI {
     const list = targetsFor(s, me, c.id)
     if (def.tgt === 'none' || def.tgt === 'board' || (def.tgt === 'leader' && list.length === 1)) { this.play(c.i, def.tgt === 'leader' ? list[0] : null, def.tgt === 'leader'); return }
     const kind = def.tgt === 'cell' ? 'cell' : def.tgt === 'cell2' ? 'cell2' : def.tgt === 'ladder' ? 'ladder' : def.tgt === 'snake' ? 'snake' : 'player'
-    this.target = { i: c.i, card: c.id, kind, list, sel: kind === 'cell2' ? [] : null }
+    this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null }
     this.selected = c.i
     app.sfx('draw', 0.3)
     this.syncHighlight()
@@ -1380,7 +1380,9 @@ export class UI {
   }
   /** The card leaves the hand at once and flies to the middle; the rules follow. */
   play(i, tg, onPlayer = false) {
-    const app = this.app, s = app.view.state
+    const app = this.app, s = app.view.state, me = app.mySeat()
+    // only my own card, on my own turn
+    if (!s || me < 0 || !s.pl[me].h[i] || whyNot(s, me, s.pl[me].h[i])) { this.cancelTarget(); return }
     const c = this.cards.find(k => k.kind === 'hand' && k.i === i)
     this.hidden = { i, seq: s.seq }
     let fl = null
@@ -1437,6 +1439,12 @@ export class UI {
     if (hov !== t.hov) { t.hov = hov; this.syncHighlight() }
   }
   cancelTarget() { this.target = null; this.selected = -1; this.syncHighlight(); this.dirty = true }
+  /** A card being aimed is put back once it can no longer be played: the turn moved on, the hand changed. */
+  checkTarget() {
+    const t = this.target, app = this.app, s = app.view.state, me = app.mySeat()
+    if (!t) return
+    if (app.screen !== 'game' || !s || me < 0 || t.seat !== me || s.pl[me].h[t.i] !== t.card || whyNot(s, me, t.card)) this.cancelTarget()
+  }
 
   // ---------- input ----------
   hitAt(x, y) { for (let k = this.hits.length - 1; k >= 0; k--) { const h = this.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h } return null }
@@ -1497,6 +1505,7 @@ export class UI {
     const n = this.rollPrompt()
     if (n !== this.promptN) { this.promptN = n; this.dirty = true }
     this.slideRows(dt)
+    this.checkTarget()
     this.layoutCards(dt)
     this.updateBanner(dt)
     if (this.dirty) this.draw()

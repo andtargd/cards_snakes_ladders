@@ -91,6 +91,11 @@ export function onlineDialog({ net, me }) {
   el.addEventListener('pointerdown', e => { if (e.target === el && !busy) close() })
   el.addEventListener('keydown', e => { if (e.key === 'Escape' && !busy) close() })
 
+  /** Coming back to a room after a reload: the dialog shows how it goes, and the choices if it fails. */
+  function resume(code, fn) {
+    open({ code })
+    go(`Coming back to room ${cleanCode(code)}…`, fn)
+  }
   function open({ code } = {}) {
     setBusy(null)
     inviteEl.hidden = !code
@@ -104,7 +109,7 @@ export function onlineDialog({ net, me }) {
     el.hidden = true
     document.getElementById('c')?.focus()
   }
-  return { open, close, get isOpen() { return !el.hidden } }
+  return { open, close, resume, get isOpen() { return !el.hidden } }
 }
 
 /** Send the room's link: the share sheet on phones, the clipboard elsewhere. */
