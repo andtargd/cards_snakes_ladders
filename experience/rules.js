@@ -1019,12 +1019,35 @@ function bestOption(s, pi, level, filter = () => true) {
     if (!filter(cardId)) return
     if (!targetsFor(s, pi, cardId).length) return
     for (const tg of botTargets(s, pi, cardId)) {
+      if (!sensible(s, pi, i, tg)) continue
       let g = evaluateOption(s, pi, i, tg, level)
       if (level === 2) g += (rnd(s) - 0.5) * 0.6
       if (!best || g > best.gain) best = { i, tg, gain: g, card: cardId }
     }
   })
   return best
+}
+
+/** False for a play no bot makes at any level: one that hurts itself or helps another player. */
+function sensible(s, pi, i, tg) {
+  const cardId = s.pl[pi].h[i]
+  if (typeof tg !== 'number' || !['any', 'other', 'leader'].includes(CARD[cardId].tgt)) return true
+  const self = tg === pi, fx = s.pl[tg].fx
+  switch (cardId) {
+    case 'M1': case 'M2': case 'H5': { // where the piece ends up, snakes, ladders and shields included
+      const c = clone(s)
+      c.rolled = false
+      if (!apply(c, pi, { t: 'play', i, tg }).ok) return false
+      const moved = c.pl[tg].d ? Infinity : c.pl[tg].pos - s.pl[tg].pos
+      return self ? moved > 0 : moved < 0
+    }
+    // more or heavier dice are wasted under Slow Down and take a Moonwalk further back
+    case 'D1': case 'D3': return self ? !fx.sl && !fx.bk : !!fx.bk
+    case 'M4': return self ? !fx.bk : !!fx.bk
+    case 'D2': case 'D4': case 'D5': case 'P1': case 'P2': case 'P3': return self
+    case 'H1': case 'H2': case 'H3': case 'H4': return !self
+  }
+  return true
 }
 
 const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M4'])
@@ -1059,7 +1082,7 @@ export function botAction(s, pi) {
     if (!s.rolled) {
       if (canPlay && rnd(s) < 0.5) {
         const opts = []
-        p.h.forEach((c, i) => { for (const tg of targetsFor(s, pi, c)) opts.push({ i, tg, c }) })
+        p.h.forEach((c, i) => { for (const tg of targetsFor(s, pi, c)) if (sensible(s, pi, i, tg)) opts.push({ i, tg, c }) })
         if (opts.length) {
           const o = opts[rint(s, opts.length)]
           const tg = CARD[o.c].tgt === 'cell2' ? pickTwo(s, pi) : o.tg

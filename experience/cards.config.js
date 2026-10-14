@@ -10,6 +10,8 @@
 //   enabled  false takes the card out of the deck and out of the How to Play catalogue
 //   text     the text on the card. {name} in it is replaced by the card's own number of that name,
 //            so "Move any player {spaces} spaces forward" follows `spaces`. Up to 4 short lines fit.
+//   popup    (some cards) the word that pops up over a player's piece when the card's effect hits them,
+//            and its colour: { text: 'Stuck!', color: '#5d7d22' }
 // and the numbers of its own, described next to each card.
 //
 // Who or what a card can target, its category (colour and picture) and how it works stay in rules.js.
@@ -80,6 +82,7 @@ export default {
     B1: {
       name: 'Swamp', rarity: 'C', weight: 1, enabled: true,
       turns: 3,
+      popup: { text: 'Stuck!', color: '#5d7d22' }, // over a piece the swamp stops
       text: 'Place a swamp. Anyone who reaches it stops there. Lasts {turns} turns.',
     },
     B2: {
@@ -117,14 +120,17 @@ export default {
     },
     H2: {
       name: 'Vanilla play', rarity: 'U', weight: 1, enabled: true,
+      popup: { text: 'No cards!', color: '#d64545' }, // over the player at the start of the turn they can't play cards
       text: "A player can't play cards on their next turn.",
     },
     H3: {
       name: 'Skip Turn', rarity: 'R', weight: 1, enabled: true,
+      popup: { text: 'Skips', color: '#d64545' }, // over the player when their turn is skipped
       text: 'A player skips their next turn.',
     },
     H4: {
       name: 'Moonwalk', rarity: 'R', weight: 1, enabled: true,
+      popup: { text: 'Backwards!', color: '#d64545' }, // over the player as their roll moves them back
       text: "A player's next roll moves them back instead of forward (never past cell 1).",
     },
     H5: {
@@ -148,6 +154,7 @@ export default {
     P3: {
       name: 'Shield', rarity: 'R', weight: 1, enabled: true,
       turns: 3, // it also ends on the first snake it blocks
+      popup: { text: 'Shield!', color: '#2b8fd6' }, // over the player when it blocks a snake
       text: 'A player ignores the next snake they land on. Lasts {turns} turns.',
     },
 

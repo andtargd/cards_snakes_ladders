@@ -353,7 +353,8 @@ export function tierArrowsGeometry({ lod = 0 } = {}) {
     const riser = (lo.z + hi.z) / 2
     const z0 = riser + 0.24, z1 = riser - 0.2
     const n = lod ? 4 : 10
-    for (const [w, lift, c] of [[0.13, 0.05, ink], [0.065, 0.058, paperC]]) {
+    // over a swamp marker, which lies up to 0.058 over the cell
+    for (const [w, lift, c] of [[0.13, 0.072, ink], [0.065, 0.08, paperC]]) {
       const pts = [], widths = [], colors = []
       for (let i = 0; i <= n; i++) { pts.push({ x, z: z0 + (z1 - z0) * (i / n) }); widths.push(w); if (i < n) colors.push(c) }
       ribbon(b, pts, widths, colors, lift, { walls: !lod && c === ink })

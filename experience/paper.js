@@ -361,16 +361,22 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.font = `bold ${s * 0.22}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
       g.fillText('≤3', x, y + s * 0.34)
       break
-    case 'H2': // freeze: snowflake
-      for (let k = 0; k < 3; k++) {
-        const a = k * Math.PI / 3
-        g.beginPath(); g.moveTo(x - Math.cos(a) * s * 0.38, y - Math.sin(a) * s * 0.38); g.lineTo(x + Math.cos(a) * s * 0.38, y + Math.sin(a) * s * 0.38); g.stroke()
-      }
-      for (let k = 0; k < 6; k++) {
-        const a = k * Math.PI / 3, px = x + Math.cos(a) * s * 0.26, py = y + Math.sin(a) * s * 0.26
-        g.beginPath(); g.moveTo(px + Math.cos(a + 2.4) * s * 0.1, py + Math.sin(a + 2.4) * s * 0.1); g.lineTo(px, py); g.lineTo(px + Math.cos(a - 2.4) * s * 0.1, py + Math.sin(a - 2.4) * s * 0.1); g.stroke()
-      }
+    case 'H2': { // vanilla play: a card with a padlock on it
+      const cw = s * 0.44, ch = s * 0.6
+      g.save(); g.translate(x - s * 0.1, y - s * 0.06); g.rotate(-0.12)
+      roundRect(g, -cw / 2, -ch / 2, cw, ch, s * 0.05); g.globalAlpha = 0.25; g.fill(); g.globalAlpha = 1; g.lineWidth = w * 0.8; g.stroke()
+      star(g, 0, -s * 0.06, s * 0.08, s * 0.035, 5); g.fill()
+      g.restore()
+      const lx = x + s * 0.16, ly = y + s * 0.16, bw = s * 0.34, bh = s * 0.26
+      g.lineWidth = w * 0.95
+      g.beginPath(); g.arc(lx, ly - bh / 2, s * 0.1, Math.PI, 0); g.lineTo(lx + s * 0.1, ly - bh / 2 + s * 0.02); g.moveTo(lx - s * 0.1, ly - bh / 2 + s * 0.02); g.lineTo(lx - s * 0.1, ly - bh / 2); g.stroke()
+      g.strokeStyle = '#ffffff'; g.lineWidth = w * 0.5
+      roundRect(g, lx - bw / 2, ly - bh / 2, bw, bh, s * 0.04); g.fill(); g.stroke()
+      g.fillStyle = '#ffffff'
+      g.beginPath(); g.arc(lx, ly - s * 0.02, s * 0.04, 0, Math.PI * 2); g.fill()
+      g.fillRect(lx - s * 0.015, ly - s * 0.01, s * 0.03, s * 0.08)
       break
+    }
     case 'H3': // skip turn
       g.beginPath(); g.arc(x, y, s * 0.34, 0, Math.PI * 2); g.stroke()
       g.beginPath(); g.moveTo(x - s * 0.24, y + s * 0.24); g.lineTo(x + s * 0.24, y - s * 0.24); g.stroke()

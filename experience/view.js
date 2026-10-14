@@ -378,8 +378,8 @@ export class View {
       case 'discard': this.tasks.push({ dur: 0.5, start: () => this.emit('discard', e) }); break
       case 'mustdisc': this.tasks.push({ dur: 0, start: () => this.emit('mustdisc', e) }); break
       case 'play': this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); if (typeof e.tg === 'number' && ['any', 'other', 'leader'].includes(CARD[e.card].tgt)) { this.focusOn(e.tg); this.pointAt(e.tg, 1.6); this.sfx('target', 0.5) } } }); break
-      case 'roll': this.queueRoll(e); if (e.back) this.popupTask(e.p, 'Backwards!', '#d64545', 'skip'); break
-      case 'pick': this.queuePick(e); if (e.back) this.popupTask(e.p, 'Backwards!', '#d64545', 'skip'); break
+      case 'roll': this.queueRoll(e); if (e.back) this.cardPopup(e.p, 'H4', 'skip'); break
+      case 'pick': this.queuePick(e); if (e.back) this.cardPopup(e.p, 'H4', 'skip'); break
       case 'offer': this.tasks.push({ dur: 0.35, start: () => this.emit('offer', e) }); break
       case 'move': {
         let from = null
@@ -396,10 +396,10 @@ export class View {
         this.tasks.push({ dur: 0, start: () => { tok(e.p).anim = null; this.layoutTokens() } })
         break
       }
-      case 'swamp': this.popupTask(e.p, 'Stuck!', '#5d7d22', 'swamp'); break
-      case 'shield': this.popupTask(e.p, 'Shield!', '#2b8fd6', 'shield'); break
-      case 'skip': this.popupTask(e.p, 'Skips', '#d64545', 'skip'); break
-      case 'frozen': this.popupTask(e.p, 'Frozen', '#2b8fd6', 'freeze'); break
+      case 'swamp': this.cardPopup(e.p, 'B1', 'swamp'); break
+      case 'shield': this.cardPopup(e.p, 'P3', 'shield'); break
+      case 'skip': this.cardPopup(e.p, 'H3', 'skip'); break
+      case 'frozen': this.cardPopup(e.p, 'H2', 'skip'); break
       case 'ladder': case 'snake': {
         let path = null
         this.tasks.push({
@@ -440,6 +440,11 @@ export class View {
     }
   }
 
+  /** The word a card's effect pops up over a piece (cards.config.js), in the card's category colour unless it gives one. */
+  cardPopup(p, cardId, sound) {
+    const c = CARD[cardId], pop = c.popup || {}
+    this.popupTask(p, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat], sound)
+  }
   popupTask(p, text, color, sound) {
     this.tasks.push({ dur: 0.7, start: () => { this.popup(this.tokens[p].group.position, text, color); this.sfx(sound, 0.5) } })
   }
@@ -724,14 +729,20 @@ export class View {
     let budget = sdt
     for (let guard = 0; guard < 200 && this.tasks.length; guard++) {
       const t = this.tasks[0]
-      if (!t.begun) { t.begun = true; t.t = 0; t.start?.() }
-      if (t.dur <= 0 || this.speed >= 50) { t.update?.(1); t.end?.(); this.tasks.shift(); continue }
-      if (budget <= 0) break
-      const step = Math.min(budget, t.dur - t.t)
-      t.t += step
-      budget -= step
-      t.update?.(Math.min(1, t.t / t.dur))
-      if (t.t >= t.dur - 1e-6) { t.end?.(); this.tasks.shift() } else break
+      try {
+        if (!t.begun) { t.begun = true; t.t = 0; t.start?.() }
+        if (t.dur <= 0 || this.speed >= 50) { t.update?.(1); t.end?.(); this.tasks.shift(); continue }
+        if (budget <= 0) break
+        const step = Math.min(budget, t.dur - t.t)
+        t.t += step
+        budget -= step
+        t.update?.(Math.min(1, t.t / t.dur))
+        if (t.t >= t.dur - 1e-6) { t.end?.(); this.tasks.shift() } else break
+      } catch (err) {
+        // a step that fails is dropped: the queue must not stall, or the game waits for it forever
+        this.p0.log('animation', String(err?.stack || err))
+        if (this.tasks[0] === t) this.tasks.shift()
+      }
     }
     // pieces glide to their slots
     this.tokens.forEach((t, i) => {

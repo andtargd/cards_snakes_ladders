@@ -197,6 +197,11 @@ export class UI {
     un.time.value = this.time
     un.hover.value += ((this.hover === 'tray' ? 1 : 0) - un.hover.value) * (1 - Math.exp(-12 * dt))
   }
+  trayKey() {
+    const app = this.app, s = app.view.state
+    if (app.screen !== 'game' || !s) return ''
+    return [s.gid, s.seq, s.cur, s.ph, s.rolled, s.played, app.mySeat(), app.view.busy, app.waiting > 0, app.curtain(), app.menuOpen, !!app.invite, !!this.target].join()
+  }
   /** How many dice wait in the tray for my click (0 when it is not my roll, or the roll is a chosen value). */
   rollPrompt() {
     const app = this.app, s = app.view.state, me = app.mySeat()
@@ -1504,6 +1509,10 @@ export class UI {
     if (this.p0.width !== this.W || this.p0.height !== this.H) this.resize()
     const n = this.rollPrompt()
     if (n !== this.promptN) { this.promptN = n; this.dirty = true }
+    // the tray (End Turn, the dice, the values to choose) follows whose turn it is and whether the table is busy:
+    // redraw whenever any of that changes, not only when an event says so
+    const trayKey = this.trayKey()
+    if (trayKey !== this.trayKeyWas) { this.trayKeyWas = trayKey; this.dirty = true }
     this.slideRows(dt)
     this.checkTarget()
     this.layoutCards(dt)
