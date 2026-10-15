@@ -263,6 +263,11 @@ function snakeShape(g, x, y, s, flip = false) {
   g.stroke()
   g.beginPath(); g.ellipse(x + s * 0.42, y, s * 0.13, s * 0.1, 0, 0, Math.PI * 2); g.fill()
 }
+/** A playing piece standing on (x, y), s tall. */
+function pawn(g, x, y, s) {
+  g.beginPath(); g.arc(x, y - s * 0.78, s * 0.2, 0, Math.PI * 2); g.fill()
+  g.beginPath(); g.moveTo(x - s * 0.12, y - s * 0.6); g.lineTo(x + s * 0.12, y - s * 0.6); g.lineTo(x + s * 0.3, y); g.lineTo(x - s * 0.3, y); g.closePath(); g.fill()
+}
 function ladderShape(g, x, y, s, angle = -0.5) {
   g.save()
   g.translate(x, y); g.rotate(angle)
@@ -310,6 +315,36 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.fillText('x2', x - s * 0.08, y + s * 0.02)
       arrow(g, x + s * 0.16, y + s * 0.28, x + s * 0.4, y + s * 0.28, w * 0.8)
       break
+    case 'M5': { // tailgate: a piece leaps along a dashed arc to land right behind another
+      pawn(g, x + s * 0.3, y + s * 0.3, s * 0.34)
+      g.globalAlpha = 0.45; pawn(g, x - s * 0.36, y + s * 0.3, s * 0.26); g.globalAlpha = 1
+      g.lineWidth = w * 0.75; g.setLineDash([s * 0.07, s * 0.06])
+      g.beginPath(); g.moveTo(x - s * 0.34, y + s * 0.02); g.quadraticCurveTo(x - s * 0.1, y - s * 0.62, x + s * 0.08, y + s * 0.02); g.stroke()
+      g.setLineDash([])
+      arrow(g, x + s * 0.03, y - s * 0.1, x + s * 0.1, y + s * 0.1, w * 0.75)
+      break
+    }
+    case 'M6': { // rewind: a clock whose arrow runs back round it
+      g.lineWidth = w * 0.8
+      g.beginPath(); g.arc(x, y, s * 0.24, 0, Math.PI * 2); g.stroke()
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x, y - s * 0.15); g.moveTo(x, y); g.lineTo(x - s * 0.1, y + s * 0.05); g.stroke()
+      arcArrow(g, x, y, s * 0.38, -Math.PI * 0.35, -Math.PI * 1.75, w * 0.9)
+      break
+    }
+    case 'C6': { // echo: a card, its ghost behind it, and the rings of an echo
+      const cw = s * 0.26, ch = s * 0.38
+      g.lineWidth = w * 0.6
+      g.save(); g.translate(x + s * 0.06, y - s * 0.06); g.rotate(0.12)
+      g.globalAlpha = 0.35; roundRect(g, -cw / 2, -ch / 2, cw, ch, s * 0.03); g.fill(); g.globalAlpha = 0.6; g.setLineDash([s * 0.04, s * 0.03]); g.stroke(); g.setLineDash([])
+      g.restore()
+      g.globalAlpha = 1
+      g.fillStyle = '#ffffff'; roundRect(g, x - s * 0.2 - cw / 2, y + s * 0.04 - ch / 2, cw, ch, s * 0.03); g.fill(); g.stroke()
+      g.fillStyle = col; star(g, x - s * 0.2, y + s * 0.04, s * 0.07, s * 0.03, 5); g.fill()
+      g.lineWidth = w * 0.7
+      for (const [r, a] of [[0.3, 0.8], [0.42, 0.45]]) { g.globalAlpha = a; g.beginPath(); g.arc(x - s * 0.02, y, s * r, -0.55, 0.55); g.stroke() }
+      g.globalAlpha = 1
+      break
+    }
     case 'D1': die(g, x - s * 0.15, y - s * 0.1, s * 0.36, 3); die(g, x + s * 0.15, y + s * 0.12, s * 0.36, 5); break
     case 'D2':
       die(g, x, y - s * 0.08, s * 0.44, 2)
@@ -519,6 +554,34 @@ export function drawCard(g, cardId, w = 256, h = 358, x0 = 0, y0 = 0) {
     star(g, w / 2 + (i - (st.stars - 1) / 2) * 18 * k, h - 48 * k, 7 * k, 3 * k)
     g.fill()
   }
+  g.restore()
+}
+
+/** A card's ghost, as Echo shows the card it plays again: washed out in a pale violet, with ripples and an ECHO tag. */
+export function drawGhostCard(g, cardId, w = 256, h = 358) {
+  const k = w / 256
+  drawCard(g, cardId, w, h)
+  g.save()
+  roundRect(g, 0, 0, w, h, 18 * k); g.clip()
+  g.globalCompositeOperation = 'saturation'
+  g.fillStyle = 'hsl(0,0%,50%)'; g.globalAlpha = 0.7; g.fillRect(0, 0, w, h)
+  g.globalCompositeOperation = 'source-atop'
+  g.globalAlpha = 1
+  const gr = g.createLinearGradient(0, 0, w * 0.4, h)
+  gr.addColorStop(0, 'rgba(196,170,255,0.55)'); gr.addColorStop(1, 'rgba(140,200,255,0.5)')
+  g.fillStyle = gr; g.fillRect(0, 0, w, h)
+  // ripples, as on water
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 2 * k
+  for (let y = 14 * k; y < h; y += 15 * k) {
+    g.beginPath()
+    for (let x = 0; x <= w; x += 8 * k) g.lineTo(x, y + Math.sin(x / (22 * k) + y / (40 * k)) * 2.5 * k)
+    g.stroke()
+  }
+  g.globalCompositeOperation = 'source-over'
+  g.fillStyle = '#7a4fd0'
+  roundRect(g, w / 2 - 44 * k, h * 0.555 - 14 * k, 88 * k, 26 * k, 13 * k); g.fill()
+  g.fillStyle = '#ffffff'; g.font = `bold ${15 * k}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
+  g.fillText('ECHO', w / 2, h * 0.555)
   g.restore()
 }
 

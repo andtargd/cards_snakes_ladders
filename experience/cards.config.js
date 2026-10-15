@@ -44,12 +44,22 @@ export default {
       text: 'Move any player {spaces} spaces back.',
     },
     M3: {
-      name: 'Swap Places', rarity: 'R', weight: 1, enabled: true,
+      name: 'Swap Places', rarity: 'L', weight: 1, enabled: true,
       text: 'Instead of rolling, swap places with another player.',
     },
     M4: {
-      name: 'Double Move', rarity: 'L', weight: 1, enabled: true,
+      name: 'Double Move', rarity: 'R', weight: 1, enabled: true,
       text: 'Any player immediately rolls again and moves.',
+    },
+    M5: {
+      name: 'Tailgate', rarity: 'U', weight: 1, enabled: true,
+      popup: { text: 'Leap!', color: '#3fa66b' }, // over the player where the leap lands
+      text: 'Instead of rolling, leap to the cell just behind the nearest player ahead.',
+    },
+    M6: {
+      name: 'Rewind', rarity: 'R', weight: 1, enabled: true,
+      popup: { text: 'Rewind!', color: '#9b59d6' }, // over the player sent back
+      text: 'A player goes back to where their last turn began. Nothing there takes effect.',
     },
 
     // ---------- Dice: they change the target's next roll ----------
@@ -180,6 +190,10 @@ export default {
       name: 'Choose Your Card', rarity: 'U', weight: 1, enabled: true,
       draw: 3, // cards offered at the start of the next turn (1 to 5); the player keeps one
       text: 'On your next turn draw {draw} cards instead of one and keep the one you choose.',
+    },
+    C6: {
+      name: 'Echo', rarity: 'L', weight: 1, enabled: true,
+      text: "Replay the last card a player played, on targets you choose. Not an Echo.",
     },
   },
 }

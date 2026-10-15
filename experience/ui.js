@@ -2,10 +2,17 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, FX, targetsFor, whyNot, choiceMax, CFG, SIZES } from './rules.js'
+import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, choiceMax, CFG, SIZES } from './rules.js'
 import { T } from './strings.js'
 
-const CARD_VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
+/** The cards page of How to Play: by category, and within one from Common to Legendary. */
+const CATALOG = [...CARDS].sort((a, b) => Object.keys(CATEGORY).indexOf(a.cat) - Object.keys(CATEGORY).indexOf(b.cat) || 'CURL'.indexOf(a.rar) - 'CURL'.indexOf(b.rar))
+/** How long a played card stays in the middle: Echo longer, while it turns over to the card it plays again. */
+const flyerLife = fl => (fl.echo ? 2.0 : 1.25)
+/** How a card's target is picked on the screen. */
+const kindOf = tgt => ({ cell: 'cell', cell2: 'cell2', ladder: 'ladder', snake: 'snake' })[tgt] || 'player'
+
+const CARD_VS ='varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 const CARD_FS = `
 uniform sampler2D map; uniform float time; uniform float legendary; uniform float dim; uniform float opacity; uniform float lift;
 uniform float burn; uniform float heat; uniform float seed;
@@ -133,7 +140,9 @@ export class UI {
   cardTexture(id) {
     if (this.cardTex.has(id)) return this.cardTex.get(id)
     const { c, g } = P.canvas(288, 403)
-    if (id === 'back') P.drawCardBack(g, 288, 403); else P.drawCard(g, id, 288, 403)
+    if (id === 'back') P.drawCardBack(g, 288, 403)
+    else if (id.startsWith('ghost:')) P.drawGhostCard(g, id.slice(6), 288, 403) // Echo's copy of a card
+    else P.drawCard(g, id, 288, 403)
     const t = new THREE.CanvasTexture(c)
     t.colorSpace = THREE.NoColorSpace
     t.anisotropy = 4
@@ -257,7 +266,11 @@ export class UI {
     b.turn = Math.max(0, b.turn - dt)
     let text = null, sub = null
     const discard = inGame && me >= 0 && s.cur === me && s.ph === 'disc' && app.curtain() < 0 && !app.view.busy
-    if (inGame && this.target) { text = T.chooseWhat(CARD[this.target.card].tgt); sub = T.targetHint(this.target.kind) }
+    if (inGame && this.target) {
+      const t = this.target
+      if (t.echo && t.echo.card) { text = T.chooseWhat(CARD[t.echo.card].tgt); sub = T.echoing(CARD[t.echo.card].name, T.targetHint(t.kind)) }
+      else { text = T.chooseWhat(CARD[t.card].tgt); sub = T.targetHint(t.echo ? 'echo' : t.kind) }
+    }
     else if (discard) { text = T.discardTitle; sub = T.discardHint(s.pl[me].h.length - CFG.hand) }
     else if (inGame && b.turn > 0) text = b.turnText
     if (text && (text !== b.text || sub !== b.sub)) { this.drawBanner(text, sub); b.text = text; b.sub = sub; b.pop = 0 }
@@ -958,9 +971,17 @@ export class UI {
     // log
     this.drawLog()
   }
-  /** The peeked hand stays until the roll; I can put it away sooner. */
+  /** The peeked hand stays until the end of the turn; I can put it away sooner, and then the turn ends after the roll as usual. */
   peekKey(s) { return s?.peek ? `${s.gid}:${s.turnNo}:${s.peek.tg}` : null }
-  closePeek() { if (this.peekRect) { this.peekClosed = this.peekKey(this.app.view.state); this.dirty = true; return true } return false }
+  closePeek() { if (this.peekRect) { this.peekClosed = this.peekKey(this.app.view.state); this.dirty = true; this.sendUnpeek(); return true } return false }
+  /** Tells the rules the peeked hand is put away, once the table is still (it may be busy when the window closes). */
+  sendUnpeek() {
+    const app = this.app, s = app.view.state, me = app.mySeat()
+    if (!s?.peek || s.peek.by !== me || s.cur !== me || this.peekClosed !== this.peekKey(s) || this.unpeekSent === this.peekClosed) return
+    if (app.view.busy || app.waiting > 0) return
+    this.unpeekSent = this.peekClosed
+    app.act({ t: 'unpeek' })
+  }
 
   /** The game's windows over the cards: whose turn it is at one computer, the results, the game menu. */
   drawGameWindows() {
@@ -1168,7 +1189,10 @@ export class UI {
     // Choose Your Card: the cards offered, in a window over the hand
     const offering = app.screen === 'game' && s && s.ph === 'take' && s.offer && me >= 0 && s.cur === me && !hide && !app.menuOpen && !(this.took && this.took.seq === s.seq && this.time - this.took.at < 3)
     if (offering) s.offer.forEach((id, i) => want.push({ id, key: 'o' + i + id, i, kind: 'offer' }))
-    if (app.screen === 'help' && this.helpPage === 1) CARDS.forEach((c, i) => want.push({ id: c.id, key: 'c' + c.id, i, kind: 'catalog' }))
+    // Echo: the card each player played last, by their row in the players panel
+    const echoing = app.screen === 'game' && s && this.target?.echo && !this.target.echo.card && !hide && !app.menuOpen
+    if (echoing) s.pl.forEach((p, i) => { if (p.lc && !p.d && this.rowRect[i]) want.push({ id: p.lc, key: 'e' + i + p.lc, i, kind: 'echo' }) })
+    if (app.screen === 'help' && this.helpPage === 1) CATALOG.forEach((c, i) => want.push({ id: c.id, key: 'c' + c.id, i, kind: 'catalog' }))
     // keep meshes whose key stays, add new ones, drop the rest
     const next = []
     for (const w of want) {
@@ -1176,6 +1200,7 @@ export class UI {
       if (!c) {
         c = { ...w, mesh: this.makeCard(w.id), x: this.W + 80 * this.u, y: this.H - 60 * this.u, s: 0.4 }
         if (w.kind === 'catalog' || w.kind === 'peek' || w.kind === 'offer') { c.x = this.W / 2; c.y = this.H / 2; c.s = 0.2 }
+        if (w.kind === 'echo') { const r = this.rowRect[w.i]; c.x = r.x + r.w; c.y = r.y + r.h / 2; c.s = 0.2 }
         // the card kept from an offer comes down from where it lay
         if (w.kind === 'hand' && this.took && this.took.id === w.id && this.time - this.took.at < 3) { c.x = this.took.x; c.y = this.took.y; c.s = this.took.s; this.took = null }
       }
@@ -1234,6 +1259,16 @@ export class UI {
       })
       this.offerRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * 1.08 + pw, h: pw * 1.4 }
     }
+    for (const c of this.cards.filter(c => c.kind === 'echo')) {
+      // beside the row (over its right end on a phone), bigger under the pointer; dimmed when Echo can't play it now
+      const r = this.rowRect[c.i]
+      if (!r) continue
+      const hov = this.hover === 'pl' + c.i
+      const w0 = r.h * 1.3 / 1.4, w = hov ? Math.max(w0, Math.min(w0 * 3, 150 * u)) : w0
+      c.tx = Math.min(W - w / 2 - 4 * u, this.narrow ? r.x + r.w - w / 2 - 3 * u : r.x + r.w + 8 * u + w / 2)
+      c.ty = Math.max(w * 0.7 + 4 * u, r.y + r.h / 2)
+      c.ts = w; c.rot = hov ? 0 : 0.05; c.dim = this.target?.list.includes(c.i) ? 0 : 1; c.lift = hov ? 0.6 : 0; c.z = hov ? 30 : 14
+    }
     // the window behind the cards is drawn only on a redraw: one when it moves (a resize)
     const offerKey = this.offerRect ? [this.offerRect.x, this.offerRect.y, this.offerRect.w].map(Math.round).join() : ''
     if (offerKey !== this.offerKey) { this.offerKey = offerKey; this.dirty = true }
@@ -1288,15 +1323,27 @@ export class UI {
       const big = Math.min(W * 0.42, 250 * u)
       const x = fl.x0 + (W / 2 - fl.x0) * k, y = fl.y0 + (H * 0.42 - fl.y0) * k
       const sc = fl.s0 + (big - fl.s0) * k
+      const life = flyerLife(fl)
       fl.mesh.position.set(x, H - y, 40)
       fl.mesh.scale.set(sc, sc, 1)
       fl.mesh.rotation.z = (1 - k) * 0.3
       fl.mesh.renderOrder = 40
       const u2 = fl.mesh.material.uniforms
       u2.time.value = this.time
-      u2.opacity.value = fl.t > 1.0 ? Math.max(0, 1 - (fl.t - 1.0) / 0.25) : 1
+      u2.opacity.value = fl.t > life - 0.25 ? Math.max(0, 1 - (fl.t - life + 0.25) / 0.25) : 1
+      if (fl.echo) {
+        // Echo turns over: its back is a ghost of the card it plays again
+        const f = THREE.MathUtils.clamp((fl.t - 0.55) / 0.5, 0, 1)
+        if (f >= 0.5 && !fl.flipped) {
+          fl.flipped = true
+          u2.map.value = this.cardTexture('ghost:' + fl.echo)
+          u2.legendary.value = CARD[fl.echo].rar === 'L' ? 1 : 0
+        }
+        fl.mesh.scale.set(sc * Math.max(0.02, Math.abs(Math.cos(f * Math.PI))), sc * (1 + 0.08 * Math.sin(f * Math.PI)), 1)
+        if (fl.flipped) { u2.opacity.value *= 0.82 + 0.1 * Math.sin(this.time * 7); fl.mesh.position.y += Math.sin(this.time * 3) * 3 * u }
+      }
     }
-    const gone = f => f.t > (f.burn ? BURN_SECS + 0.05 : 1.25)
+    const gone = f => f.t > (f.burn ? BURN_SECS + 0.05 : flyerLife(f))
     for (const fl of this.flyers.filter(gone)) this.dropCard(fl.mesh)
     this.flyers = this.flyers.filter(f => !gone(f))
   }
@@ -1347,13 +1394,14 @@ export class UI {
   /** A card goes to the middle of the screen for everyone (my own already flew from my hand). */
   showPlayed(e) {
     const me = this.app.mySeat()
-    if (e.p === me && this.flyers.some(f => f.mine && f.card === e.card)) return
+    const mine = e.p === me && this.flyers.find(f => f.mine && f.card === e.card)
+    if (mine) { if (e.echo) mine.echo = e.echo; return }
     let x0 = this.W / 2, y0 = -100 * this.u, s0 = 60 * this.u
     const r = this.rowRect[e.p]
     if (e.p === me) { y0 = this.H - 80 * this.u; s0 = this.cardW() }
     else if (r) { x0 = r.x + r.w / 2; y0 = r.y + r.h / 2 }
     else { x0 = 120 * this.u; y0 = 30 * this.u + e.p * 50 * this.u }
-    this.flyers.push({ mesh: this.makeCard(e.card), t: 0, x0, y0, s0, card: e.card })
+    this.flyers.push({ mesh: this.makeCard(e.card), t: 0, x0, y0, s0, card: e.card, echo: e.echo || null })
   }
 
   // ---------- playing a card: a click plays it, or asks for its target first ----------
@@ -1375,9 +1423,11 @@ export class UI {
     if (why) { this.cancelTarget(); this.say(why); return }
     const def = CARD[c.id]
     const list = targetsFor(s, me, c.id)
+    if (def.tgt === 'self') { this.play(c.i, me); return }
     if (def.tgt === 'none' || def.tgt === 'board' || (def.tgt === 'leader' && list.length === 1)) { this.play(c.i, def.tgt === 'leader' ? list[0] : null, def.tgt === 'leader'); return }
-    const kind = def.tgt === 'cell' ? 'cell' : def.tgt === 'cell2' ? 'cell2' : def.tgt === 'ladder' ? 'ladder' : def.tgt === 'snake' ? 'snake' : 'player'
-    this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null }
+    const kind = kindOf(def.tgt)
+    // Echo: first the player whose last card it plays again (shown by their names), then that card's target
+    this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null, echo: def.tgt === 'echo' ? {} : null }
     this.selected = c.i
     app.sfx('draw', 0.3)
     this.syncHighlight()
@@ -1391,15 +1441,17 @@ export class UI {
     const c = this.cards.find(k => k.kind === 'hand' && k.i === i)
     this.hidden = { i, seq: s.seq }
     let fl = null
+    const echo = s.pl[me].h[i] === 'C6' && Array.isArray(tg) ? s.pl[tg[0]].lc : null
     if (c) {
       this.cards = this.cards.filter(k => k !== c)
-      fl = { mesh: c.mesh, t: 0, x0: c.x, y0: c.y, s0: c.s, card: c.id, mine: true }
+      fl = { mesh: c.mesh, t: 0, x0: c.x, y0: c.y, s0: c.s, card: c.id, mine: true, echo }
       this.flyers.push(fl)
     }
     this.target = null
     this.selected = -1
     this.syncHighlight()
-    if (onPlayer && typeof tg === 'number') app.view.pointAt(tg, 1.8)
+    const at = echo ? tg[1] : tg
+    if (onPlayer && typeof at === 'number') app.view.pointAt(at, 1.8)
     app.sfx('select', 0.45)
     if (app.act({ t: 'play', i, tg }) === false) {
       this.hidden = null
@@ -1418,16 +1470,34 @@ export class UI {
   chooseTarget(x) {
     const t = this.target
     if (!t || !t.list.includes(x)) return false
+    if (t.echo && !t.echo.card) return this.echoFrom(x)
+    // Echo's target goes with the player whose card it plays again
+    const send = (tg, onPlayer) => this.play(t.i, t.echo ? [t.echo.src, tg] : tg, onPlayer)
     if (t.kind === 'cell2') {
       if (t.sel.includes(x)) t.sel = t.sel.filter(c => c !== x)
       else t.sel.push(x)
-      if (t.sel.length === 2) { this.play(t.i, [...t.sel]); return true }
+      if (t.sel.length === 2) { send([...t.sel]); return true }
       this.app.sfx('select', 0.35)
       this.syncHighlight()
       this.dirty = true
       return true
     }
-    this.play(t.i, x, t.kind === 'player')
+    send(x, t.kind === 'player')
+    return true
+  }
+  /** Echo plays again the last card of player src: played at once, or that card's target is chosen next. */
+  echoFrom(src) {
+    const app = this.app, s = app.view.state, me = app.mySeat(), t = this.target
+    const id = s.pl[src].lc, def = CARD[id], list = targetsFor(s, me, id)
+    if (def.tgt === 'none' || def.tgt === 'board') { this.play(t.i, [src, null]); return true }
+    if (def.tgt === 'self') { this.play(t.i, [src, me]); return true }
+    if (def.tgt === 'leader' && list.length === 1) { this.play(t.i, [src, list[0]], true); return true }
+    const kind = kindOf(def.tgt)
+    this.target = { ...t, kind, list, sel: kind === 'cell2' ? [] : null, hov: null, echo: { src, card: id } }
+    app.view.pointAt(null)
+    app.sfx('draw', 0.3)
+    this.syncHighlight()
+    this.dirty = true
     return true
   }
   /** While choosing: the arrow over the player under the pointer, a lit cell or cut-out. */
@@ -1467,7 +1537,7 @@ export class UI {
     let key = h ? h.key : null
     if (!key) {
       const c = this.cardAt(x, y)
-      if (c) key = c.kind === 'hand' ? 'card' + c.i : c.kind === 'offer' ? 'offer' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null
+      if (c) key = c.kind === 'hand' ? 'card' + c.i : c.kind === 'offer' ? 'offer' + c.i : c.kind === 'echo' ? 'pl' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null
     }
     if (key !== this.hover) { this.hover = key; this.dirty = true }
     if (this.target?.kind === 'player' && key) this.hoverTarget(null, key.startsWith('pl') ? +key.slice(2) : null)
@@ -1479,6 +1549,7 @@ export class UI {
     if (h) { h.action(); this.dirty = true; return true }
     const c = this.cardAt(x, y)
     if (c && c.kind === 'offer') { this.choose('take', c.i); return true }
+    if (c && c.kind === 'echo') { this.chooseTarget(c.i); return true }
     if (c && c.kind === 'hand') {
       if (long) { this.selected = this.selected === c.i ? -1 : c.i; this.dirty = true }
       else this.cardClicked(c)
@@ -1515,6 +1586,7 @@ export class UI {
     if (trayKey !== this.trayKeyWas) { this.trayKeyWas = trayKey; this.dirty = true }
     this.slideRows(dt)
     this.checkTarget()
+    this.sendUnpeek()
     this.layoutCards(dt)
     this.updateBanner(dt)
     if (this.dirty) this.draw()

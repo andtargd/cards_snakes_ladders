@@ -30,14 +30,15 @@ export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 
 
 // How each card works: its category and what it targets. Names, texts, rarity and numbers come from
 // cards.config.js. tgt: any (any player on the board, self included), other (another player), leader
-// (automatic), cell, cell2 (two cells), ladder, snake, board, none
+// (automatic), self (automatic), cell, cell2 (two cells), ladder, snake, board, none, echo (a player
+// whose last card is played again, then that card's own target)
 const KINDS = {
-  M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'any'],
+  M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'any'], M5: ['M', 'self'], M6: ['M', 'any'],
   D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
   B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
   H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'], H5: ['H', 'leader'],
   P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
-  C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'],
+  C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'], C6: ['C', 'echo'],
 }
 const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3 }
 /** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
@@ -291,6 +292,8 @@ function beginTurn(s, ev) {
   for (let guard = 0; guard < 12; guard++) {
     if (s.ph === 'over') return
     const pi = s.cur, p = s.pl[pi]
+    // Rewind takes a player back here; whether they went up a ladder or a trampoline since, bots look at
+    p.st = p.pos; p.tr = ''; delete p.up
     s.turnNo++
     s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
     ev.push({ e: 'turn', p: pi, round: s.round })
@@ -545,6 +548,7 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
   }
   // step by step: a swamp on the way stops the move; going back stops on cell 1
   const path = []
+  const start = p.pos
   let c = p.pos, stopped = false
   for (let k = 0; k < total; k++) {
     if (back && c <= 1) break
@@ -556,9 +560,21 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
   if (!path.length) return
   p.pos = Math.min(c, s.n)
   ev.push({ e: 'move', p: pi, path })
+  trail(p, ['m', start, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
   resolveLanding(s, pi, ev)
+}
+
+/**
+ * A piece's moves since its turn began, for Rewind to retrace: m steps along the cells, l up a ladder,
+ * s down a snake, t a trampoline's throw, j a card's jump, p a portal or a swap. Kept short in the state
+ * ("m3,9;l9,31"), since the shared table sends the whole state.
+ */
+function trail(p, [k, from, to]) { if (p.tr != null) p.tr += (p.tr ? ';' : '') + k + from + ',' + to }
+/** A trail as [[kind, from, to], ...]. */
+export function trailOf(tr) {
+  return String(tr || '').split(';').filter(Boolean).map(x => [x[0], ...x.slice(1).split(',').map(Number)])
 }
 
 /** The cell a piece stops on takes effect: a ladder, a snake, a trampoline or a portal. */
@@ -569,8 +585,9 @@ function resolveLanding(s, pi, ev) {
   if (idx >= 0) {
     const el = els[idx]
     if (el[0] === 1) {
-      p.pos = el[2]
+      p.pos = el[2]; p.up = 1
       ev.push({ e: 'ladder', p: pi, from: c, to: p.pos, el: idx })
+      trail(p, ['l', c, p.pos])
       log(s, ev, `${p.n} climbed a ladder from ${c} to ${p.pos}`)
       if (p.pos >= s.n) finish(s, pi, ev)
       return
@@ -586,13 +603,15 @@ function resolveLanding(s, pi, ev) {
     if (para) fall = parachute(fall)
     p.pos = c - fall
     ev.push({ e: 'snake', p: pi, from: c, to: p.pos, el: idx, tail: el[2], para })
+    trail(p, ['s', c, p.pos])
     log(s, ev, `${p.n} slid down a snake from ${c} to ${p.pos}${para ? ' (parachute)' : ''}`)
     return
   }
   const m = markerAt(s, c)
   if (m && m.k === 'tr') {
-    p.pos = Math.min(s.n, c + CARD.B4.spaces)
+    p.pos = Math.min(s.n, c + CARD.B4.spaces); p.up = 1
     ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
+    trail(p, ['t', c, p.pos])
     log(s, ev, `${p.n} bounced on a trampoline to ${p.pos}`)
     if (p.pos >= s.n) { finish(s, pi, ev); return }
     // the cell it throws the piece onto takes effect too (always further on, so the chain ends)
@@ -603,6 +622,7 @@ function resolveLanding(s, pi, ev) {
   if (m && m.k === 'po') {
     p.pos = m.c[0] === c ? m.c[1] : m.c[0]
     ev.push({ e: 'portal', p: pi, from: c, to: p.pos })
+    trail(p, ['p', c, p.pos])
     log(s, ev, `${p.n} went through a portal from ${c} to ${p.pos}`)
   }
 }
@@ -616,6 +636,7 @@ function jump(s, pi, to, ev, why) {
   const from = p.pos
   p.pos = Math.max(0, Math.min(s.n, to))
   ev.push({ e: 'jump', p: pi, from, to: p.pos, why })
+  trail(p, ['j', from, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (p.pos <= 0) return
   if (!fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
@@ -672,10 +693,15 @@ function structuralOk(els, blocked, n) {
 /** Every target a card can be played on now: player indices, cells, [cell, cell] or element indices. */
 export function targetsFor(s, pi, cardId) {
   const card = CARD[cardId]
-  if (cardId === 'M3' && s.rolled) return [] // Swap Places takes the place of the roll
+  if (INSTEAD_OF_ROLL.has(cardId) && s.rolled) return [] // Swap Places and Tailgate take the place of the roll
   const live = onBoard(s)
   switch (card.tgt) {
-    case 'any': return live
+    case 'any':
+      // Rewind: a player who has begun a turn and stands elsewhere now
+      if (cardId === 'M6') return live.filter(i => s.pl[i].st != null && s.pl[i].st !== s.pl[i].pos)
+      return live
+    case 'self': return tailgateCell(s, pi) != null ? [pi] : []
+    case 'echo': return live.filter(i => echoable(s, pi, s.pl[i].lc))
     case 'other': {
       const others = live.filter(i => i !== pi)
       if (cardId === 'C2' || cardId === 'C3') return others.filter(i => s.pl[i].h.length > 0)
@@ -701,6 +727,23 @@ export function targetsFor(s, pi, cardId) {
   }
   return []
 }
+const INSTEAD_OF_ROLL = new Set(['M3', 'M5'])
+
+/**
+ * Tailgate: the cell just behind the nearest player ahead (strictly further on), or null when no one is
+ * ahead or they stand on the very next cell.
+ */
+export function tailgateCell(s, pi) {
+  const me = s.pl[pi].pos
+  const ahead = onBoard(s).map(i => s.pl[i].pos).filter(c => c > me)
+  if (!ahead.length) return null
+  const c = Math.min(...ahead) - 1
+  return c > me ? c : null
+}
+/** Echo can play this card again now: one that was played, not an Echo, with a target right now. */
+function echoable(s, pi, cardId) {
+  return !!cardId && cardId !== 'C6' && !!CARD[cardId] && targetsFor(s, pi, cardId).length > 0
+}
 
 export function canPlayCards(s, pi) {
   return s.ph === 'main' && s.cur === pi && !s.played && !s.frozen && !s.pl[pi].d
@@ -720,14 +763,18 @@ export function whyNot(s, pi, cardId) {
   if (s.ph === 'take') return 'Choose a card'
   if (s.frozen) return "You can't play cards this turn"
   if (s.played) return 'One card per turn'
-  if (cardId === 'M3' && s.rolled) return 'Only instead of the roll'
-  if (!targetsFor(s, pi, cardId).length) return 'No valid targets'
+  if (INSTEAD_OF_ROLL.has(cardId) && s.rolled) return 'Only instead of the roll'
+  if (!targetsFor(s, pi, cardId).length) {
+    if (cardId === 'M5') return 'No one ahead to tailgate'
+    if (cardId === 'C6') return s.pl.some(q => q.lc && q.lc !== 'C6') ? 'No card to echo can be played now' : 'No card to echo yet'
+    return 'No valid targets'
+  }
   return null
 }
 
 // ---------- actions ----------
 /**
- * a: { t: 'roll', v? } | { t: 'pick', i } | { t: 'take', i } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i }
+ * a: { t: 'roll', v? } | { t: 'pick', i } | { t: 'take', i } | { t: 'play', i, tg? } | { t: 'end' } | { t: 'disc', i } | { t: 'unpeek' }
  * A turn: draw a card (with Choose Your Card take one of those offered), roll once (with Choose Your Roll
  * pick one of the two dice) and play at most one card in either order, then (holding more than the
  * hand's 3) discard down to 3 at the end. Returns { ok, err, ev }. The state is changed in place
@@ -764,7 +811,12 @@ export function apply(s, pi, a) {
     p.h.push(card)
     ev.push({ e: 'draw', p: pi, card, took: true })
   } else if (s.ph !== 'main') return fail(s.ph === 'pick' ? 'Choose a die' : s.ph === 'take' ? 'Choose a card' : 'Choose a card to discard')
-  else if (a.t === 'roll') {
+  else if (a.t === 'unpeek') {
+    // the peeked hand is put away: the turn ends after the roll again, as without Peek
+    if (!s.peek || s.peek.by !== pi) return fail('Nothing to put away')
+    s.peek = null
+    afterAction(s, pi, ev)
+  } else if (a.t === 'roll') {
     if (s.rolled) return fail('Already rolled')
     s.rolled = true
     rollAndMove(s, pi, a.v, ev, false)
@@ -793,31 +845,81 @@ function afterAction(s, pi, ev) {
   if (s.rolled && !s.peek && (s.played || !hasPlayable(s, pi))) finishTurn(s, ev)
 }
 
+/** The target a card is played on, checked: { tg } or { err }. */
+function checkTarget(s, pi, cardId, tg) {
+  const card = CARD[cardId]
+  const valid = targetsFor(s, pi, cardId)
+  if (card.tgt === 'leader') {
+    if (valid.length === 1) return { tg: valid[0] }
+    return valid.includes(tg) ? { tg } : { err: 'Choose a leader' }
+  }
+  if (card.tgt === 'cell2') {
+    if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return { err: 'Choose two free cells' }
+    return { tg }
+  }
+  if (card.tgt === 'board' || card.tgt === 'none') return { tg: null }
+  if (card.tgt === 'self') return valid.includes(pi) ? { tg: pi } : { err: 'No valid targets' }
+  return valid.includes(tg) ? { tg } : { err: 'Choose a valid target' }
+}
+const onPlayer = cardId => ['any', 'other', 'leader'].includes(CARD[cardId].tgt)
+
+/**
+ * Plays card i of the player's hand on tg. Echo's tg is [player whose last card it plays again, that
+ * card's own target]. The card the player played last is remembered once its effect worked.
+ */
 function playCard(s, pi, i, tg, ev) {
   const p = s.pl[pi]
   const cardId = p.h[i]
-  const card = CARD[cardId]
-  const valid = targetsFor(s, pi, cardId)
-  let target = tg
-  if (card.tgt === 'leader') {
-    if (valid.length === 1) target = valid[0]
-    else if (!valid.includes(target)) return 'Choose a leader'
-  } else if (card.tgt === 'cell2') {
-    if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return 'Choose two free cells'
-  } else if (card.tgt === 'board' || card.tgt === 'none') target = null
-  else if (!valid.includes(target)) return 'Choose a valid target'
+  let eff = cardId, src = null, inner = tg
+  if (cardId === 'C6') {
+    if (!Array.isArray(tg) || !targetsFor(s, pi, 'C6').includes(tg[0])) return 'Choose a player whose card to echo'
+    src = tg[0]; eff = s.pl[src].lc; inner = tg[1]
+  }
+  const chk = checkTarget(s, pi, eff, inner)
+  if (chk.err) return chk.err
+  const target = chk.tg
 
   p.h.splice(i, 1)
   s.played = true
-  ev.push({ e: 'play', p: pi, card: cardId, tg: target })
-  const who = typeof target === 'number' && ['any', 'other', 'leader'].includes(card.tgt) ? s.pl[target] : null
+  const who = typeof target === 'number' && onPlayer(eff) ? s.pl[target] : null
   const onWho = who ? (target === pi ? ' on themselves' : ` on ${who.n}`) : ''
-  log(s, ev, `${p.n} played ${card.name}${onWho}`)
+  if (src != null) {
+    ev.push({ e: 'play', p: pi, card: cardId, tg: src, echo: eff, etg: target })
+    log(s, ev, `${p.n} played Echo: ${src === pi ? 'their own' : s.pl[src].n + "'s"} ${CARD[eff].name}${onWho}`)
+  } else {
+    ev.push({ e: 'play', p: pi, card: cardId, tg: target })
+    log(s, ev, `${p.n} played ${CARD[cardId].name}${onWho}`)
+  }
+  if (cardEffect(s, pi, eff, target, ev) !== false) p.lc = cardId
+  return null
+}
+
+/** What a card does, played by pi on target; false when it changed nothing. */
+function cardEffect(s, pi, cardId, target, ev) {
+  const p = s.pl[pi], card = CARD[cardId]
+  const who = typeof target === 'number' ? s.pl[target] : null
   const setFx = (k, v = 1) => { who.fx[k] = v }
   const timed = k => { who.fx[k] = { t: card.turns, f: target === pi ? 1 : 0 } }
   switch (cardId) {
     case 'M1': jump(s, target, who.pos + card.spaces, ev, 'dash'); break
-    case 'M2': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'setback'); break
+    case 'M2': if (who.pos <= 1) return false; jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'setback'); break
+    case 'M5': {
+      // it takes the place of this turn's roll; the cells it leaps over do nothing
+      const to = tailgateCell(s, pi)
+      s.rolled = true
+      jump(s, pi, to, ev, 'leap')
+      break
+    }
+    case 'M6': {
+      // back where the turn began, and nothing there takes effect
+      // the way back retraces the moves since then (a ladder climbed goes back down it, and so on)
+      const from = who.pos
+      who.pos = who.st
+      ev.push({ e: 'rewind', p: target, from, to: who.pos, tr: trailOf(who.tr) })
+      who.tr = ''
+      log(s, ev, `${who.n} rewound from ${from <= 0 ? 'the start' : from} to ${who.pos <= 0 ? 'the start' : who.pos}`)
+      break
+    }
     case 'M3': {
       // both land on their new cells: the player who played the card first, then the other
       // it takes the place of this turn's roll
@@ -825,6 +927,7 @@ function playCard(s, pi, i, tg, ev) {
       const a = p.pos
       p.pos = who.pos; who.pos = a
       ev.push({ e: 'swap', a: pi, b: target })
+      trail(p, ['p', who.pos, p.pos]); trail(who, ['p', p.pos, who.pos])
       for (const q of [pi, target]) {
         if (s.ph === 'over' || s.pl[q].d || s.pl[q].pos <= 0) continue
         if (!s.pl[q].fx.bo && markerAt(s, s.pl[q].pos, 'sw')) { ev.push({ e: 'swamp', p: q, c: s.pl[q].pos }); continue }
@@ -843,7 +946,7 @@ function playCard(s, pi, i, tg, ev) {
     case 'H2': setFx('fz'); break
     case 'H3': setFx('sk'); break
     case 'H4': setFx('bk'); break
-    case 'H5': if (who.pos > 1) jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
+    case 'H5': if (who.pos <= 1) return false; jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
     case 'P1': timed('pa'); break
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
@@ -857,7 +960,7 @@ function playCard(s, pi, i, tg, ev) {
       ev.push(boardEvent(s, 'tramp'))
       break
     case 'B5':
-      s.mk.push({ k: 'po', c: [tg[0], tg[1]], o: pi, t: card.turns, f: 1 })
+      s.mk.push({ k: 'po', c: [target[0], target[1]], o: pi, t: card.turns, f: 1 })
       ev.push(boardEvent(s, 'portal'))
       break
     case 'B2': case 'B3':
@@ -892,7 +995,7 @@ function playCard(s, pi, i, tg, ev) {
       break
     }
   }
-  return null
+  return true
 }
 
 // ---------- bots ----------
@@ -981,11 +1084,30 @@ function botTargets(s, pi, cardId) {
     for (const b of exits) for (const a of ins) if (a < b - 6) out.push([a, b])
     return out.slice(0, 24)
   }
+  if (card.tgt === 'echo') { // [whose card, that card's target], once for each different card
+    const out = [], seen = new Set()
+    for (const q of all) {
+      const id = s.pl[q].lc
+      if (seen.has(id)) continue
+      seen.add(id)
+      for (const t of botTargets(s, pi, id)) out.push([q, t])
+    }
+    return out
+  }
   return all
+}
+
+/** Echo judged as the card it plays again: a copy of the state with that card in Echo's place. */
+function asEcho(s, pi, i, tg) {
+  const c = clone(s)
+  c.pl[pi].h[i] = s.pl[tg[0]].lc
+  return c
 }
 
 function evaluateOption(s, pi, i, tg, level) {
   const cardId = s.pl[pi].h[i]
+  // (Echo leaves the hand as the copied card would: the value of the hand counts the same either way)
+  if (cardId === 'C6') return evaluateOption(asEcho(s, pi, i, tg), pi, i, tg[1], level)
   const c = clone(s)
   c.r = (s.r ^ 0xa5a5a5a5) >>> 0 // bots do not see the real future rolls
   const before = utility(s, pi)
@@ -1004,8 +1126,8 @@ function evaluateOption(s, pi, i, tg, level) {
   c.rolled = false // judge the board as it stands, without ending the turn in the copy
   const r = apply(c, pi, { t: 'play', i, tg })
   if (!r.ok) return -99
-  // Swap Places gives up this turn's roll
-  if (cardId === 'M3') return utility(c, pi) - before + 0.6 * CARD_VALUE[CARD[cardId].rar] - (expectedNext(s, pi, effectiveElements(s)) - s.pl[pi].pos)
+  // Swap Places and Tailgate give up this turn's roll
+  if (INSTEAD_OF_ROLL.has(cardId)) return utility(c, pi) - before + 0.6 * CARD_VALUE[CARD[cardId].rar] - (expectedNext(s, pi, effectiveElements(s)) - s.pl[pi].pos)
   // a portal back up to where I stand insures against a snake later
   if (cardId === 'B5') return utility(c, pi) - before + 0.6 * CARD_VALUE.R + 0.07 * Math.abs(tg[1] - tg[0])
   // the card itself leaves the hand; do not count that as a loss
@@ -1016,9 +1138,9 @@ function bestOption(s, pi, level, filter = () => true) {
   const p = s.pl[pi]
   let best = null
   p.h.forEach((cardId, i) => {
-    if (!filter(cardId)) return
     if (!targetsFor(s, pi, cardId).length) return
     for (const tg of botTargets(s, pi, cardId)) {
+      if (!filter(...played(s, cardId, tg))) continue
       if (!sensible(s, pi, i, tg)) continue
       let g = evaluateOption(s, pi, i, tg, level)
       if (level === 2) g += (rnd(s) - 0.5) * 0.6
@@ -1028,12 +1150,25 @@ function bestOption(s, pi, level, filter = () => true) {
   return best
 }
 
+/** The card that takes effect and its target: Echo's copied card, or the card itself. */
+const played = (s, cardId, tg) => (cardId === 'C6' ? [s.pl[tg[0]].lc, tg[1]] : [cardId, tg])
+
 /** False for a play no bot makes at any level: one that hurts itself or helps another player. */
 function sensible(s, pi, i, tg) {
   const cardId = s.pl[pi].h[i]
-  if (typeof tg !== 'number' || !['any', 'other', 'leader'].includes(CARD[cardId].tgt)) return true
+  if (cardId === 'C6') return sensible(asEcho(s, pi, i, tg), pi, i, tg[1])
+  if (cardId === 'M5') { // Tailgate: a long leap, better than a roll, that ends no lower than it lands
+    const to = tailgateCell(s, pi), c = clone(s)
+    c.rolled = false
+    if (to == null || !apply(c, pi, { t: 'play', i }).ok) return false
+    return to - s.pl[pi].pos > 6 && (c.pl[pi].d || c.pl[pi].pos >= to)
+  }
+  if (typeof tg !== 'number' || !onPlayer(cardId)) return true
   const self = tg === pi, fx = s.pl[tg].fx
   switch (cardId) {
+    // Rewind: myself when it takes me further on (after a snake or a Setback), another player when they
+    // have just gone up a ladder or a trampoline
+    case 'M6': { const q = s.pl[tg]; return self ? q.st > q.pos : q.st < q.pos && !!q.up }
     case 'M1': case 'M2': case 'H5': { // where the piece ends up, snakes, ladders and shields included
       const c = clone(s)
       c.rolled = false
@@ -1082,7 +1217,7 @@ export function botAction(s, pi) {
     if (!s.rolled) {
       if (canPlay && rnd(s) < 0.5) {
         const opts = []
-        p.h.forEach((c, i) => { for (const tg of targetsFor(s, pi, c)) if (sensible(s, pi, i, tg)) opts.push({ i, tg, c }) })
+        p.h.forEach((c, i) => { for (const tg of c === 'C6' ? botTargets(s, pi, c) : targetsFor(s, pi, c)) if (sensible(s, pi, i, tg)) opts.push({ i, tg, c }) })
         if (opts.length) {
           const o = opts[rint(s, opts.length)]
           const tg = CARD[o.c].tgt === 'cell2' ? pickTwo(s, pi) : o.tg
@@ -1098,8 +1233,8 @@ export function botAction(s, pi) {
   if (!s.rolled) {
     if (canPlay) {
       // cards that shape this turn's roll go before it
-      const o = bestOption(s, pi, level, c => ROLL_CARDS.has(c) || c === 'M3')
-      if (o && o.gain > threshold && !hold(o) && (CARD[o.card].tgt !== 'any' || o.tg === pi)) return { t: 'play', i: o.i, tg: o.tg }
+      const o = bestOption(s, pi, level, (c, tg) => ROLL_CARDS.has(c) || INSTEAD_OF_ROLL.has(c) ? CARD[c].tgt !== 'any' || tg === pi : false)
+      if (o && o.gain > threshold && !hold(o)) return { t: 'play', i: o.i, tg: o.tg }
     }
     return rollAction()
   }

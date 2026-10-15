@@ -87,8 +87,9 @@ export const T = {
   chooseTarget: 'Choose a target',
   chooseTwoCells: 'Choose two free cells, up to your own',
   // the soft message in the middle of the screen while a card waits for its target
-  chooseWhat: tgt => ({ any: 'Choose any player', other: 'Choose another player', leader: 'Choose a leader', cell: 'Choose a cell', cell2: 'Choose two cells', ladder: 'Choose a ladder', snake: 'Choose a snake' })[tgt] || 'Choose a target',
-  targetHint: kind => ({ player: 'Click a player or their panel to play the card', cell: 'Click a lit cell to play the card', cell2: 'Click two lit cells: portals go no further than your cell', ladder: 'Click a lit ladder', snake: 'Click a lit snake' })[kind],
+  chooseWhat: tgt => ({ any: 'Choose any player', other: 'Choose another player', leader: 'Choose a leader', cell: 'Choose a cell', cell2: 'Choose two cells', ladder: 'Choose a ladder', snake: 'Choose a snake', echo: 'Choose a card to echo' })[tgt] || 'Choose a target',
+  targetHint: kind => ({ player: 'Click a player or their panel to play the card', cell: 'Click a lit cell to play the card', cell2: 'Click two lit cells: portals go no further than your cell', ladder: 'Click a lit ladder', snake: 'Click a lit snake', echo: "Each player's last card is by their name: click one to play it again" })[kind],
+  echoing: (name, hint) => `Echo of ${name} · ${hint}`,
   chooseDiscard: 'Choose a card to discard',
   // the message at the end of a turn with more cards than the hand holds
   discardTitle: 'Discard a card',
@@ -142,7 +143,7 @@ export const T = {
   controls: 'Click a card, then its target; hold a card to read it. Click the dice tray to roll, and again to end the turn. Space rolls and ends the turn, 1-4 play a card, wheel or +/- zoom, drag to look around, M or Tab opens this menu.',
   rules: [
     'Race up the paper tiers to the last cell: 50, 70 or 100, as you pick the board. On your turn you must roll the die once (click the dice tray when it lights up) and may play one card, in either order. While you still can play a card the tray says End Turn: click it or press Space when you are done.',
-    'End your move on a ladder’s foot to climb it, on a snake’s head to slide down. Passing over them does nothing, and there are no chains, except a trampoline: the cell it throws you onto takes effect too, be it a ladder, a snake, a portal, a swamp or another trampoline. A swamp on the way stops a roll, but Dash jumps over it. Cards that move a player (Dash, Setback, Dethrone, Swap Places) work the same: the cell they land on takes effect. Swap Places is played instead of your roll, never after it.',
+    'End your move on a ladder’s foot to climb it, on a snake’s head to slide down. Passing over them does nothing, and there are no chains, except a trampoline: the cell it throws you onto takes effect too, be it a ladder, a snake, a portal, a swamp or another trampoline. A swamp on the way stops a roll, but Dash jumps over it. Cards that move a player (Dash, Setback, Dethrone, Swap Places, Tailgate) work the same: the cell they land on takes effect. Swap Places and Tailgate are played instead of your roll, never after it. Rewind is the exception: nothing on the cell it takes a player back to takes effect.',
     `You draw one card at the start of each turn and keep up to ${CFG.hand}: holding ${CFG.hand + 1} at the end of your turn, you burn one. Cards can target any player, yourself included.`,
     'Rarity: Common (grey), Uncommon (green, one star), Rare (blue, two stars), Legendary (gold, three stars). Rarer cards come up less often.',
     'Timed effects last the turns the card says, counted on the turns of the player who played it (in Fool, even after they finish). Next-roll effects apply to the target’s first roll not made yet, and they add up: Moonwalk with Extra Die moves back by both dice, with Choose Your Roll you pick which die takes you back.',

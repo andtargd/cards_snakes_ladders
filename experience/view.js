@@ -18,8 +18,23 @@ const TILT = 22 * Math.PI / 180
 const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
 const RING_ORDER = 50 // the rings under the pieces go after the other opaque things, the pieces after the rings
 // events that move a piece: who moved
-const MOVER = { move: e => e.p, ladder: e => e.p, snake: e => e.p, tramp: e => e.p, jump: e => e.p, portal: e => e.p, swap: e => e.a }
+const MOVER = { move: e => e.p, ladder: e => e.p, snake: e => e.p, tramp: e => e.p, jump: e => e.p, portal: e => e.p, swap: e => e.a, rewind: e => e.p }
 
+/** A stretch of a Rewind's way back: points with their lengths along them, so the piece moves at an even pace. */
+function seg(pts, dur, opts = {}) {
+  const len = [0]
+  for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + pts[i].distanceTo(pts[i - 1]))
+  return { pts, len, dur, ...opts }
+}
+/** The point a share u (0 to 1) of the way along a stretch, into out. */
+function alongPath(sg, u, out) {
+  const { pts, len } = sg, d = u * len[len.length - 1]
+  if (pts.length < 2 || !len[len.length - 1]) return out.copy(pts[pts.length - 1])
+  let i = 1
+  while (i < pts.length - 1 && len[i] < d) i++
+  const f = (d - len[i - 1]) / Math.max(1e-6, len[i] - len[i - 1])
+  return out.lerpVectors(pts[i - 1], pts[i], Math.min(1, Math.max(0, f)))
+}
 export class View {
   constructor(p0) {
     this.p0 = p0
@@ -377,7 +392,15 @@ export class View {
       case 'draw': this.tasks.push({ dur: 0.35, start: () => this.emit('draw', e) }); break
       case 'discard': this.tasks.push({ dur: 0.5, start: () => this.emit('discard', e) }); break
       case 'mustdisc': this.tasks.push({ dur: 0, start: () => this.emit('mustdisc', e) }); break
-      case 'play': this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); if (typeof e.tg === 'number' && ['any', 'other', 'leader'].includes(CARD[e.card].tgt)) { this.focusOn(e.tg); this.pointAt(e.tg, 1.6); this.sfx('target', 0.5) } } }); break
+      case 'play': {
+        // Echo shows the card it plays again (its card turns over) before that card's target lights up
+        const id = e.echo || e.card, tg = e.echo ? e.etg : e.tg
+        const aim = () => { if (typeof tg === 'number' && ['any', 'other', 'leader'].includes(CARD[id].tgt)) { this.focusOn(tg); this.pointAt(tg, 1.6); this.sfx('target', 0.5) } }
+        if (!e.echo) { this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); aim() } }); break }
+        this.tasks.push({ dur: 1.0, start: () => this.emit('play', e) })
+        this.tasks.push({ dur: 1.0, start: aim })
+        break
+      }
       case 'roll': this.queueRoll(e); if (e.back) this.cardPopup(e.p, 'H4', 'skip'); break
       case 'pick': this.queuePick(e); if (e.back) this.cardPopup(e.p, 'H4', 'skip'); break
       case 'offer': this.tasks.push({ dur: 0.35, start: () => this.emit('offer', e) }); break
@@ -425,7 +448,10 @@ export class View {
         })
         break
       }
-      case 'tramp': case 'jump': this.arcTask(e.p, e.from, e.to, e.e === 'tramp' ? 1.2 : 0.7, e.e === 'tramp' ? 'tramp' : 'jump'); break
+      case 'tramp': case 'jump':
+        if (e.why === 'leap') { this.arcTask(e.p, e.from, e.to, null, 'jump'); this.cardPopup(e.p, 'M5', 'select'); break }
+        this.arcTask(e.p, e.from, e.to, e.e === 'tramp' ? 1.2 : 0.7, e.e === 'tramp' ? 'tramp' : 'jump'); break
+      case 'rewind': this.cardPopup(e.p, 'M6', 'fold'); this.rewindTask(e); break
       case 'portal': this.teleportTask([[e.p, e.to]]); break
       case 'swap': this.teleportTask([[e.a, null, e.b], [e.b, null, e.a]]); break
       case 'finish': this.tasks.push({
@@ -448,13 +474,148 @@ export class View {
   popupTask(p, text, color, sound) {
     this.tasks.push({ dur: 0.7, start: () => { this.popup(this.tokens[p].group.position, text, color); this.sfx(sound, 0.5) } })
   }
+  /** A piece flies in an arc; with no height given (a long leap) the arc rises with the distance. */
   arcTask(p, from, to, h, sound) {
     let a, b
     this.tasks.push({
-      dur: 0.6,
-      start: () => { const t = this.tokens[p]; t.anim = true; a = t.group.position.clone(); b = G.cellPos(to); this.focusOn(p); this.sfx(sound, 0.5) },
+      dur: h == null ? 0.9 : 0.6,
+      start: () => {
+        const t = this.tokens[p]; t.anim = true; a = t.group.position.clone(); b = G.cellPos(to)
+        if (h == null) h = THREE.MathUtils.clamp(a.distanceTo(b) * 0.3, 0.8, 2.4)
+        this.focusOn(p); this.sfx(sound, 0.5)
+      },
       update: k => { const t = this.tokens[p]; t.group.position.lerpVectors(a, b, ease(k)); t.group.position.y += Math.sin(k * Math.PI) * h; this.follow(t.group.position) },
       end: () => { const t = this.tokens[p]; t.pos = to; t.anim = null; this.layoutTokens() },
+    })
+  }
+  /**
+   * Rewind: the piece fades to a ghost and retraces its moves since its turn began, backwards (down the
+   * ladder it climbed, up the snake it slid, back through a portal) under a clock turning back, then comes
+   * back solid where its turn began.
+   */
+  rewindTask(e) {
+    let clock = null, t = null, segs = [], total = 0
+    const place = (pos, op) => {
+      clock.face.position.copy(pos).add(new THREE.Vector3(0, 1.05, 0)); clock.hand.position.copy(clock.face.position)
+      clock.face.material.opacity = op; clock.hand.material.opacity = op
+    }
+    this.tasks.push({
+      dur: 0.35,
+      start: () => {
+        t = this.tokens[e.p]; t.anim = true
+        clock = this.makeClock()
+        segs = this.rewindPath(e)
+        total = segs.reduce((a, s) => a + s.dur, 0)
+        this.focusOn(e.p); this.sfx('portal', 0.4)
+      },
+      update: k => { this.ghostToken(t, 1 - 0.7 * k); place(t.group.position, k); clock.hand.material.rotation = k * Math.PI },
+    })
+    // the whole way back takes 0.8 to 2.8 s, each move its share
+    const dur = () => THREE.MathUtils.clamp(total, 0.8, 2.8)
+    let task
+    this.tasks.push(task = {
+      dur: 2,
+      start: () => { task.dur = dur() },
+      update: k => {
+        let at = k * total, i = 0
+        while (i < segs.length - 1 && at > segs[i].dur) { at -= segs[i].dur; i++ }
+        const sg = segs[i], u = Math.min(1, at / sg.dur)
+        if (sg.blink) { // a portal or a swap: gone here, back there
+          t.group.position.copy(u < 0.5 ? sg.pts[0] : sg.pts[1])
+          t.pivot.scale.setScalar(Math.max(0.05, Math.abs(1 - 2 * u)))
+        } else {
+          t.pivot.scale.setScalar(1)
+          alongPath(sg, sg.walk ? u : ease(u), t.group.position)
+          if (sg.walk) t.group.position.y += 0.1 * Math.abs(Math.sin(u * Math.PI * Math.max(1, sg.pts.length - 1)))
+        }
+        place(t.group.position, 1)
+        clock.hand.material.rotation = Math.PI + k * Math.PI * 6 // anticlockwise: time running back
+        this.follow(t.group.position)
+      },
+    })
+    this.tasks.push({
+      dur: 0.35,
+      start: () => { t.pivot.scale.setScalar(1); t.group.position.copy(G.cellPos(e.to)) },
+      update: k => { this.ghostToken(t, 0.3 + 0.7 * k); place(t.group.position, 1 - k) },
+      end: () => {
+        this.ghostToken(t, 1)
+        this.root.remove(clock.face, clock.hand); clock.face.material.dispose(); clock.hand.material.dispose()
+        t.pos = e.to; t.anim = null; this.layoutTokens()
+      },
+    })
+  }
+  /** The ways back of a Rewind: its trail's moves, last first, each turned round, as points in the world with their share of the time. */
+  rewindPath(e) {
+    const tr = Array.isArray(e.tr) ? e.tr : []
+    // a trail that does not join where the piece is and where it goes back to: straight back along the cells
+    const joined = tr.length && tr[0][1] === e.to && tr[tr.length - 1][2] === e.from && tr.every((s, i) => !i || tr[i - 1][2] === s[1])
+    const list = joined ? [...tr].reverse() : [['m', e.to, e.from]]
+    const els = this.state ? effectiveElements(this.state) : []
+    const elPath = (type, from) => {
+      const i = els.findIndex(x => x[0] === type && x[1] === from)
+      const path = this.elMeshes[i]?.userData.path
+      return path && path.length > 1 ? { path: path.map(v => v.clone()), el: els[i] } : null
+    }
+    return list.map(([k, from, to]) => {
+      // forward this went from -> to; the rewind goes to -> from
+      if (k === 'm') {
+        const n = Math.abs(to - from), dir = Math.sign(from - to) || 1, step = Math.max(1, Math.ceil(n / 40))
+        const cells = []
+        for (let c = 0; c < n; c += step) cells.push(to + dir * c)
+        cells.push(from)
+        return seg(cells.map(c => G.cellPos(c)), Math.max(0.25, 0.06 * n), { walk: true })
+      }
+      if (k === 'l' || k === 's') {
+        const f = elPath(k === 'l' ? 1 : 0, from)
+        let pts = f ? f.path : [G.cellPos(from), G.cellPos(to)]
+        if (f && k === 's' && to !== f.el[2]) { // a parachute stopped it part of the way
+          const part = (from - to) / Math.max(1, from - f.el[2])
+          pts = pts.slice(0, Math.max(2, Math.round(pts.length * part)))
+          pts.push(G.cellPos(to))
+        }
+        return seg(pts.reverse(), 0.6)
+      }
+      if (k === 't' || k === 'j') {
+        const a = G.cellPos(to), b = G.cellPos(from), h = THREE.MathUtils.clamp(a.distanceTo(b) * 0.3, 0.6, 2.2), pts = []
+        for (let i = 0; i <= 16; i++) { const v = new THREE.Vector3().lerpVectors(a, b, i / 16); v.y += Math.sin(i / 16 * Math.PI) * h; pts.push(v) }
+        return seg(pts, 0.5)
+      }
+      return seg([G.cellPos(to), G.cellPos(from)], 0.45, { blink: true })
+    })
+  }
+  /** A clock face and its hand (sprites; the hand turns with its material's rotation). */
+  makeClock() {
+    if (!this.clockTex) {
+      const face = P.canvas(128, 128), hand = P.canvas(128, 128)
+      let g = face.g
+      g.fillStyle = 'rgba(255,255,255,0.92)'; g.beginPath(); g.arc(64, 64, 56, 0, Math.PI * 2); g.fill()
+      g.strokeStyle = '#2b7fd6'; g.lineWidth = 9; g.stroke()
+      g.lineWidth = 5; g.lineCap = 'round'
+      for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6, r0 = i % 3 ? 42 : 36; g.beginPath(); g.moveTo(64 + Math.cos(a) * r0, 64 + Math.sin(a) * r0); g.lineTo(64 + Math.cos(a) * 48, 64 + Math.sin(a) * 48); g.stroke() }
+      g = hand.g
+      g.strokeStyle = '#174a8c'; g.lineWidth = 8; g.lineCap = 'round'
+      g.beginPath(); g.moveTo(64, 70); g.lineTo(64, 20); g.stroke()
+      g.fillStyle = '#174a8c'; g.beginPath(); g.arc(64, 64, 8, 0, Math.PI * 2); g.fill()
+      this.clockTex = { face: P.texture(face.c), hand: P.texture(hand.c) }
+    }
+    const sprite = (map, order) => {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map, depthTest: false, transparent: true, opacity: 0 }))
+      sp.scale.set(0.5, 0.5, 1); sp.renderOrder = order
+      this.root.add(sp)
+      return sp
+    }
+    return { face: sprite(this.clockTex.face, 8), hand: sprite(this.clockTex.hand, 9) }
+  }
+  /** A piece seen through (op < 1) or solid again. */
+  ghostToken(t, op) {
+    t.pivot.traverse(o => {
+      if (!o.isMesh) return
+      for (const m of [].concat(o.material)) {
+        if (m.userData.solid == null) { m.userData.solid = m.transparent; m.userData.op0 = m.opacity }
+        const see = op < 0.999
+        if (m.transparent !== (see || m.userData.solid)) { m.transparent = see || m.userData.solid; m.needsUpdate = true }
+        m.opacity = op * m.userData.op0
+      }
     })
   }
   teleportTask(list) {
