@@ -12,11 +12,27 @@ const flyerLife = fl => (fl.echo ? 2.0 : 1.25)
 /** How a card's target is picked on the screen. */
 const kindOf = tgt => ({ cell: 'cell', cell2: 'cell2', ladder: 'ladder', snake: 'snake' })[tgt] || 'player'
 
-const CARD_VS ='varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
+// tilt turns a card, flat and whole, about its centre: the corner under the pointer goes away (radians about
+// y and x). Seen in perspective from in front of the card; w carries it, so the picture on it stays true
+const CARD_VS = `
+uniform vec2 tilt;
+varying vec2 vUv; varying float vNear;
+void main() {
+  vUv = uv;
+  vec3 p = position;
+  float cx = cos(tilt.y), sx = sin(tilt.y), cy = cos(tilt.x), sy = sin(tilt.x);
+  p = vec3(p.x, p.y * cx - p.z * sx, p.y * sx + p.z * cx);
+  p = vec3(p.x * cy + p.z * sy, p.y, -p.x * sy + p.z * cy);
+  vNear = p.z;
+  vec4 c = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 q = projectionMatrix * modelViewMatrix * vec4(p.xy, 0.0, 1.0);
+  float w = 1.0 - p.z / 4.0; // the eye 4 card widths away
+  gl_Position = vec4(c.xy * w + (q.xy - c.xy), q.z * w, w);
+}`
 const CARD_FS = `
 uniform sampler2D map; uniform float time; uniform float legendary; uniform float dim; uniform float opacity; uniform float lift;
 uniform float burn; uniform float heat; uniform float seed;
-varying vec2 vUv;
+varying vec2 vUv; varying float vNear;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -33,6 +49,7 @@ void main() {
   }
   c.rgb = mix(c.rgb, vec3(0.62), dim * 0.6);
   c.rgb += lift * 0.06;
+  c.rgb *= 1.0 + vNear * 0.35; // the side leaning out catches the light
   float a = c.a * opacity;
   if (burn > 0.0 || heat > 0.0) {
     // a discarded card smoulders away from its lower edge: charred paper, a glowing rim, then nothing
@@ -52,7 +69,7 @@ void main() {
 const BURN_SECS = 0.8
 
 // the gold frame round the dice tray when it is my roll: a shine runs round it and rings go out, asking for a click
-const FRAME_VS = CARD_VS
+const FRAME_VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
 const FRAME_FS = `
 uniform vec2 size; uniform vec2 inner; uniform float radius; uniform float bw; uniform float u;
 uniform float time; uniform float hover; uniform float opacity;
@@ -151,7 +168,7 @@ export class UI {
   }
   makeCard(id) {
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: this.cardTexture(id) }, time: { value: 0 }, legendary: { value: id !== 'back' && CARD[id].rar === 'L' ? 1 : 0 }, dim: { value: 0 }, opacity: { value: 1 }, lift: { value: 0 }, burn: { value: 0 }, heat: { value: 0 }, seed: { value: Math.random() * 50 } },
+      uniforms: { map: { value: this.cardTexture(id) }, time: { value: 0 }, legendary: { value: id !== 'back' && CARD[id].rar === 'L' ? 1 : 0 }, dim: { value: 0 }, opacity: { value: 1 }, lift: { value: 0 }, burn: { value: 0 }, heat: { value: 0 }, seed: { value: Math.random() * 50 }, tilt: { value: new THREE.Vector2() } },
       vertexShader: CARD_VS, fragmentShader: CARD_FS, transparent: true, depthTest: false, depthWrite: false,
     })
     const mesh = new THREE.Mesh(this.cardGeo ||= new THREE.PlaneGeometry(1, 1.4), mat)
@@ -316,7 +333,7 @@ export class UI {
     const fill = disabled ? '#e4e0d8' : selected ? (color || '#2d3a6b') : primary ? (color || '#e8743b') : '#ffffff'
     this.panel(x, y - (hov ? 2 * this.u : 0), w, h, { fill, stroke: disabled ? null : selected || primary ? 'rgba(0,0,0,0.25)' : 'rgba(43,38,34,0.3)', r: Math.min(14, h / 2.4) })
     this.text(label, x + w / 2, y + h / 2 - (hov ? 2 * this.u : 0) + 1, { size, align: 'center', color: disabled ? '#9a948a' : primary || selected ? '#ffffff' : P.INK, max: w - 10 })
-    if (!disabled) this.hits.push({ key, x, y, w, h, action })
+    if (!disabled) this.hits.push({ key, x, y, w, h, action, go: primary })
   }
 
   // ---------- main draw ----------
@@ -410,7 +427,7 @@ export class UI {
     const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
     const { x, w } = this.menuLayout(400 * u)
     const table = this.p0.table || []
-    const ch = (room ? 470 : 430) * u, cx = x + w / 2
+    const ch = (room ? 508 : 468) * u, cx = x + w / 2
     let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
     this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
     this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
@@ -431,7 +448,8 @@ export class UI {
       y += 22 * u
     }
     this.ghostButton('help', T.howToPlay, cx - 80 * u, y + 6 * u, 160 * u, 36 * u, () => { app.screen = 'help'; this.helpPage = 0; this.dirty = true })
-    y += 58 * u
+    this.ghostButton('cards', T.theCards, cx - 80 * u, y + 44 * u, 160 * u, 36 * u, () => { app.screen = 'help'; this.helpPage = 1; this.dirty = true })
+    y += 96 * u
     // the week's table, quietly under the buttons
     if (table.length && y + 40 * u < H) {
       this.text(T.weekTable, cx, y + 8 * u, { size: 13, align: 'center', color: '#5b544c' })
@@ -505,7 +523,7 @@ export class UI {
     g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1.5 * u; g.stroke()
     this.text(label, x + w / 2, y - lift + h * 0.4, { size: 23, align: 'center', color: '#ffffff', max: w - 24 * u })
     this.text(sub, x + w / 2, y - lift + h * 0.72, { size: 12.5, align: 'center', bold: false, color: 'rgba(255,255,255,0.82)', max: w - 24 * u })
-    this.hits.push({ key, x, y: y - lift, w, h: h + lift, action })
+    this.hits.push({ key, x, y: y - lift, w, h: h + lift, action, go: true })
   }
   /** A quiet button: no fill until the pointer is on it. */
   ghostButton(key, label, x, y, w, h, action) {
@@ -612,7 +630,7 @@ export class UI {
     g.shadowColor = 'rgba(120,50,0,0.45)'; g.shadowOffsetY = 2 * u; g.shadowBlur = 3 * u
     this.text(T.play, x + w / 2, y + h / 2 + 2 * u, { size: 32, align: 'center', color: '#ffffff' })
     g.restore()
-    this.hits.push({ key: 'play', x, y, w, h: h + lift, action })
+    this.hits.push({ key: 'play', x, y, w, h: h + lift, action, go: true })
   }
   /** − value + in a small row, `w` wide. */
   miniStepper(key, x, y, w, value, dec, inc, canDec, canInc) {
@@ -696,12 +714,13 @@ export class UI {
     this.text(this.helpPage === 0 ? T.howToPlay : T.theCards, W / 2, y + 30 * u, { size: 22, align: 'center' })
     if (this.helpPage === 0) {
       const g = this.g
-      g.font = this.font(14.5 * u, false)
-      let yy = y + 66 * u
-      for (const para of T.rules) {
+      let yy = y + 74 * u
+      for (const [head, para] of T.rules) {
+        this.text(head, x + 30 * u, yy, { size: 16, color: '#e8743b' }); yy += 23 * u
+        g.font = this.font(15 * u, false)
         const lines = P.wrapText(g, para, pw - 60 * u)
-        for (const l of lines) { this.text(l, x + 30 * u, yy, { size: 14.5, bold: false }); yy += 20 * u }
-        yy += 8 * u
+        for (const l of lines) { this.text(l, x + 30 * u, yy, { size: 15, bold: false }); yy += 21 * u }
+        yy += 12 * u
         if (yy > y + ph - 70 * u) break
       }
     }
@@ -1283,9 +1302,14 @@ export class UI {
         const hov = this.hover === 'cat' + k
         c.tx = W / 2 + (col - (cols - 1) / 2) * (areaW / cols)
         c.ty = (H - ph) / 2 + 66 * u + (row + 0.5) * (areaH / rows)
-        c.ts = cwc * (hov ? 1.9 : 1)
+        c.ts = cwc * (hov ? 2.28 : 1)
+        // the big card stays on the screen
+        if (hov) { c.tx = Math.min(W - c.ts / 2 - 4 * u, Math.max(c.ts / 2 + 4 * u, c.tx)); c.ty = Math.min(H - c.ts * 0.7 - 4 * u, Math.max(c.ts * 0.7 + 4 * u, c.ty)) }
         c.rot = 0; c.dim = 0; c.lift = hov ? 1 : 0
         c.z = hov ? 30 : 10
+        // it leans towards the pointer: the corner under it goes away
+        const pt = this.pointer, lean = (v, r) => Math.max(-1, Math.min(1, v / r)) * 0.24
+        c.tilt = hov && pt ? [lean(pt.x - c.x, c.s / 2), lean(pt.y - c.y, c.s * 0.7)] : null
       })
     }
     const f = 1 - Math.exp(-14 * dt)
@@ -1299,6 +1323,8 @@ export class UI {
       m.dim.value += (c.dim - m.dim.value) * f
       m.lift.value = c.lift
       m.heat.value += ((c.heat || 0) - m.heat.value) * f
+      m.tilt.value.x += ((c.tilt?.[0] || 0) - m.tilt.value.x) * f
+      m.tilt.value.y += ((c.tilt?.[1] || 0) - m.tilt.value.y) * f
       m.time.value = this.time
     }
     // discarded cards burn where they are, rising a little
@@ -1533,6 +1559,7 @@ export class UI {
     return null
   }
   pointerMove(x, y) {
+    this.pointer = { x, y }
     const h = this.hitAt(x, y)
     let key = h ? h.key : null
     if (!key) {
@@ -1543,10 +1570,18 @@ export class UI {
     if (this.target?.kind === 'player' && key) this.hoverTarget(null, key.startsWith('pl') ? +key.slice(2) : null)
     return !!key
   }
+  /** A button of the menus and the game's windows clicks: a ding going on, a lower one going back, a bubble for a choice. */
+  menuSound(h) {
+    const app = this.app
+    if (h.drag || h.key === 'snd' || h.key === 'block') return
+    if (app.screen === 'game' && !this.modal && h.key !== 'menu') return // the game's own buttons have their sounds
+    const name = /back|leave|mainmenu|resume|cancel|close|invno|stand|exit/i.test(h.key) ? 'back' : h.go ? 'menu' : 'tick'
+    app.playSound(name, 0.45)
+  }
   /** A click: true when the UI used it. A long press on a card only shows it bigger. */
   click(x, y, long = false) {
     const h = this.hitAt(x, y)
-    if (h) { h.action(); this.dirty = true; return true }
+    if (h) { this.menuSound(h); h.action(); this.dirty = true; return true }
     const c = this.cardAt(x, y)
     if (c && c.kind === 'offer') { this.choose('take', c.i); return true }
     if (c && c.kind === 'echo') { this.chooseTarget(c.i); return true }

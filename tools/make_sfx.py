@@ -1,12 +1,13 @@
 """Synthesises the game's sound effects (all original, made here) as WAV, then MP3 through ffmpeg.
 Soft and round on purpose: sine and triangle tones on a pentatonic scale, gentle attacks, a little
 echo and a low-pass over everything, in the spirit of cheerful console games.
-python tools/make_sfx.py  ->  experience/sfx/*.mp3"""
+python tools/make_sfx.py [name ...]  ->  experience/sfx/*.mp3 (all of them, or only the ones named)"""
 import math
 import os
 import random
 import struct
 import subprocess
+import sys
 import wave
 
 SR = 22050
@@ -164,6 +165,17 @@ def sounds():
     s = bell(N['C6'], 0.55)
     mix(s, bell(N['G6'], 0.45), 0.07, 0.5)
     S['target'] = (echo(s, 0.12, 0.3, 0.3), 0.3)
+    # the menus: a bright two-note "ding" for a button that goes on, a soft bubble for a choice,
+    # and the "ding" turned round for one that goes back
+    s = silence(0.3)
+    mix(s, note(N['C6'], 0.07, wave_='sine', attack=0.003, decay=28), 0, 0.8)
+    mix(s, bell(N['G6'], 0.22, decay=16), 0.055, 0.6)
+    S['menu'] = (echo(s, 0.08, 0.25, 0.18, 2), 0.22)
+    S['tick'] = (note(N['A5'], 0.07, N['D6'], wave_='sine', attack=0.003, decay=32), 0.18)
+    s = silence(0.3)
+    mix(s, note(N['G5'], 0.07, wave_='sine', attack=0.003, decay=28), 0, 0.8)
+    mix(s, note(N['C5'], 0.16, wave_='tri', attack=0.004, decay=18), 0.06, 0.7)
+    S['back'] = (s, 0.2)
     return S
 
 
@@ -183,7 +195,10 @@ def write_wav(path, samples):
 def main():
     os.makedirs(OUT, exist_ok=True)
     os.makedirs(TMP, exist_ok=True)
+    only = set(sys.argv[1:])
     for name, (s, peak) in sounds().items():
+        if only and name not in only:
+            continue
         s = normalise(lowpass(s), peak)
         wav = os.path.join(TMP, name + '.wav')
         write_wav(wav, s)

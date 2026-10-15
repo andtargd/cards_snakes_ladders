@@ -211,8 +211,8 @@ export function wrapText(g, text, maxWidth) {
   return lines
 }
 
-function arrow(g, x1, y1, x2, y2, w) {
-  const a = Math.atan2(y2 - y1, x2 - x1), h = w * 2.2
+function arrow(g, x1, y1, x2, y2, w, head = w) {
+  const a = Math.atan2(y2 - y1, x2 - x1), h = head * 2.2
   g.lineWidth = w
   g.lineCap = 'round'
   g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2 - Math.cos(a) * h * 0.6, y2 - Math.sin(a) * h * 0.6); g.stroke()
@@ -318,10 +318,10 @@ export function drawIcon(g, id, x, y, s, col = INK) {
     case 'M5': { // tailgate: a piece leaps along a dashed arc to land right behind another
       pawn(g, x + s * 0.3, y + s * 0.3, s * 0.34)
       g.globalAlpha = 0.45; pawn(g, x - s * 0.36, y + s * 0.3, s * 0.26); g.globalAlpha = 1
-      g.lineWidth = w * 0.75; g.setLineDash([s * 0.07, s * 0.06])
+      g.lineWidth = w * 0.375; g.setLineDash([s * 0.07, s * 0.06])
       g.beginPath(); g.moveTo(x - s * 0.34, y + s * 0.02); g.quadraticCurveTo(x - s * 0.1, y - s * 0.62, x + s * 0.08, y + s * 0.02); g.stroke()
       g.setLineDash([])
-      arrow(g, x + s * 0.03, y - s * 0.1, x + s * 0.1, y + s * 0.1, w * 0.75)
+      arrow(g, x + s * 0.03, y - s * 0.1, x + s * 0.1, y + s * 0.1, w * 0.375, w * 0.75)
       break
     }
     case 'M6': { // rewind: a clock whose arrow runs back round it

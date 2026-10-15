@@ -155,11 +155,13 @@ export default {
       slide: 0.5, // the part of a snake's length the player still slides (0.5 = half); fix the text if you change it
       turns: 3,
       text: 'A player slides only half as far down snakes for {turns} turns.',
+      popup: { text: 'Parachute!' }, // over the player as it opens on a snake
     },
     P2: {
       name: 'Swamp Boots', rarity: 'U', weight: 1, enabled: true,
       turns: 3,
       text: 'A player ignores swamps for {turns} turns.',
+      popup: { text: 'Boots!' }, // over the player as a roll wades on past a swamp
     },
     P3: {
       name: 'Shield', rarity: 'R', weight: 1, enabled: true,

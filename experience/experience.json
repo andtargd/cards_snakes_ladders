@@ -1,7 +1,7 @@
 {
   "entry": "main.js",
   "name": "Cards, Snakes & Ladders",
-  "description": "Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck of 25 cards that bend the board, the dice and your rivals. Play bots solo, pass one computer round with friends, or invite everyone here to the Shared Table.",
+  "description": "Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck of 31 cards that bend the board, the dice and your rivals. Play bots solo, pass one computer round with friends, or invite everyone here to the Shared Table.",
   "maxPlayers": 12,
   "stick": false
 }

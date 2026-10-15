@@ -411,7 +411,10 @@ export class View {
           let a, b
           this.tasks.push({
             dur: 0.24,
-            start: () => { const t = tok(e.p); t.anim = true; a = t.group.position.clone(); b = G.cellPos(c); this.sfx('hop', 0.3) },
+            start: () => {
+              const t = tok(e.p); t.anim = true; a = t.group.position.clone(); b = G.cellPos(c); this.sfx('hop', 0.3)
+              if (e.boots?.includes(c)) this.cardPopupNow(b, 'P2', 'swamp')
+            },
             update: k2 => { const t = tok(e.p); const up = b.y > a.y + 0.1 ? 0.55 : 0.32; t.group.position.lerpVectors(a, b, ease(k2)); t.group.position.y += Math.sin(k2 * Math.PI) * up; this.follow(t.group.position) },
             end: () => { const t = tok(e.p); t.pos = c },
           })
@@ -435,6 +438,7 @@ export class View {
               path = path.slice(0, Math.max(2, Math.round(path.length * f)))
               path.push(G.cellPos(e.to))
             }
+            if (e.para) this.cardPopupNow(t.group.position, 'P1')
             this.sfx(e.e, 0.5)
           },
           update: k => {
@@ -470,6 +474,12 @@ export class View {
   cardPopup(p, cardId, sound) {
     const c = CARD[cardId], pop = c.popup || {}
     this.popupTask(p, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat], sound)
+  }
+  /** The same word, now and over a given point, not in its own turn of the queue (it pops up as a piece moves on). */
+  cardPopupNow(pos, cardId, sound) {
+    const c = CARD[cardId], pop = c.popup || {}
+    this.popup(pos, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat])
+    if (sound) this.sfx(sound, 0.4)
   }
   popupTask(p, text, color, sound) {
     this.tasks.push({ dur: 0.7, start: () => { this.popup(this.tokens[p].group.position, text, color); this.sfx(sound, 0.5) } })
@@ -760,8 +770,8 @@ export class View {
   popup(pos, text, color) {
     const { c, g } = P.canvas(256, 80)
     g.font = `bold 44px ${P.FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
-    g.lineWidth = 8; g.strokeStyle = '#ffffff'; g.strokeText(text, 128, 42)
-    g.fillStyle = color; g.fillText(text, 128, 42)
+    g.lineWidth = 8; g.strokeStyle = '#ffffff'; g.strokeText(text, 128, 42, 240)
+    g.fillStyle = color; g.fillText(text, 128, 42, 240)
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: P.texture(c), depthTest: false, transparent: true }))
     sp.scale.set(1.2, 0.375, 1)
     sp.renderOrder = 8

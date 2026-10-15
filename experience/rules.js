@@ -547,7 +547,7 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
     log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + raw : ''}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
   }
   // step by step: a swamp on the way stops the move; going back stops on cell 1
-  const path = []
+  const path = [], waded = []
   const start = p.pos
   let c = p.pos, stopped = false
   for (let k = 0; k < total; k++) {
@@ -555,11 +555,13 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
     c += back ? -1 : 1
     path.push(Math.min(c, s.n))
     if (c >= s.n) break
-    if (!fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
+    if (markerAt(s, c, 'sw')) { if (!fx.bo) { stopped = true; break } waded.push(c) }
   }
   if (!path.length) return
   p.pos = Math.min(c, s.n)
-  ev.push({ e: 'move', p: pi, path })
+  // Swamp Boots show only on a swamp the roll went on past, not on one it ends on
+  const boots = waded.filter(w => w !== p.pos)
+  ev.push({ e: 'move', p: pi, path, ...(boots.length ? { boots } : {}) })
   trail(p, ['m', start, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
