@@ -347,6 +347,8 @@ function beginTurn(s, ev) {
     if (s.ph === 'over') return
     const pi = s.cur, p = s.pl[pi]
     // Rewind takes a player back here; whether they went up a ladder or a trampoline since, bots look at
+    // and where the turn before began, for a player who has not moved since this one began
+    if (p.st != null) { p.ps = p.st; p.ptr = p.tr || '' }
     p.st = p.pos; p.tr = ''; delete p.up
     s.turnNo++
     s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
@@ -787,11 +789,22 @@ function fitsPlayer(s, pi, cardId, q) {
   if (NOT_SELF.has(cardId) && q === pi) return false
   switch (cardId) {
     case 'M5': return tailgateCell(s, q) != null
-    case 'M6': return p.st != null && p.st !== p.pos // Rewind: a player who has begun a turn and stands elsewhere now
+    case 'M6': return !!rewindOf(p) // Rewind: a player who stands elsewhere than where a turn of theirs began
     case 'C2': case 'C3': return p.h.length > 0
     case 'C4': return p.h.length > 0 || s.pl[pi].h.length > 1
   }
   return true
+}
+
+/**
+ * Where Rewind takes a player and the trail back: { to, tr }, or null when it would leave them where they
+ * stand. Back to where their latest turn began; when they have not moved since (Rewind on oneself before
+ * the roll), back to where the turn before began.
+ */
+function rewindOf(p) {
+  if (p.st != null && p.st !== p.pos) return { to: p.st, tr: p.tr }
+  if (p.ps != null && p.ps !== p.pos) return { to: p.ps, tr: [p.ptr, p.tr].filter(Boolean).join(';') }
+  return null
 }
 
 /**
@@ -978,10 +991,11 @@ function cardEffect(s, pi, cardId, target, ev) {
     case 'M6': {
       // back where the turn began, and nothing there takes effect
       // the way back retraces the moves since then (a ladder climbed goes back down it, and so on)
-      const from = who.pos
-      who.pos = who.st
-      ev.push({ e: 'rewind', p: target, from, to: who.pos, tr: trailOf(who.tr) })
-      who.tr = ''
+      const from = who.pos, back = rewindOf(who)
+      who.pos = back.to
+      ev.push({ e: 'rewind', p: target, from, to: who.pos, tr: trailOf(back.tr) })
+      // the moves are undone: the piece starts over from here
+      who.st = who.pos; who.tr = ''; delete who.ps; delete who.ptr
       log(s, ev, `${who.n} rewound from ${from <= 0 ? 'the start' : from} to ${who.pos <= 0 ? 'the start' : who.pos}`)
       break
     }
@@ -1233,7 +1247,7 @@ function sensible(s, pi, i, tg) {
   switch (cardId) {
     // Rewind: myself when it takes me further on (after a snake or a Setback), another player when they
     // have just gone up a ladder or a trampoline
-    case 'M6': { const q = s.pl[tg]; return self ? q.st > q.pos : q.st < q.pos && !!q.up }
+    case 'M6': { const q = s.pl[tg], b = rewindOf(q); return !!b && (self ? b.to > q.pos : b.to < q.pos && (!!q.up || /[lt]/.test(b.tr))) }
     case 'M1': case 'M2': case 'H5': { // where the piece ends up, snakes, ladders and shields included
       const c = clone(s)
       c.rolled = false

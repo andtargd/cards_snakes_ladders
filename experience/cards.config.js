@@ -59,8 +59,8 @@ export default {
     },
     M4: {
       name: 'Double Move', rarity: 'R', weight: 1, enabled: true,
-      target: 'any_player',
-      text: 'Any player immediately rolls again and moves.',
+      target: 'current_player',
+      text: 'A player immediately rolls again and moves.',
     },
     M5: {
       name: 'Tailgate', rarity: 'U', weight: 1, enabled: true,
@@ -78,31 +78,31 @@ export default {
     // ---------- Dice: they change the target's next roll ----------
     D1: {
       name: 'Extra Die', rarity: 'C', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       dice: 2, // dice in the next roll (the tray shows up to 2)
       text: "A player's next roll uses {dice} dice.",
     },
     D2: {
-      name: 'Choose a Face', rarity: 'U', weight: 1, enabled: true,
-      target: 'any_player',
+      name: 'Choose a Face', rarity: 'R', weight: 1, enabled: true,
+      target: 'current_player',
       max: 3, // the player picks a value from 1 to this
       text: 'A player picks a value from 1 to {max} instead of rolling.',
     },
     D3: {
       name: 'Heavy Die', rarity: 'R', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       min: 3, // the lowest face the dice can show (1 to 6)
       text: "A player's next roll: no die shows less than {min}.",
     },
     D4: {
       name: 'Golden Die', rarity: 'L', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       max: 6, // the player picks a value from 1 to this
       text: 'A player picks any value from 1 to {max} instead of rolling.',
     },
     D5: {
       name: 'Choose Your Roll', rarity: 'U', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       text: "A player's next roll uses 2 dice: they move by the one they pick.",
     },
 
@@ -174,7 +174,7 @@ export default {
     // ---------- Protection ----------
     P1: {
       name: 'Parachute', rarity: 'C', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       slide: 0.5, // the part of a snake's length the player still slides (0.5 = half); fix the text if you change it
       turns: 3, // it also ends on the first snake it softens
       text: 'A player slides only half as far down the next snake they land on. Lasts {turns} turns.',
@@ -182,14 +182,14 @@ export default {
     },
     P2: {
       name: 'Swamp Boots', rarity: 'U', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       turns: 3,
       text: 'A player ignores swamps for {turns} turns.',
       popup: { text: 'Boots!' }, // over the player as a roll wades on past a swamp
     },
     P3: {
       name: 'Shield', rarity: 'R', weight: 1, enabled: true,
-      target: 'any_player',
+      target: 'current_player',
       turns: 3, // it also ends on the first snake it blocks
       popup: { text: 'Shield!', color: '#2b8fd6' }, // over the player when it blocks a snake
       text: 'A player ignores the next snake they land on. Lasts {turns} turns.',
