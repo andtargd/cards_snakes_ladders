@@ -332,6 +332,7 @@ class App {
     this.menuOpen = false
     this.view = new View(p0)
     this.ui = new UI(p0, this)
+    this.view.cover = () => this.ui.cover()
     this.table = null
     this.shared = null
     this.lastSfx = {}

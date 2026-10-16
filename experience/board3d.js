@@ -166,55 +166,72 @@ export const SNAKE_COLORS = [
   ['#f08a24', '#a8540a'], ['#c2368f', '#7d1a5a'], ['#6b8f2a', '#3f5714'], ['#2b5fbf', '#173a80'],
 ]
 const LIFT = 0.035, THICK = 0.022
+const FLAT = () => 0
 
-function ribbon(b, pts, widths, colors, lift, { walls = true } = {}) {
-  // pts: [{x, z}] along the centre; widths per point; colors per segment
-  const L = [], R = []
+/**
+ * A strip of paper along pts ([{x, z}] the centre line; widths per point, colors per segment). Across, it is
+ * cut into strips no wider than STRIP, so where it crosses a step at a slant it bends with the step instead
+ * of cutting through it as a flat quad. Returns at(i, t): the point of row i at t from the left edge (0) to
+ * the right (1), on the paper.
+ */
+const STRIP = 0.075
+function ribbon(b, pts, widths, colors, lift, { walls = true, up = FLAT } = {}) {
+  const K = Math.max(1, Math.ceil(Math.max(...widths) / STRIP))
+  const rows = []
   for (let i = 0; i < pts.length; i++) {
     const a = pts[Math.max(0, i - 1)], c = pts[Math.min(pts.length - 1, i + 1)]
     let tx = c.x - a.x, tz = c.z - a.z
     const l = Math.hypot(tx, tz) || 1
     tx /= l; tz /= l
     const nx = -tz, nz = tx, w = widths[i] / 2
-    const lx = pts[i].x + nx * w, lz = pts[i].z + nz * w, rx = pts[i].x - nx * w, rz = pts[i].z - nz * w
-    L.push(V(lx, drapeY(lz) + lift, lz)); R.push(V(rx, drapeY(rz) + lift, rz))
+    const row = []
+    for (let k = 0; k <= K; k++) {
+      const o = w * (1 - 2 * k / K), x = pts[i].x + nx * o, z = pts[i].z + nz * o
+      row.push(V(x, drapeY(z) + lift + up(x, z), z))
+    }
+    rows.push(row)
   }
   for (let i = 0; i + 1 < pts.length; i++) {
-    const c = colors[i]
-    b.quad(L[i], L[i + 1], R[i + 1], R[i], c)
+    const c = colors[i], r0 = rows[i], r1 = rows[i + 1]
+    for (let k = 0; k < K; k++) b.quad(r0[k], r1[k], r1[k + 1], r0[k + 1], c)
     if (walls) {
       const dc = c.clone().multiplyScalar(0.7)
-      const d = v => V(v.x, v.y - THICK, v.z)
-      b.quad(d(L[i + 1]), L[i + 1], L[i], d(L[i]), dc)
-      b.quad(d(R[i]), R[i], R[i + 1], d(R[i + 1]), dc)
+      const d = v => V(v.x, drapeY(v.z) + lift - THICK, v.z) // a raised edge reaches down to the board
+      b.quad(d(r1[0]), r1[0], r0[0], d(r0[0]), dc)
+      b.quad(d(r0[K]), r0[K], r1[K], d(r1[K]), dc)
     }
   }
-  return { L, R }
+  const at = (i, t) => {
+    const s = Math.min(K - 1e-6, Math.max(0, t * K)), k = Math.floor(s)
+    return rows[i][k].clone().lerp(rows[i][k + 1], s - k)
+  }
+  return { at }
 }
-function disc(b, cx, cz, rx, rz, ang, lift, c, seg = 14, wall = false, flatY = null) {
+function disc(b, cx, cz, rx, rz, ang, lift, c, seg = 14, wall = false, flatY = null, up = FLAT) {
   const ca = Math.cos(ang), sa = Math.sin(ang)
   const at = (k) => {
     const a = (k / seg) * Math.PI * 2
     const x = cx + Math.cos(a) * rx * ca - Math.sin(a) * rz * sa
     const z = cz + Math.cos(a) * rx * sa + Math.sin(a) * rz * ca
-    return V(x, flatY ?? drapeY(z) + lift, z)
+    return V(x, flatY ?? drapeY(z) + lift + up(x, z), z)
   }
-  const mid = V(cx, flatY ?? drapeY(cz) + lift, cz)
+  const mid = V(cx, flatY ?? drapeY(cz) + lift + up(cx, cz), cz)
   for (let k = 0; k < seg; k++) {
     const p = at(k), q = at(k + 1)
     b.tri(mid, q, p, c)
     if (wall) {
       const dc = c.clone().multiplyScalar(0.7)
-      b.quad(V(q.x, q.y - THICK, q.z), V(p.x, p.y - THICK, p.z), p, q, dc)
+      const d = v => V(v.x, (flatY ?? drapeY(v.z) + lift) - THICK, v.z)
+      b.quad(d(q), d(p), p, q, dc)
     }
   }
 }
 
-/** A snake from its head (cell `from`) down to its tail (cell `to`). */
-export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {}) {
-  const b = new Builder()
-  const [body, dark] = SNAKE_COLORS[index % SNAKE_COLORS.length].map(h => col(h))
-  const light = body.clone().lerp(new THREE.Color('#ffffff'), 0.35)
+/**
+ * A snake's centre line from tail to head, its widths, and the frame of its head: shared by the cut-out,
+ * the path a piece rides and the paper it covers. Dense unless lod.
+ */
+function snakeLine(from, to, index, lod = 0) {
   const head = cellPos(from), tail = cellPos(to)
   const dx = head.x - tail.x, dz = head.z - tail.z
   const len = Math.hypot(dx, dz) || 1
@@ -222,46 +239,62 @@ export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {}
   const waves = Math.max(1, Math.round(len / 1.9))
   const amp = Math.min(Math.abs(dz) < 0.5 ? 0.22 : 0.4, 0.14 + len * 0.035)
   const N = lod ? Math.max(10, Math.ceil(len * 3.5)) : Math.max(30, Math.ceil(len * 16))
-  const pts = [], widths = [], colors = []
+  const pts = [], widths = []
   for (let i = 0; i <= N; i++) {
     const u = i / N
     const env = Math.pow(Math.sin(Math.PI * Math.min(u, 0.93) / 0.93), 0.7)
     const off = amp * Math.sin(u * waves * Math.PI * 2 + (index % 2) * Math.PI) * env
     pts.push({ x: tail.x + dx * u + px * off, z: tail.z + dz * u + pz * off })
     widths.push(0.05 + 0.25 * smooth(u / 0.4))
-    if (i < N) colors.push(Math.floor(u * len / 0.3) % 2 ? light : body)
   }
-  ribbon(b, pts, widths, colors, lift + index * 0.002, { walls: !lod })
-  // diamonds along the back
+  return { head, len, ux, uz, px, pz, N, pts, widths }
+}
+
+/** A snake from its head (cell `from`) down to its tail (cell `to`). */
+export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0, up = FLAT } = {}) {
+  const b = new Builder()
+  const [body, dark] = SNAKE_COLORS[index % SNAKE_COLORS.length].map(h => col(h))
+  const light = body.clone().lerp(new THREE.Color('#ffffff'), 0.35)
+  const { head, len, ux, uz, px, pz, N, pts, widths } = snakeLine(from, to, index, lod)
+  const colors = []
+  for (let i = 0; i < N; i++) colors.push(Math.floor(i / N * len / 0.3) % 2 ? light : body)
+  const { at } = ribbon(b, pts, widths, colors, lift, { walls: !lod, up })
+  // diamonds along the back, laid on the body itself in a little grid, so they bend with it over a step
+  // instead of cutting through the bend as flat ones do; f is the way from the middle to the left (1) or right (-1) edge
+  const on = (j, f) => { const v = at(j, 0.5 - f / 2); v.y += 0.004; return v }
+  const M = 4
   for (let i = 3; i < N - 3 && !lod; i += 4) {
     const u = i / N
     if (u < 0.2 || u > 0.9) continue
-    const p = pts[i], q = pts[i + 1]
-    let tx = q.x - p.x, tz = q.z - p.z
-    const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l
     const s = widths[i] * 0.28
-    const y = (x, z) => drapeY(z) + lift + index * 0.002 + 0.004
-    const a = V(p.x + tx * s * 1.6, 0, p.z + tz * s * 1.6), c = V(p.x - tx * s * 1.6, 0, p.z - tz * s * 1.6)
-    const d = V(p.x - tz * s, 0, p.z + tx * s), e = V(p.x + tz * s, 0, p.z - tx * s)
-    for (const v of [a, c, d, e]) v.y = y(v.x, v.z)
-    b.tri(a, c, d, dark); b.tri(a, e, c, dark)
+    const seg = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z) || 1e-3
+    const k = Math.max(1, Math.round(s * 1.6 / seg)) // the tips, k segments either way
+    if (i - k < 0 || i + k > N) continue
+    const f = j => s * (1 - Math.abs(j - i) / k) / (widths[j] / 2)
+    for (let j = i - k; j < i + k; j++) {
+      const f0 = f(j), f1 = f(j + 1)
+      for (let m = 0; m < M; m++) {
+        const a = 1 - 2 * m / M, c = 1 - 2 * (m + 1) / M
+        b.quad(on(j, f0 * a), on(j + 1, f1 * a), on(j + 1, f1 * c), on(j, f0 * c), dark)
+      }
+    }
   }
   // head, eyes and tongue on the head cell
   const ang = Math.atan2(uz, ux)
-  const hl = lift + index * 0.002 + 0.01
-  disc(b, head.x - ux * 0.02, head.z - uz * 0.02, 0.3, 0.23, ang, hl, body, lod ? 8 : 18, !lod)
-  disc(b, head.x + ux * 0.02, head.z + uz * 0.02, 0.2, 0.15, ang, hl + 0.004, dark, 14)
+  const hl = lift + 0.01
+  disc(b, head.x - ux * 0.02, head.z - uz * 0.02, 0.3, 0.23, ang, hl, body, lod ? 8 : 18, !lod, null, up)
+  disc(b, head.x + ux * 0.02, head.z + uz * 0.02, 0.2, 0.15, ang, hl + 0.004, dark, 14, false, null, up)
   for (const sgn of [-1, 1]) {
     const ex = head.x + ux * 0.1 + px * 0.11 * sgn, ez = head.z + uz * 0.1 + pz * 0.11 * sgn
-    disc(b, ex, ez, 0.065, 0.065, 0, hl + 0.008, col('#ffffff'), 10)
-    disc(b, ex + ux * 0.015, ez + uz * 0.015, 0.032, 0.032, 0, hl + 0.012, col('#141414'), 8)
+    disc(b, ex, ez, 0.065, 0.065, 0, hl + 0.008, col('#ffffff'), 10, false, null, up)
+    disc(b, ex + ux * 0.015, ez + uz * 0.015, 0.032, 0.032, 0, hl + 0.012, col('#141414'), 8, false, null, up)
   }
   const ty = z => drapeY(z) + hl
   const t0 = V(head.x + ux * 0.28, 0, head.z + uz * 0.28)
   const t1 = V(head.x + ux * 0.46 + px * 0.06, 0, head.z + uz * 0.46 + pz * 0.06)
   const t2 = V(head.x + ux * 0.46 - px * 0.06, 0, head.z + uz * 0.46 - pz * 0.06)
   const tm = V(head.x + ux * 0.4, 0, head.z + uz * 0.4)
-  for (const v of [t0, t1, t2, tm]) v.y = ty(v.z)
+  for (const v of [t0, t1, t2, tm]) v.y = ty(v.z) + up(v.x, v.z)
   const red = col('#e53935')
   b.tri(V(t0.x - px * 0.02, t0.y, t0.z - pz * 0.02), t1, tm, red)
   b.tri(V(t0.x + px * 0.02, t0.y, t0.z + pz * 0.02), tm, t2, red)
@@ -269,7 +302,7 @@ export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {}
 }
 
 /** A ladder from its base (cell `from`) up to its top (cell `to`). */
-export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {}) {
+export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0, up = FLAT } = {}) {
   const b = new Builder()
   const rail = col('#b8732f'), rung = col('#e6ad5c'), arrowC = col('#43a047')
   const base = cellPos(from), top = cellPos(to)
@@ -278,7 +311,7 @@ export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {
   const ux = dx / len, uz = dz / len, px = -uz, pz = ux
   const ext = 0.32
   const N = lod ? Math.max(4, Math.ceil(len * 2)) : Math.max(20, Math.ceil(len * 10))
-  const l2 = lift + 0.01 + index * 0.002
+  const l2 = lift + 0.01
   for (const side of [-1, 1]) {
     const pts = [], widths = [], colors = []
     for (let i = 0; i <= N; i++) {
@@ -287,7 +320,7 @@ export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {
       widths.push(0.075)
       if (i < N) colors.push(rail)
     }
-    ribbon(b, pts, widths, colors, l2 + 0.006, { walls: !lod })
+    ribbon(b, pts, widths, colors, l2 + 0.006, { walls: !lod, up })
   }
   const step = lod ? 0.6 : 0.3
   for (let s = -ext + 0.1; s <= len + ext - 0.05; s += step) {
@@ -296,14 +329,14 @@ export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {
       const o = -0.2 + (0.4 / n) * k
       pts.push({ x: base.x + ux * s + px * o, z: base.z + uz * s + pz * o })
     }
-    ribbon(b, pts, pts.map(() => 0.06), pts.slice(1).map(() => rung), l2, { walls: false })
+    ribbon(b, pts, pts.map(() => 0.06), pts.slice(1).map(() => rung), l2, { walls: false, up })
   }
   // an up arrow on the base cell, beside the ladder's foot
   const ax = base.x - ux * 0.36, az = base.z - uz * 0.36
   const y = z => drapeY(z) + l2 + 0.012
   const tip = V(ax + ux * 0.2, 0, az + uz * 0.2), l = V(ax - ux * 0.05 + px * 0.17, 0, az - uz * 0.05 + pz * 0.17), r = V(ax - ux * 0.05 - px * 0.17, 0, az - uz * 0.05 - pz * 0.17)
   const m = V(ax + ux * 0.04, 0, az + uz * 0.04)
-  for (const v of [tip, l, r, m]) v.y = y(v.z)
+  for (const v of [tip, l, r, m]) v.y = y(v.z) + up(v.x, v.z)
   b.tri(tip, m, l, arrowC); b.tri(tip, r, m, arrowC)
   return b.geometry()
 }
@@ -312,29 +345,130 @@ export function ladderGeometry(from, to, index = 0, { lift = LIFT, lod = 0 } = {
  * Points along a snake from head to tail (or a ladder from base to top) where a piece rides it: dense
  * enough to follow every step, at the height of the highest paper under the piece's foot.
  */
-export function elementPath(el, index) {
+export function elementPath(el, index, up = FLAT) {
   const from = cellPos(el[1]), to = cellPos(el[2])
   const out = []
-  const at = (x, z) => new THREE.Vector3(x, standY(z) + LIFT + 0.03, z)
+  const at = (x, z) => new THREE.Vector3(x, standY(z) + LIFT + 0.03 + up(x, z), z)
   if (el[0] === 1) {
     const n = Math.max(24, Math.ceil(from.distanceTo(to) / 0.06))
     for (let i = 0; i <= n; i++) out.push(at(from.x + (to.x - from.x) * i / n, from.z + (to.z - from.z) * i / n))
     return out
   }
-  const head = from, tail = to
-  const dx = head.x - tail.x, dz = head.z - tail.z
-  const len = Math.hypot(dx, dz) || 1
-  const px = -dz / len, pz = dx / len
-  const waves = Math.max(1, Math.round(len / 1.9))
-  const amp = Math.min(Math.abs(dz) < 0.5 ? 0.22 : 0.4, 0.14 + len * 0.035)
-  const N = Math.max(30, Math.ceil(len * 16))
-  for (let i = N; i >= 0; i--) {
-    const u = i / N
-    const env = Math.pow(Math.sin(Math.PI * Math.min(u, 0.93) / 0.93), 0.7)
-    const off = amp * Math.sin(u * waves * Math.PI * 2 + (index % 2) * Math.PI) * env
-    out.push(at(tail.x + dx * u + px * off, tail.z + dz * u + pz * off))
-  }
+  const { pts } = snakeLine(el[1], el[2], index)
+  for (let i = pts.length - 1; i >= 0; i--) out.push(at(pts[i].x, pts[i].z))
   return out
+}
+
+// paper laid over another rises a little before it reaches it, holds over it and clears it by GAP
+const HOLD = 0.06, RAMP = 0.16, GAP = 0.008
+/**
+ * The paper an element covers, as capsules: a segment a-b with a half width r, and top, how high its paper
+ * stands there over the element's own lift (a ladder's rails, a snake's head and eyes). A snake's head, its
+ * tongue and its neck are also listed apart, as head.
+ */
+const NECK = 0.5
+function footprint(el, index) {
+  const caps = [], head = []
+  if (el[0] === 0) {
+    const { head: h, ux, uz, pts, widths } = snakeLine(el[1], el[2], index)
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const c = { a: pts[i], b: pts[i + 1], r: Math.max(widths[i], widths[i + 1]) / 2, top: 0.004 }
+      caps.push(c)
+      if (Math.hypot(pts[i].x - h.x, pts[i].z - h.z) < NECK) head.push(c)
+    }
+    head.push({ a: h, b: h, r: 0.31, top: 0.022 })
+    head.push({ a: { x: h.x + ux * 0.2, z: h.z + uz * 0.2 }, b: { x: h.x + ux * 0.47, z: h.z + uz * 0.47 }, r: 0.08, top: 0.012 })
+    caps.push(...head.slice(-2))
+  } else {
+    const base = cellPos(el[1]), top = cellPos(el[2])
+    const len = Math.hypot(top.x - base.x, top.z - base.z) || 1
+    const at = s => ({ x: base.x + (top.x - base.x) / len * s, z: base.z + (top.z - base.z) / len * s })
+    caps.push({ a: at(-0.32), b: at(len + 0.32), r: 0.24, top: 0.016 })
+    caps.push({ a: at(-0.56), b: at(-0.2), r: 0.18, top: 0.022 }) // the up arrow
+  }
+  const reach = Math.max(...caps.map(c => c.r)) + HOLD + RAMP
+  const box = [Infinity, -Infinity, Infinity, -Infinity]
+  for (const c of caps) for (const p of [c.a, c.b]) {
+    box[0] = Math.min(box[0], p.x - reach); box[1] = Math.max(box[1], p.x + reach)
+    box[2] = Math.min(box[2], p.z - reach); box[3] = Math.max(box[3], p.z + reach)
+  }
+  return { caps, head, box }
+}
+function segDist(x, z, { a, b }) {
+  const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz
+  const t = l2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0
+  return Math.hypot(x - a.x - dx * t, z - a.z - dz * t)
+}
+/** Whether two sets of capsules touch (their paper overlaps). */
+function touch(A, B) {
+  for (const c of A) for (const d of B) {
+    const r = c.r + d.r + HOLD
+    if (segDist(c.a.x, c.a.z, d) < r || segDist(c.b.x, c.b.z, d) < r || segDist(d.a.x, d.a.z, c) < r || segDist(d.b.x, d.b.z, c) < r) return true
+  }
+  return false
+}
+const boxesMeet = (p, q) => p[0] < q[1] && q[0] < p[1] && p[2] < q[3] && q[2] < p[3]
+
+/**
+ * Where snakes and ladders cross, one lies over the other like paper over paper instead of the two
+ * sharing a height and flickering: ladders on the board, snakes over them. Of two snakes that cross, the
+ * one whose head lies on the other goes on top, a head is never hidden; else the shorter one (it is small
+ * enough as it is: it stays in sight). A snake goes over or under another whole, its neck can't slip
+ * through. For each element: up(x, z), how far its paper rises there to clear what lies under it.
+ */
+export function stackElements(els) {
+  const fps = els.map((e, i) => footprint(e, i))
+  const len = i => cellPos(els[i][1]).distanceTo(cellPos(els[i][2]))
+  const snakes = els.map((e, i) => i).filter(i => els[i][0] === 0)
+  // which snakes each snake must lie over
+  const over = new Map(snakes.map(i => [i, []]))
+  for (const i of snakes) for (const j of snakes) {
+    if (j <= i || !boxesMeet(fps[i].box, fps[j].box) || !touch(fps[i].caps, fps[j].caps)) continue
+    const hi = touch(fps[i].head, fps[j].caps), hj = touch(fps[j].head, fps[i].caps)
+    const top = hi !== hj ? (hi ? i : j) : len(i) !== len(j) ? (len(i) < len(j) ? i : j) : j
+    over.get(top).push(top === i ? j : i)
+  }
+  // laid from the bottom: ladders, then each snake once those it lies over are down, the longest first;
+  // a ring of heads on bodies is broken by laying the longest
+  const order = els.map((e, i) => i).filter(i => els[i][0] !== 0)
+  const left = new Set(snakes)
+  while (left.size) {
+    const byLen = [...left].sort((a, b) => len(b) - len(a) || a - b)
+    const next = byLen.find(i => over.get(i).every(j => !left.has(j))) ?? byLen[0]
+    order.push(next); left.delete(next)
+  }
+  const ups = els.map(() => FLAT)
+  const laid = []
+  for (const i of order) {
+    const fp = fps[i]
+    const under = laid.filter(f => boxesMeet(f.box, fp.box))
+    // the paper under a point, as a thickness across the paper: on a step's slope it takes more height
+    let thick = FLAT
+    if (under.length) {
+      thick = (x, z) => {
+        let h = 0
+        for (const f of under) {
+          if (x < f.box[0] || x > f.box[1] || z < f.box[2] || z > f.box[3]) continue
+          let k = 0, top = 0
+          for (const c of f.caps) {
+            const d = segDist(x, z, c) - c.r
+            const w = d <= HOLD ? 1 : smooth(1 - (d - HOLD) / RAMP)
+            if (w > 0) { k = Math.max(k, w); top = Math.max(top, w * (c.top + GAP)) }
+          }
+          if (k > 0) h = Math.max(h, top + k * f.thick(x, z))
+        }
+        return h
+      }
+      ups[i] = (x, z) => {
+        const h = thick(x, z)
+        if (!h) return 0
+        const slope = (drapeY(z + 0.01) - drapeY(z - 0.01)) / 0.02
+        return h * Math.sqrt(1 + slope * slope)
+      }
+    }
+    laid.push({ ...fp, thick })
+  }
+  return ups
 }
 
 /** A snake or a ladder for an element [type, from, to]. */

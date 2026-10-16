@@ -236,7 +236,8 @@ function buildLOD0() {
   const add = (name, geo, mat, pos = null) => { const m = new THREE.Mesh(geo, mat); m.name = name; if (pos) m.position.copy(pos); scene.add(m); return m }
   // the paper: table, tiers, pads, every snake and ladder, the markers
   const paper = [G.buildTiers({ lot: LOT })]
-  ELS.forEach((e, i) => paper.push(G.boxUV(G.elementGeometry(e, i), 0.32)))
+  const ups = G.stackElements(ELS)
+  ELS.forEach((e, i) => paper.push(G.boxUV(G.elementGeometry(e, i, { up: ups[i] }), 0.32)))
   let portal = 0
   for (const m of MARKERS) for (const c of m.c) paper.push(G.boxUV(G.markerGeometry(m.k, c, m.k === 'po' ? portal : 0), 0.32))
   paper.push(G.boxUV(G.tierArrowsGeometry(), 0.32))
@@ -288,7 +289,8 @@ function buildLOD1() {
     tops.setAttribute(name, new THREE.BufferAttribute(arr, n))
   }
   parts.push(tops)
-  ELS.forEach((e, i) => parts.push(setUV(G.elementGeometry(e, i, { lod: 1 }), ...blank)))
+  const ups = G.stackElements(ELS)
+  ELS.forEach((e, i) => parts.push(setUV(G.elementGeometry(e, i, { lod: 1, up: ups[i] }), ...blank)))
   let portal = 0
   for (const m of MARKERS) for (const c of m.c) parts.push(setUV(G.markerGeometry(m.k, c, m.k === 'po' ? portal : 0), ...blank))
   DIE_REST.forEach((pos, i) => {

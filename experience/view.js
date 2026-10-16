@@ -56,6 +56,12 @@ export class View {
     this.shake = 0
     // the menus push the board aside: its picture moves right by `side` of the screen's width, `scale` shrinks it
     this.aside = { side: 0, scale: 1, sideNow: 0, scaleNow: 1 }
+    // the hand and the panels stand over the board: the picture moves by `dodge` px so the point the camera
+    // follows (aim) stays clear of them; cover() gives their screen rectangles (set by the app)
+    this.cover = null
+    this.aim = null
+    this.dodge = new THREE.Vector2()
+    this.dodgeWant = new THREE.Vector2()
     this.highlight = null
     this.time = 0
     this.buildStatic()
@@ -194,9 +200,10 @@ export class View {
   buildBoard(els, mk, mods) {
     for (const m of this.elMeshes) { m.geometry.dispose(); this.elGroup.remove(m) }
     for (const m of this.mkMeshes) { m.geometry.dispose(); this.mkGroup.remove(m) }
+    const ups = G.stackElements(els)
     this.elMeshes = els.map((e, i) => {
-      const m = new THREE.Mesh(G.elementGeometry(e, i), this.mat.paper)
-      m.userData = { el: i, path: G.elementPath(e, i), flipped: mods.includes(i) }
+      const m = new THREE.Mesh(G.elementGeometry(e, i, { up: ups[i] }), this.mat.paper)
+      m.userData = { el: i, path: G.elementPath(e, i, ups[i]), flipped: mods.includes(i) }
       this.elGroup.add(m)
       return m
     })
@@ -794,13 +801,15 @@ export class View {
     if (t) this.follow(t.group.position)
   }
   /** The camera goes after a point, unless the player is moving it about themselves. */
-  follow(p) { if (this.manual <= 0) this.focusWant.copy(p) }
+  follow(p) { if (this.manual <= 0) { this.focusWant.copy(p); this.aim = p } }
   /** The whole board in view: its middle, from further away on a big board. */
   overview() {
     const fewer = 10 - G.B.tiers
     const z = 0.2 + fewer * G.B.tierD / 2
     this.focusWant.set(0, Math.max(0.6, 1.5 - fewer * 0.15), z)
     this.distWant = 12.5 - fewer * 0.6
+    this.aim = null
+    this.dodgeWant.set(0, 0)
   }
   zoom(f) { this.distWant = THREE.MathUtils.clamp(this.distWant * f, 3.5, 13) }
   pan(dx, dy) {
@@ -837,10 +846,60 @@ export class View {
     fr.scaleNow += (fr.scale - fr.scaleNow) * k
     if (Math.abs(fr.sideNow) < 0.001 && Math.abs(fr.scaleNow - 1) < 0.001) { fr.sideNow = 0; fr.scaleNow = 1 }
     cam.zoom = fr.scaleNow
-    if (fr.sideNow) cam.setViewOffset(this.p0.width, this.p0.height, -fr.sideNow * this.p0.width, fr.sideNow * 0.22 * this.p0.height, this.p0.width, this.p0.height) // a little up, the tray below out of sight
-    else if (cam.view) cam.clearViewOffset()
+    this.viewOffset(0, 0)
     cam.updateProjectionMatrix()
+    cam.updateMatrixWorld()
+    // the picture moves aside for the hand and the panels, worked out from where things stand without it
+    if (this.aim && this.manual <= 0) this.dodgeFor(this.aim)
+    this.dodge.lerp(this.dodgeWant, 1 - Math.exp(-8 * dt))
+    if (!this.dodgeWant.x && !this.dodgeWant.y && this.dodge.lengthSq() < 0.25) this.dodge.set(0, 0)
+    if (this.dodge.x || this.dodge.y) this.viewOffset(this.dodge.x, this.dodge.y)
     this.p0.me.position.set(THREE.MathUtils.clamp(p.x, -5, 5), Math.min(p.y, L.height - 1), THREE.MathUtils.clamp(p.z, -8.5, 8.5))
+  }
+
+  /** The picture moves right by the menus' aside (and a little up, the tray below out of sight), and by dx, dy px. */
+  viewOffset(dx, dy) {
+    const cam = this.p0.camera, W = this.p0.width, H = this.p0.height, side = this.aside.sideNow
+    if (side || dx || dy) cam.setViewOffset(W, H, -side * W - dx, side * 0.22 * H - dy, W, H)
+    else if (cam.view) cam.clearViewOffset()
+  }
+  /**
+   * The least shift of the picture that puts the piece standing at p clear of the cover (the hand, the
+   * tray, the panels) and inside the screen; none when it already is. Steady: it is worked out on the
+   * picture without the shift, so the shift never moves what it is worked out from.
+   */
+  dodgeFor(p) {
+    const cam = this.p0.camera, W = this.p0.width, H = this.p0.height, want = this.dodgeWant
+    const rects = this.cover?.() || []
+    if (!rects.length) { want.set(0, 0); return }
+    const scr = v => { v.project(cam); return { x: (v.x + 1) / 2 * W, y: (1 - v.y) / 2 * H, front: v.z < 1 } }
+    const feet = scr(p.clone()), head = scr(p.clone().add(new THREE.Vector3(0, 0.85, 0)))
+    if (!feet.front || !head.front) { want.set(0, 0); return }
+    const r = THREE.MathUtils.clamp(Math.abs(feet.y - head.y) * 0.45, 12, 60)
+    const box = { x0: Math.min(feet.x, head.x) - r, x1: Math.max(feet.x, head.x) + r, y0: head.y - r * 0.4, y1: feet.y + r * 0.5 }
+    const M = 10
+    const hits = ([dx, dy]) => rects.filter(c => box.x0 + dx < c.x + c.w + M && box.x1 + dx > c.x - M && box.y0 + dy < c.y + c.h + M && box.y1 + dy > c.y - M)
+    const fits = ([dx, dy]) => box.x0 + dx >= M && box.x1 + dx <= W - M && box.y0 + dy >= M && box.y1 + dy <= H - M && Math.abs(dx) <= W * 0.4 && Math.abs(dy) <= H * 0.4
+    // into the screen first, then out of whatever still covers it, one rectangle and one way at a time
+    const inX = box.x0 < M ? M - box.x0 : box.x1 > W - M ? W - M - box.x1 : 0
+    const inY = box.y0 < M ? M - box.y0 : box.y1 > H - M ? H - M - box.y1 : 0
+    let tries = [[0, 0], [inX, inY]], best = null, cost = Infinity
+    for (let depth = 0; depth < 3 && tries.length; depth++) {
+      const next = []
+      for (const d of tries) {
+        const over = hits(d)
+        if (!over.length) {
+          if (!fits(d)) continue
+          const k = Math.hypot(d[0], d[1]) + 0.5 * Math.hypot(d[0] - want.x, d[1] - want.y) // and near the last one, so it doesn't flip
+          if (k < cost) { cost = k; best = d }
+          continue
+        }
+        for (const c of over) next.push([d[0], c.y - M - box.y1], [d[0], c.y + c.h + M - box.y0], [c.x - M - box.x1, d[1]], [c.x + c.w + M - box.x0, d[1]])
+      }
+      tries = next
+    }
+    if (best) want.set(best[0], best[1])
+    else want.set(0, 0) // nowhere clear within reach: the picture as it is
   }
 
   // ---------- picking and highlights ----------

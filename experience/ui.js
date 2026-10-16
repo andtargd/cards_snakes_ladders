@@ -920,6 +920,7 @@ export class UI {
     const sy = this.narrow ? panelBottom + 4 * u : 10 * u
     const sx = this.narrow ? (W - sw) / 2 : Math.max(pw + 20 * u, (W - sw) / 2)
     this.panel(sx, sy, sw, 40 * u, { fill: myTurn ? '#2d3a6b' : 'rgba(255,255,255,0.93)', r: 20 })
+    this.statusRect = { x: sx, y: sy, w: sw, h: 40 * u }
     this.text(status, sx + sw / 2, sy + 21 * u, { size: 17, align: 'center', color: myTurn ? '#ffffff' : P.INK, max: sw - 20 * u })
     if (!this.narrow) this.text(T.round(s.round, CFG.roundLimit) + (s.mode === 'fool' ? ' · Fool' : ' · Champion'), sx + sw / 2, sy + 52 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c' })
     if (app.turnLeft != null && myTurn) this.text(`${Math.ceil(app.turnLeft)} s`, sx + sw - 30 * u, sy + 21 * u, { size: 14, align: 'center', color: app.turnLeft < 10 ? '#ffb4a8' : '#ffffff' })
@@ -1118,6 +1119,28 @@ export class UI {
     const w = this.narrow ? THREE.MathUtils.clamp(W * 0.62, 225, 360) : 354 * u, h = w * 0.66
     return { x: this.narrow ? 14 : W - w - 12 * u, y: this.narrow ? H - this.handHeight() - h - 12 * u : H - h - 46 * u, w, h }
   }
+  /**
+   * What stands over the board in a game, as screen rectangles: my hand at rest, the dice tray with its label,
+   * the players panel, the status and the log. The camera keeps the piece it follows clear of them.
+   */
+  cover() {
+    if (this.app.screen !== 'game' || !this.app.view.state) return []
+    const u = this.u, out = []
+    const n = this.cards.filter(c => c.kind === 'hand').length
+    if (n) {
+      const cw = this.cardW(), { left, right } = this.handLayout(n)
+      const top = this.H - cw * 1.4 * 0.42 + 6 * u - cw * 0.7 - 6 * u // the fanned cards lean a little higher
+      out.push({ x: left, y: top, w: right - left, h: this.H - top })
+    }
+    if (this.trayTop != null && this.trayRect) {
+      const r = this.trayRect, bottom = this.narrow ? r.y + r.h + 4 * u : r.y + r.h + 32 * u
+      out.push({ x: r.x - 4 * u, y: this.trayTop, w: r.w + 8 * u, h: bottom - this.trayTop })
+    }
+    for (const r of this.rowRect) if (r) out.push(r)
+    if (this.statusRect) out.push(this.statusRect)
+    if (this.logRect) out.push(this.logRect)
+    return out
+  }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
   handLayout(n) {
     const u = this.u, cw = this.cardW()
@@ -1132,6 +1155,7 @@ export class UI {
 
   drawLog() {
     const u = this.u, H = this.H
+    this.logRect = null
     const lines = this.logOpen ? this.logLines.slice(-16) : this.logLines.slice(-5)
     if (!lines.length) return
     if (this.narrow && !this.logOpen) {
@@ -1152,6 +1176,7 @@ export class UI {
     const h = lines.length * lh + 16 * u
     const y = this.narrow ? 120 * u : over ? H - this.handHeight() - h - 8 * u : H - h - 12 * u
     this.panel(x, y, w, h, { fill: 'rgba(255,255,255,0.82)', r: 10 })
+    this.logRect = { x, y, w, h }
     lines.forEach((l, i) => this.text(l, x + 10 * u, y + 8 * u + lh * (i + 0.5), { size: 12.5, bold: false, max: w - 20 * u, color: i === lines.length - 1 ? P.INK : '#4b453e' }))
     this.hits.push({ key: 'logtoggle', x, y, w, h, action: () => { this.logOpen = !this.logOpen; this.dirty = true } })
   }
