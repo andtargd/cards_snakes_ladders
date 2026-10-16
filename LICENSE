@@ -1,0 +1,26 @@
+Copyright (c) 2026 Andrey Taranovskiy (andtargd). All rights reserved.
+
+Cards, Snakes & Ladders, including its source code, game design, card texts,
+graphics, 3D models, sounds and other content in this repository, is the
+property of the copyright holder.
+
+The source is published for viewing only. Without prior written permission
+from the copyright holder you may not copy, modify, distribute, publish,
+host, sublicense or sell this software or any part of it, or use it to make
+derivative works, in any form or medium. Viewing the repository and forking it
+on GitHub as allowed by the GitHub Terms of Service grants no further rights.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+Contact: andtargd@gmail.com
+
+-------------------------------------------------------------------------------
+Third-party software
+
+This game uses the following libraries, which remain under their own licenses
+and are not covered by the notice above:
+
+- three.js (https://threejs.org), MIT License, Copyright (c) 2010-2026 three.js authors
+- PeerJS (https://peerjs.com), MIT License, Copyright (c) 2015 Michelle Bu and Eric Zhang
