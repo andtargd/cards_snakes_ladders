@@ -12,9 +12,16 @@
 //            so "Move any player {spaces} spaces forward" follows `spaces`. Up to 4 short lines fit.
 //   popup    (some cards) the word that pops up over a player's piece when the card's effect hits them,
 //            and its colour: { text: 'Stuck!', color: '#5d7d22' }
+//   target   (cards played on a player) who it can be played on:
+//              any_player          any player on the board, the one playing it included
+//              not_current_player  any player but the one playing it
+//              current_player      the one playing it, without choosing
+//            Swap Places, Peek, Steal and Swap Hands always go to another player. Fix the text if you
+//            change it.
 // and the numbers of its own, described next to each card.
 //
-// Who or what a card can target, its category (colour and picture) and how it works stay in rules.js.
+// Its category (colour and picture), how it works and what the other cards target (cells, ladders,
+// snakes, the leader) stay in rules.js.
 
 export default {
   // cards a player may hold at the end of their turn (they draw one at the start of each turn, so the
@@ -35,29 +42,35 @@ export default {
     // ---------- Movement ----------
     M1: {
       name: 'Dash', rarity: 'C', weight: 1, enabled: true,
+      target: 'any_player',
       spaces: 2, // spaces forward
       text: 'Move any player {spaces} spaces forward, over any swamp.',
     },
     M2: {
       name: 'Setback', rarity: 'U', weight: 1, enabled: true,
+      target: 'any_player',
       spaces: 3, // spaces back (never past cell 1)
       text: 'Move any player {spaces} spaces back.',
     },
     M3: {
       name: 'Swap Places', rarity: 'L', weight: 1, enabled: true,
+      target: 'not_current_player',
       text: 'Instead of rolling, swap places with another player.',
     },
     M4: {
       name: 'Double Move', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       text: 'Any player immediately rolls again and moves.',
     },
     M5: {
       name: 'Tailgate', rarity: 'U', weight: 1, enabled: true,
+      target: 'current_player',
       popup: { text: 'Leap!', color: '#3fa66b' }, // over the player where the leap lands
       text: 'Instead of rolling, leap to the cell just behind the nearest player ahead.',
     },
     M6: {
       name: 'Rewind', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       popup: { text: 'Rewind!', color: '#9b59d6' }, // over the player sent back
       text: 'A player goes back to where their last turn began. Nothing there takes effect.',
     },
@@ -65,26 +78,31 @@ export default {
     // ---------- Dice: they change the target's next roll ----------
     D1: {
       name: 'Extra Die', rarity: 'C', weight: 1, enabled: true,
+      target: 'any_player',
       dice: 2, // dice in the next roll (the tray shows up to 2)
       text: "A player's next roll uses {dice} dice.",
     },
     D2: {
       name: 'Choose a Face', rarity: 'U', weight: 1, enabled: true,
+      target: 'any_player',
       max: 3, // the player picks a value from 1 to this
       text: 'A player picks a value from 1 to {max} instead of rolling.',
     },
     D3: {
       name: 'Heavy Die', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       min: 3, // the lowest face the dice can show (1 to 6)
       text: "A player's next roll: no die shows less than {min}.",
     },
     D4: {
       name: 'Golden Die', rarity: 'L', weight: 1, enabled: true,
+      target: 'any_player',
       max: 6, // the player picks a value from 1 to this
       text: 'A player picks any value from 1 to {max} instead of rolling.',
     },
     D5: {
       name: 'Choose Your Roll', rarity: 'U', weight: 1, enabled: true,
+      target: 'any_player',
       text: "A player's next roll uses 2 dice: they move by the one they pick.",
     },
 
@@ -125,21 +143,25 @@ export default {
     // ---------- Hinder ----------
     H1: {
       name: 'Slow Down', rarity: 'C', weight: 1, enabled: true,
+      target: 'any_player',
       max: 3, // the next roll's total is cut to this
       text: "A player's next roll totals {max} at most.",
     },
     H2: {
       name: 'Vanilla play', rarity: 'U', weight: 1, enabled: true,
+      target: 'any_player',
       popup: { text: 'No cards!', color: '#d64545' }, // over the player at the start of the turn they can't play cards
       text: "A player can't play cards on their next turn.",
     },
     H3: {
       name: 'Skip Turn', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       popup: { text: 'Skips', color: '#d64545' }, // over the player when their turn is skipped
       text: 'A player skips their next turn.',
     },
     H4: {
       name: 'Moonwalk', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       popup: { text: 'Backwards!', color: '#d64545' }, // over the player as their roll moves them back
       text: "A player's next roll moves them back instead of forward (never past cell 1).",
     },
@@ -152,19 +174,22 @@ export default {
     // ---------- Protection ----------
     P1: {
       name: 'Parachute', rarity: 'C', weight: 1, enabled: true,
+      target: 'any_player',
       slide: 0.5, // the part of a snake's length the player still slides (0.5 = half); fix the text if you change it
-      turns: 3,
-      text: 'A player slides only half as far down snakes for {turns} turns.',
+      turns: 3, // it also ends on the first snake it softens
+      text: 'A player slides only half as far down the next snake they land on. Lasts {turns} turns.',
       popup: { text: 'Parachute!' }, // over the player as it opens on a snake
     },
     P2: {
       name: 'Swamp Boots', rarity: 'U', weight: 1, enabled: true,
+      target: 'any_player',
       turns: 3,
       text: 'A player ignores swamps for {turns} turns.',
       popup: { text: 'Boots!' }, // over the player as a roll wades on past a swamp
     },
     P3: {
       name: 'Shield', rarity: 'R', weight: 1, enabled: true,
+      target: 'any_player',
       turns: 3, // it also ends on the first snake it blocks
       popup: { text: 'Shield!', color: '#2b8fd6' }, // over the player when it blocks a snake
       text: 'A player ignores the next snake they land on. Lasts {turns} turns.',
@@ -178,14 +203,17 @@ export default {
     },
     C2: {
       name: 'Peek', rarity: 'C', weight: 1, enabled: true,
+      target: 'not_current_player',
       text: "Look at another player's hand until the end of your turn.",
     },
     C3: {
       name: 'Steal', rarity: 'U', weight: 1, enabled: true,
+      target: 'not_current_player',
       text: "Take a random card from another player's hand.",
     },
     C4: {
       name: 'Swap Hands', rarity: 'R', weight: 1, enabled: true,
+      target: 'not_current_player',
       text: 'Swap hands with another player.',
     },
     C5: {

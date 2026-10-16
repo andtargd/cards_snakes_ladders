@@ -16,9 +16,11 @@ Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck
 
 Controls: click the dice tray when it lights up (or press Space) to roll; while you can still play a card the tray says End Turn: click it or press Space to end the turn. Click a card, then its target; 1–4 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
 
-## Tuning the cards
+## Tuning the cards and the board
 
-`experience/cards.config.js` holds the deck for game design: each card's name, text, rarity, how often it comes up within its rarity (`weight`), whether it is in the deck (`enabled`) and its numbers (spaces, turns, dice values…). Texts use `{placeholders}` for those numbers, so they follow the values. The hand size and the rarity weights are there too. Edit and reload the page.
+`experience/cards.config.js` holds the deck for game design: each card's name, text, rarity, how often it comes up within its rarity (`weight`), whether it is in the deck (`enabled`), who it can be played on (`target`: any player, any player but yourself, or yourself) and its numbers (spaces, turns, dice values…). Texts use `{placeholders}` for those numbers, so they follow the values. The hand size and the rarity weights are there too. Edit and reload the page.
+
+`experience/board.config.js` holds the field: the snakes and ladders of each board size, how long they run, how many may stand on one tier, how many tiers may stay empty, the share of ladders in the first half and of snakes in the second, and the snake just before the finish.
 
 ## Running locally
 
@@ -38,7 +40,8 @@ web/p0web.js        browser stand-in for the Project 0 runtime the game is writt
 web/net.js          online rooms: WebRTC through PeerJS, one player relays, host handover
 web/online.js       the Play Online dialog
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
-  cards.config.js   the deck's names, texts, rarity and numbers, for tuning
+  cards.config.js   the deck's names, texts, rarity, targets and numbers, for tuning
+  board.config.js   where snakes and ladders may stand, for tuning
 tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page

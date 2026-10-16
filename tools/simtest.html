@@ -19,7 +19,7 @@ for (const n of R.SIZES) {
     const t1 = performance.now()
     const b = R.generateBoard(seed, n)
     if (performance.now() - t1 > 400) slow++
-    if (b.length !== bc.snakes + bc.ladders || R.boardProblems(b, null, n)) bad++
+    if (b.length !== bc.snakes + bc.ladders || R.boardProblems(b, null, n) || R.layoutProblems(b, n)) bad++
     if (seed <= 200) means.push(R.simulateMean(b, 1000, R.mulberry32(seed), n))
   }
   say(`boards ${n}: ${boards} in ${Math.round(performance.now() - t0)} ms, bad ${bad}, slow ${slow}, mean rolls ${Math.min(...means).toFixed(1)}..${Math.max(...means).toFixed(1)}`)

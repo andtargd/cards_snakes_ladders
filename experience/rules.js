@@ -4,24 +4,24 @@
 // seeded generator, so a game replays exactly from its seed and its actions.
 
 import DECK from './cards.config.js'
+import FIELD from './board.config.js'
 
 export const CFG = {
   cells: 100, tiers: 10, perTier: 10,
-  snakes: 8, ladders: 8,
   hand: Math.max(1, DECK.hand | 0 || 3), fxTurns: 3, roundLimit: 150,
-  minLen: 8, maxLen: 60, maxEndsPerTier: 4, balance: 0.15,
-  simRuns: 1000, simMin: 25, simMax: 45,
-  // how snakes and ladders may cross: at most 2 crossings each, at 40 degrees or more
-  maxCrossings: 2, minCrossAngle: 40,
+  minLen: FIELD.minLen, maxEndsPerTier: FIELD.perTier.ends, balance: FIELD.balance,
+  simRuns: 1000,
+  // how snakes and ladders may cross: a few crossings each, and only steeply
+  maxCrossings: FIELD.maxCrossings, minCrossAngle: FIELD.minCrossAngle,
 }
 
 /** The board sizes a game can be played on (ten cells per tier). */
 export const SIZES = [50, 70, 100]
-/** Field settings for a board of n cells: fewer snakes and ladders, shorter cut-outs and races on small boards. */
+/** Field settings for a board of n cells (board.config.js): fewer snakes and ladders, shorter cut-outs and races on small boards. */
 export function boardCfg(n = CFG.cells) {
-  if (n === 50) return { cells: 50, tiers: 5, snakes: 4, ladders: 4, maxLen: 30, simMin: 12, simMax: 23 }
-  if (n === 70) return { cells: 70, tiers: 7, snakes: 6, ladders: 6, maxLen: 42, simMin: 17, simMax: 32 }
-  return { cells: CFG.cells, tiers: CFG.tiers, snakes: CFG.snakes, ladders: CFG.ladders, maxLen: CFG.maxLen, simMin: CFG.simMin, simMax: CFG.simMax }
+  if (!SIZES.includes(n)) n = CFG.cells
+  const z = FIELD.sizes[n]
+  return { cells: n, tiers: n / CFG.perTier, snakes: z.snakes, ladders: z.ladders, maxLen: z.maxLen, simMin: z.rolls[0], simMax: z.rolls[1], emptyTiers: z.emptyTiers }
 }
 
 export const RARITY = DECK.rarity
@@ -29,9 +29,10 @@ export const RARITY = DECK.rarity
 export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 'Protection', C: 'Hand' }
 
 // How each card works: its category and what it targets. Names, texts, rarity and numbers come from
-// cards.config.js. tgt: any (any player on the board, self included), other (another player), leader
-// (automatic), self (automatic), cell, cell2 (two cells), ladder, snake, board, none, echo (a player
-// whose last card is played again, then that card's own target)
+// cards.config.js, and so does the target of a card played on a player (its `target`). tgt: any (any
+// player on the board, self included), other (another player), self (automatic), leader (automatic),
+// cell, cell2 (two cells), ladder, snake, board, none, echo (a player whose last card is played again,
+// then that card's own target)
 const KINDS = {
   M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'any'], M5: ['M', 'self'], M6: ['M', 'any'],
   D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
@@ -40,10 +41,16 @@ const KINDS = {
   P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
   C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'], C6: ['C', 'echo'],
 }
+// a card's `target` in cards.config.js, for the cards played on a player
+const TARGETS = { any_player: 'any', not_current_player: 'other', current_player: 'self' }
+// Swap Places and the hand cards make no sense on oneself: they always go to another player
+const NOT_SELF = new Set(['M3', 'C2', 'C3', 'C4'])
 const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3 }
 /** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
-const ALL = Object.entries(KINDS).map(([id, [cat, tgt]]) => {
+const ALL = Object.entries(KINDS).map(([id, [cat, kind]]) => {
   const c = { ...DEFAULTS, ...DECK.cards[id] }
+  const onPlayers = ['any', 'other', 'self'].includes(kind)
+  const tgt = onPlayers && TARGETS[c.target] ? (NOT_SELF.has(id) ? 'other' : TARGETS[c.target]) : kind
   const text = String(c.text || '').replace(/\{(\w+)\}/g, (m, k) => (c[k] !== undefined ? String(c[k]) : m))
   return { ...c, id, name: String(c.name || id), cat, rar: RARITY[c.rarity] ? c.rarity : 'C', tgt, text, w: Math.max(0, +(c.weight ?? 1) || 0), on: c.enabled !== false }
 })
@@ -108,6 +115,33 @@ export function boardProblems(els, blocked = null, n = CFG.cells) {
   return crossingProblems(els)
 }
 
+// ---------- layout: where snakes and ladders stand (board.config.js) ----------
+// A snake or ladder stands on the tier where a piece steps on it: a ladder's foot, a snake's head.
+/** The most snakes tier t may hold: more on the one crowded tier the board may have near its end. */
+const snakeCap = (t, n) => (t * CFG.perTier >= FIELD.crowdedTier.from * n ? Math.max(FIELD.perTier.snakes, FIELD.crowdedTier.snakes) : FIELD.perTier.snakes)
+const laddersEarly = bc => Math.ceil(FIELD.laddersFirstHalf * bc.ladders - 1e-9)
+const snakesLate = bc => Math.ceil(FIELD.snakesSecondHalf * bc.snakes - 1e-9)
+
+/** Checks where the base board's snakes and ladders stand: per tier, per half, the snake before the finish. */
+export function layoutProblems(els, n = CFG.cells) {
+  const bc = boardCfg(n)
+  const lad = new Array(bc.tiers).fill(0), sn = new Array(bc.tiers).fill(0)
+  let early = 0, late = 0, final = false
+  for (const [type, from] of els) {
+    const t = tierOf(from)
+    if (type === 1) { lad[t]++; if (from <= n / 2) early++ }
+    else { sn[t]++; if (from > n / 2) late++; if (n - from <= FIELD.finalSnake) final = true }
+  }
+  if (lad.some(k => k > FIELD.perTier.ladders)) return 'too many ladders on a tier'
+  const crowded = sn.map((k, t) => t).filter(t => sn[t] > FIELD.perTier.snakes)
+  if (crowded.length > 1 || crowded.some(t => sn[t] > snakeCap(t, n))) return 'too many snakes on a tier'
+  if (lad.filter((k, t) => !k && !sn[t]).length > bc.emptyTiers) return 'too many empty tiers'
+  if (early < laddersEarly(bc)) return 'too few ladders in the first half'
+  if (late < snakesLate(bc)) return 'too few snakes in the second half'
+  if (FIELD.finalSnake > 0 && !final) return 'no snake before the finish'
+  return null
+}
+
 // ---------- crossings: the board as seen from above ----------
 /** A cell's centre on the board's plan in metres (the 3D board's layout: 1 m cells, 1.25 m tiers). */
 export function cellXZ(c) {
@@ -166,26 +200,47 @@ export function simulateMean(els, runs, rand, n = CFG.cells) {
 }
 
 const boardCache = new Map()
-/** The random field for a seed and a size: on 100 cells 8 snakes and 8 ladders that pass every rule and the 1,000-run check. */
+/**
+ * The random field for a seed and a size: on 100 cells 8 snakes and 8 ladders that pass every rule of
+ * board.config.js and the 1,000-run check.
+ */
 export function generateBoard(seed, n = CFG.cells) {
   const key = n + ':' + seed
   if (boardCache.has(key)) return boardCache.get(key)
-  const bc = boardCfg(n)
+  const bc = boardCfg(n), half = Math.floor(n / 2)
+  // where each one's entry may go, [type, lowest cell, highest cell]: the snake before the finish first,
+  // then the ladders of the first half and the snakes of the second, then the rest anywhere
+  const snakes = [], ladders = []
+  if (FIELD.finalSnake > 0) snakes.push([0, n - Math.max(1, FIELD.finalSnake), n - 1])
+  while (snakes.length < Math.min(bc.snakes, snakesLate(bc))) snakes.push([0, half + 1, n - 1])
+  while (snakes.length < bc.snakes) snakes.push([0, 2, n - 1])
+  while (ladders.length < Math.min(bc.ladders, laddersEarly(bc))) ladders.push([1, 2, half])
+  while (ladders.length < bc.ladders) ladders.push([1, 2, n - 1])
+  const slots = []
+  for (let i = 0; i < Math.max(snakes.length, ladders.length); i++) {
+    if (i < snakes.length) slots.push(snakes[i])
+    if (i < ladders.length) slots.push(ladders[i])
+  }
   const r = mulberry32(seed ^ 0x5bd1e995)
   let els = null
   for (let attempt = 0; attempt < 4000 && !els; attempt++) {
     const list = [], used = new Set(), perTier = new Array(bc.tiers).fill(0), crossings = []
-    let ok = true
-    const add = type => {
+    const lad = new Array(bc.tiers).fill(0), sn = new Array(bc.tiers).fill(0)
+    let ok = true, crowded = -1
+    const add = ([type, lo, hi]) => {
       for (let k = 0; k < 300; k++) {
         const len = CFG.minLen + Math.floor(r() * (bc.maxLen - CFG.minLen + 1))
-        const low = 2 + Math.floor(r() * (bc.cells - 2 - len))
-        const high = low + len
-        if (high > bc.cells - 1 || used.has(low) || used.has(high)) continue
-        const tl = tierOf(low), th = tierOf(high)
+        const from = lo + Math.floor(r() * (hi - lo + 1))
+        const to = type === 1 ? from + len : from - len
+        if (to < 2 || to > n - 1 || used.has(from) || used.has(to)) continue
+        const tf = tierOf(from), tt = tierOf(to)
         // every snake and ladder joins two tiers: none lies flat along one
-        if (tl === th || perTier[tl] + 1 > CFG.maxEndsPerTier || perTier[th] + 1 > CFG.maxEndsPerTier) continue
-        const el = type === 1 ? [1, low, high] : [0, high, low]
+        if (tf === tt || perTier[tf] + 1 > CFG.maxEndsPerTier || perTier[tt] + 1 > CFG.maxEndsPerTier) continue
+        // few ladders and snakes stand on one tier, a few more snakes on one tier near the end
+        if (type === 1 && lad[tf] + 1 > FIELD.perTier.ladders) continue
+        const over = type === 0 && sn[tf] + 1 > FIELD.perTier.snakes
+        if (over && ((crowded >= 0 && crowded !== tf) || sn[tf] + 1 > snakeCap(tf, n))) continue
+        const el = [type, from, to]
         // cross few others, and only steeply
         let bad = false, mine = 0
         const hit = []
@@ -197,17 +252,16 @@ export function generateBoard(seed, n = CFG.cells) {
         if (bad || mine > CFG.maxCrossings) continue
         for (const j of hit) crossings[j]++
         crossings.push(mine)
-        used.add(low); used.add(high); perTier[tl]++; perTier[th]++
+        used.add(from); used.add(to); perTier[tf]++; perTier[tt]++
+        if (type === 1) lad[tf]++; else sn[tf]++
+        if (over) crowded = tf
         list.push(el)
         return true
       }
       return false
     }
-    for (let i = 0; i < Math.max(bc.snakes, bc.ladders) && ok; i++) {
-      if (i < bc.snakes) ok = add(0)
-      if (ok && i < bc.ladders) ok = add(1)
-    }
-    if (!ok || boardProblems(list, null, n)) continue
+    for (const slot of slots) if (!(ok = add(slot))) break
+    if (!ok || boardProblems(list, null, n) || layoutProblems(list, n)) continue
     const mean = simulateMean(list, CFG.simRuns, r, n)
     if (mean < bc.simMin || mean > bc.simMax) continue
     els = list
@@ -504,7 +558,8 @@ export function bestPick(s, pi, dice) {
 
 /**
  * Rolls for a player with their next-roll effects and moves them. With Choose Your Roll the player whose
- * turn it is picks one of the dice first (the 'pick' phase); anyone else's bonus roll takes the better die.
+ * turn it is picks one of the dice first (the 'pick' phase) unless they match; anyone else's bonus roll
+ * takes the better die.
  */
 function rollAndMove(s, pi, value, ev, bonus) {
   const p = s.pl[pi], fx = p.fx
@@ -524,7 +579,8 @@ function rollAndMove(s, pi, value, ev, bonus) {
   if (pick) {
     ev.push({ e: 'roll', p: pi, dice, total: 0, chosen: false, slowed: false, bonus: !!bonus, pick: true })
     log(s, ev, `${p.n} rolled ${dice.join(' and ')}`)
-    if (pi === s.cur) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
+    // two equal dice leave nothing to choose: the move goes on at once
+    if (pi === s.cur && dice[0] !== dice[1]) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
     moveBy(s, pi, dice, ev, bonus, bestPick(s, pi, dice))
     return
   }
@@ -602,7 +658,8 @@ function resolveLanding(s, pi, ev) {
     }
     let fall = el[1] - el[2]
     const para = !!p.fx.pa
-    if (para) fall = parachute(fall)
+    // a parachute opens once, like a shield blocks once
+    if (para) { fall = parachute(fall); delete p.fx.pa }
     p.pos = c - fall
     ev.push({ e: 'snake', p: pi, from: c, to: p.pos, el: idx, tail: el[2], para })
     trail(p, ['s', c, p.pos])
@@ -698,18 +755,11 @@ export function targetsFor(s, pi, cardId) {
   if (INSTEAD_OF_ROLL.has(cardId) && s.rolled) return [] // Swap Places and Tailgate take the place of the roll
   const live = onBoard(s)
   switch (card.tgt) {
-    case 'any':
-      // Rewind: a player who has begun a turn and stands elsewhere now
-      if (cardId === 'M6') return live.filter(i => s.pl[i].st != null && s.pl[i].st !== s.pl[i].pos)
-      return live
-    case 'self': return tailgateCell(s, pi) != null ? [pi] : []
-    case 'echo': return live.filter(i => echoable(s, pi, s.pl[i].lc))
-    case 'other': {
-      const others = live.filter(i => i !== pi)
-      if (cardId === 'C2' || cardId === 'C3') return others.filter(i => s.pl[i].h.length > 0)
-      if (cardId === 'C4') return others.filter(i => s.pl[i].h.length > 0 || s.pl[pi].h.length > 1)
-      return others
+    case 'any': case 'other': case 'self': {
+      const list = card.tgt === 'self' ? [pi] : card.tgt === 'other' ? live.filter(i => i !== pi) : live
+      return list.filter(q => fitsPlayer(s, pi, cardId, q))
     }
+    case 'echo': return live.filter(i => echoable(s, pi, s.pl[i].lc))
     case 'leader': {
       const best = Math.max(...live.map(i => s.pl[i].pos))
       return live.filter(i => s.pl[i].pos === best)
@@ -731,9 +781,22 @@ export function targetsFor(s, pi, cardId) {
 }
 const INSTEAD_OF_ROLL = new Set(['M3', 'M5'])
 
+/** Whether a card played by pi on a player works on player q. */
+function fitsPlayer(s, pi, cardId, q) {
+  const p = s.pl[q]
+  if (NOT_SELF.has(cardId) && q === pi) return false
+  switch (cardId) {
+    case 'M5': return tailgateCell(s, q) != null
+    case 'M6': return p.st != null && p.st !== p.pos // Rewind: a player who has begun a turn and stands elsewhere now
+    case 'C2': case 'C3': return p.h.length > 0
+    case 'C4': return p.h.length > 0 || s.pl[pi].h.length > 1
+  }
+  return true
+}
+
 /**
- * Tailgate: the cell just behind the nearest player ahead (strictly further on), or null when no one is
- * ahead or they stand on the very next cell.
+ * Tailgate: the cell just behind the nearest player ahead of player pi (strictly further on), or null
+ * when no one is ahead or they stand on the very next cell.
  */
 export function tailgateCell(s, pi) {
   const me = s.pl[pi].pos
@@ -907,9 +970,9 @@ function cardEffect(s, pi, cardId, target, ev) {
     case 'M2': if (who.pos <= 1) return false; jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'setback'); break
     case 'M5': {
       // it takes the place of this turn's roll; the cells it leaps over do nothing
-      const to = tailgateCell(s, pi)
+      const to = tailgateCell(s, target)
       s.rolled = true
-      jump(s, pi, to, ev, 'leap')
+      jump(s, target, to, ev, 'leap')
       break
     }
     case 'M6': {
@@ -1159,13 +1222,13 @@ const played = (s, cardId, tg) => (cardId === 'C6' ? [s.pl[tg[0]].lc, tg[1]] : [
 function sensible(s, pi, i, tg) {
   const cardId = s.pl[pi].h[i]
   if (cardId === 'C6') return sensible(asEcho(s, pi, i, tg), pi, i, tg[1])
-  if (cardId === 'M5') { // Tailgate: a long leap, better than a roll, that ends no lower than it lands
+  if (cardId === 'M5') { // Tailgate: my own long leap, better than a roll, that ends no lower than it lands
     const to = tailgateCell(s, pi), c = clone(s)
     c.rolled = false
-    if (to == null || !apply(c, pi, { t: 'play', i }).ok) return false
+    if (tg !== pi || to == null || !apply(c, pi, { t: 'play', i, tg }).ok) return false
     return to - s.pl[pi].pos > 6 && (c.pl[pi].d || c.pl[pi].pos >= to)
   }
-  if (typeof tg !== 'number' || !onPlayer(cardId)) return true
+  if (typeof tg !== 'number' || !(onPlayer(cardId) || CARD[cardId].tgt === 'self')) return true
   const self = tg === pi, fx = s.pl[tg].fx
   switch (cardId) {
     // Rewind: myself when it takes me further on (after a snake or a Setback), another player when they
