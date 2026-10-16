@@ -112,7 +112,7 @@ export function boardProblems(els, blocked = null, n = CFG.cells) {
   }
   if (perTier.some(n => n > CFG.maxEndsPerTier)) return 'too many ends on a tier'
   if (rise && fall && Math.abs(rise - fall) / Math.max(rise, fall) > CFG.balance) return 'balance'
-  return crossingProblems(els)
+  return crossingProblems(els) || ladderEndProblems(els)
 }
 
 // ---------- layout: where snakes and ladders stand (board.config.js) ----------
@@ -139,8 +139,15 @@ export function layoutProblems(els, n = CFG.cells) {
   if (early < laddersEarly(bc)) return 'too few ladders in the first half'
   if (late < snakesLate(bc)) return 'too few snakes in the second half'
   if (FIELD.finalSnake > 0 && !final) return 'no snake before the finish'
+  for (const type of [0, 1]) {
+    const sides = [0, 0]
+    for (const e of els) if (e[0] === type && lean(e)) sides[lean(e) > 0 ? 1 : 0]++
+    if (Math.min(...sides) < Math.round((sides[0] + sides[1]) * FIELD.leanEachWay)) return type ? 'ladders lean one way' : 'snakes lean one way'
+  }
   return null
 }
+/** Which way a snake or ladder leans as it rises, seen from the front: -1 left, 1 right, 0 straight up. */
+export const lean = ([type, from, to]) => Math.sign(cellXZ(type === 1 ? to : from)[0] - cellXZ(type === 1 ? from : to)[0])
 
 // ---------- crossings: the board as seen from above ----------
 /** A cell's centre on the board's plan in metres (the 3D board's layout: 1 m cells, 1.25 m tiers). */
@@ -169,6 +176,70 @@ export function relation(e, f) {
   if (d < 0.45) return angle < CFG.minCrossAngle ? 'bad' : 'cross'
   return 'none'
 }
+// ---------- a snake's body and the ladders' ends, as the 3D board draws them ----------
+const smooth01 = x => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x))
+/**
+ * How far a snake's body swings off the straight line from its tail to its head at u (0 the tail, 1 the
+ * head), in metres: the wave board3d.js draws. len: its run on the plan, dz: the part of it along the board.
+ * Snakes take turns starting the wave to one side or the other (index).
+ */
+export function snakeSwing(u, len, dz, index) {
+  const waves = Math.max(1, Math.round(len / 1.9))
+  const amp = Math.min(Math.abs(dz) < 0.5 ? 0.22 : 0.4, 0.14 + len * 0.035)
+  const env = Math.pow(Math.sin(Math.PI * Math.min(u, 0.93) / 0.93), 0.7)
+  return amp * Math.sin(u * waves * Math.PI * 2 + (index % 2) * Math.PI) * env
+}
+/** A snake's width at u: a thin tail growing to the full body. */
+export const snakeWidth = u => 0.05 + 0.25 * smooth01(u / 0.4)
+/** A ladder's ends on the plan, as segments: its foot with the arrow before it, and its top. */
+function ladderEnds(l) {
+  const f = cellXZ(l[1]), g = cellXZ(l[2]), ll = Math.hypot(g[0] - f[0], g[1] - f[1]) || 1
+  const ux = (g[0] - f[0]) / ll, uz = (g[1] - f[1]) / ll
+  return [[f[0] - ux * 0.56, f[1] - uz * 0.56, f[0] + ux * 0.2, f[1] + uz * 0.2], [g[0] - ux * 0.2, g[1] - uz * 0.2, g[0] + ux * 0.32, g[1] + uz * 0.32]]
+}
+/** The distance between two segments [x1, z1, x2, z2] on the plan (0 where they cross). */
+function segSeg(p, q) {
+  const d1 = cross2(...p, q[0], q[1]), d2 = cross2(...p, q[2], q[3]), d3 = cross2(...q, p[0], p[1]), d4 = cross2(...q, p[2], p[3])
+  if (d1 * d2 < 0 && d3 * d4 < 0) return 0
+  return Math.min(pointSeg(p[0], p[1], q), pointSeg(p[2], p[3], q), pointSeg(q[0], q[1], p), pointSeg(q[2], q[3], p))
+}
+const LADDER_HALF = 0.24 // half a ladder's width, rails and all
+/**
+ * Whether snake or ladder e (at index i in the list) passes over ladder l's foot, its arrow or its top:
+ * a snake's body as it swings, a ladder's straight run with its rails.
+ */
+function coversLadderEnd(e, i, l) {
+  if (e === l) return false
+  const ends = ladderEnds(l), clear = LADDER_HALF + FIELD.ladderEndsClear
+  const h = cellXZ(e[1]), t = cellXZ(e[2])
+  const dx = h[0] - t[0], dz = h[1] - t[1], len = Math.hypot(dx, dz) || 1
+  if (e[0] === 1) {
+    // its rails run 0.32 past both ends
+    const ux = dx / len, uz = dz / len
+    const run = [t[0] + ux * 0.32, t[1] + uz * 0.32, h[0] - ux * 0.32, h[1] - uz * 0.32]
+    return ends.some(end => segSeg(run, end) < clear + LADDER_HALF)
+  }
+  const px = -dz / len, pz = dx / len
+  for (const end of ends) {
+    // nothing near: the body swings 0.4 m at most
+    if (segSeg([t[0], t[1], h[0], h[1]], end) > 0.85) continue
+    const n = Math.ceil(len * 12)
+    for (let k = 0; k <= n; k++) {
+      const u = k / n, o = snakeSwing(u, len, dz, i)
+      const x = t[0] + dx * u + px * o, z = t[1] + dz * u + pz * o
+      if (pointSeg(x, z, end) < clear + snakeWidth(u) / 2) return true
+    }
+  }
+  return false
+}
+/** A snake or another ladder over a ladder's foot or top hides where a piece gets on and off. */
+export function ladderEndProblems(els) {
+  for (let i = 0; i < els.length; i++) {
+    for (const l of els) if (l[0] === 1 && coversLadderEnd(els[i], i, l)) return (els[i][0] ? 'ladder' : 'snake') + ' over a ladder end'
+  }
+  return null
+}
+
 export function crossingProblems(els) {
   const n = new Array(els.length).fill(0)
   for (let i = 0; i < els.length; i++) {
@@ -226,6 +297,8 @@ export function generateBoard(seed, n = CFG.cells) {
   for (let attempt = 0; attempt < 4000 && !els; attempt++) {
     const list = [], used = new Set(), perTier = new Array(bc.tiers).fill(0), crossings = []
     const lad = new Array(bc.tiers).fill(0), sn = new Array(bc.tiers).fill(0)
+    // how many lean each way, of the snakes [left, right] and of the ladders
+    const sides = [[0, 0], [0, 0]], most = [bc.snakes, bc.ladders].map(k => k - Math.round(k * FIELD.leanEachWay))
     let ok = true, crowded = -1
     const add = ([type, lo, hi]) => {
       for (let k = 0; k < 300; k++) {
@@ -250,6 +323,12 @@ export function generateBoard(seed, n = CFG.cells) {
           else if (rel === 'cross') { mine++; hit.push(j); if (crossings[j] + 1 > CFG.maxCrossings) bad = true }
         }
         if (bad || mine > CFG.maxCrossings) continue
+        // about as many lean left as right
+        const side = lean(el)
+        if (side && sides[type][side > 0 ? 1 : 0] + 1 > most[type]) continue
+        // nothing over a ladder's foot or top: this one over the ladders laid, nor those laid over this ladder
+        if (list.some(l => l[0] === 1 && coversLadderEnd(el, list.length, l)) || (type === 1 && list.some((e, j) => coversLadderEnd(e, j, el)))) continue
+        if (side) sides[type][side > 0 ? 1 : 0]++
         for (const j of hit) crossings[j]++
         crossings.push(mine)
         used.add(from); used.add(to); perTier[tf]++; perTier[tt]++

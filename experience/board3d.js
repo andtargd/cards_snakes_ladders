@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { TIER_COLORS, ATLAS, tileUV, remapDiceUV } from './paper.js'
+import { snakeSwing, snakeWidth } from './rules.js'
 
 export const B = {
   cellW: 1.0, tierD: 1.25, stepH: 0.3, base: 0.12, zFront: 5.6, half: 5.15,
@@ -236,16 +237,12 @@ function snakeLine(from, to, index, lod = 0) {
   const dx = head.x - tail.x, dz = head.z - tail.z
   const len = Math.hypot(dx, dz) || 1
   const ux = dx / len, uz = dz / len, px = -uz, pz = ux
-  const waves = Math.max(1, Math.round(len / 1.9))
-  const amp = Math.min(Math.abs(dz) < 0.5 ? 0.22 : 0.4, 0.14 + len * 0.035)
   const N = lod ? Math.max(10, Math.ceil(len * 3.5)) : Math.max(30, Math.ceil(len * 16))
   const pts = [], widths = []
   for (let i = 0; i <= N; i++) {
-    const u = i / N
-    const env = Math.pow(Math.sin(Math.PI * Math.min(u, 0.93) / 0.93), 0.7)
-    const off = amp * Math.sin(u * waves * Math.PI * 2 + (index % 2) * Math.PI) * env
+    const u = i / N, off = snakeSwing(u, len, dz, index) // the wave the board's rules check (rules.js)
     pts.push({ x: tail.x + dx * u + px * off, z: tail.z + dz * u + pz * off })
-    widths.push(0.05 + 0.25 * smooth(u / 0.4))
+    widths.push(snakeWidth(u))
   }
   return { head, len, ux, uz, px, pz, N, pts, widths }
 }

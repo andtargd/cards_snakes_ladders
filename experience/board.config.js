@@ -47,4 +47,12 @@ export default {
   // degrees or more
   maxCrossings: 2,
   minCrossAngle: 40,
+
+  // seen from above, no snake and no other ladder passes over a ladder's foot (with its arrow) or top,
+  // where a piece gets on and off: it keeps this far (in metres) from them, past its own width and the ladder's
+  ladderEndsClear: 0.05,
+
+  // seen from the front, a snake or ladder leans left or right as it rises; of the ladders that lean, and of
+  // the snakes, at least this share leans each way (0.4 of 8 rounds to 3: 3 and 5 at the worst)
+  leanEachWay: 0.4,
 }
