@@ -439,7 +439,7 @@ export class UI {
     y += 88 * u
     if (room) {
       this.text(T.roomLine(room.code, app.sessionCount()), x + 4 * u, y + 16 * u, { size: 13.5, max: w * 0.4 - 8 * u })
-      this.button('share', T.shareLink, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
+      this.button('share', room.link ? T.shareLink : T.shareCode, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
       this.button('leaveroom', T.leaveRoom, x + w * 0.7 + 4 * u, y, w * 0.3 - 4 * u, 32 * u, () => web.leave(), { size: 13 })
       y += 44 * u
     } else if (!web) {
@@ -694,9 +694,14 @@ export class UI {
     if (this.W >= 320) this.volumeSlider('vol', x - 122 * u, y, 104 * u, s)
   }
 
-  /** The web build: send the online room's link. */
+  /** The web build: send the online room's link, or only its code where rooms have no links. */
   shareRoom() {
-    this.p0.web.share().then(r => { if (r === 'copied') this.say(T.linkCopied, 3); else if (r === 'failed') this.say(T.linkFailed, 3) })
+    const room = this.p0.web.room
+    if (!room) return
+    this.p0.web.share().then(r => {
+      if (r === 'copied') this.say(room.link ? T.linkCopied : T.codeCopied(room.code), 4)
+      else if (r === 'failed') this.say(T.copyFailed(room.code), 5)
+    })
   }
 
   /** "Board" and a button per size (50, 70, 100 cells). */
@@ -794,7 +799,7 @@ export class UI {
     this.text(room ? T.roomSub : T.inviteSub, W / 2, y + 58 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
     const bx = x + 20 * u, bw = pw - 40 * u
     let yy = y + 80 * u
-    if (!ids.length) this.text(room ? T.noOneRoom : T.noOneHere, W / 2, yy + 20 * u, { size: 14, align: 'center', bold: false, color: '#9a948a', max: bw })
+    if (!ids.length) this.text(room ? (room.link ? T.noOneRoom : T.noOneRoomCode(room.code)) : T.noOneHere, W / 2, yy + 20 * u, { size: 14, align: 'center', bold: false, color: '#9a948a', max: bw })
     ids.forEach((id, i) => {
       const ry = yy + i * 46 * u
       this.panel(bx, ry, bw, 40 * u, { fill: '#ffffff', r: 10 })
@@ -808,7 +813,7 @@ export class UI {
       this.button('inv' + id, sent ? T.inviteSentShort : T.inviteOne, bx + bw - 110 * u, ry + 5 * u, 100 * u, 30 * u, () => { app.invitePlayer(id); this.dirty = true }, { primary: !sent, disabled: sent, size: 14 })
     })
     const by = y + ph - 56 * u
-    if (room) this.button('invlink', T.shareLink, bx, by, bw * 0.6 - 4 * u, 42 * u, () => this.shareRoom(), { size: 14, primary: !ids.length, color: '#2d3a6b' })
+    if (room) this.button('invlink', room.link ? T.shareLink : T.shareCode, bx, by, bw * 0.6 - 4 * u, 42 * u, () => this.shareRoom(), { size: 14, primary: !ids.length, color: '#2d3a6b' })
     else this.button('invcity', T.inviteCity, bx, by, bw * 0.6 - 4 * u, 42 * u, () => { try { this.p0.invite({ kind: 'team', note: T.inviteNote }) } catch { /* the city's own button does it */ } this.say(T.inviteHint, 4) }, { size: 14 })
     this.button('invclose', T.close, bx + bw * 0.6 + 4 * u, by, bw * 0.4 - 4 * u, 42 * u, () => { this.picker = false; this.dirty = true }, { size: 15 })
   }

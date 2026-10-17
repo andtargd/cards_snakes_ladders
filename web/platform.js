@@ -32,6 +32,7 @@ export const mute = {
 }
 
 // what an SDK will do; until then nothing (mute and unmute already work)
+const noLink = () => null
 const impl = {
   loadingStart() {}, // the game starts loading
   loadingStop() {}, // the menu is up
@@ -45,7 +46,9 @@ const impl = {
   /** The player's name (and avatar) on the site: it stands in for the name they type. */
   getUser: async () => null,
   /** inviteLink(code): a link to a room that keeps the player on the site, or null for no link of the site's own. */
-  inviteLink: () => null,
+  inviteLink: noLink,
+  /** The room code a site's invite link brought the player with (an SDK's invite parameter), or null. */
+  inviteRoom: () => null,
   /** The online room this tab is in ({ code, quick, link, fresh }), or null after leaving it. */
   roomChanged() {},
   /** The player's language on the site, or null (the game is in English only for now). */
@@ -62,5 +65,18 @@ export const hooks = Object.freeze(Object.fromEntries(Object.keys(impl).map(name
   if (platform.debug) console.debug('[platform]', name, ...a)
   try { return impl[name](...a) } catch (e) { console.error('[platform]', name, e); return undefined }
 }])))
+
+/**
+ * The link to a room for friends, or null when there is none to give (then only the code is shared):
+ * the site's own invite link if it has one, else this page's address where links are fine (GitHub Pages).
+ * On CrazyGames this page is the game's files on their CDN, a playable copy off the portal: no link to it.
+ */
+export function roomLink(code) {
+  const site = hooks.inviteLink(code)
+  if (typeof site === 'string' && site) return site
+  return platform.allowLinks ? location.origin + location.pathname + '?room=' + code : null
+}
+/** Whether rooms get links at all here (for texts shown before there is a room). */
+export const roomLinks = () => platform.allowLinks || impl.inviteLink !== noLink
 
 if (platform.debug) console.info('[platform]', platform.id, platform)

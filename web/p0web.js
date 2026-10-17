@@ -5,7 +5,7 @@
 import * as THREE from 'three'
 import { Net, cleanCode, cleanName } from './net.js'
 import { onlineDialog, shareRoom } from './online.js'
-import { platform, hooks, mute } from './platform.js'
+import { platform, hooks, mute, roomLink, roomLinks } from './platform.js'
 
 const q = new URLSearchParams(location.search)
 const entry = new URL('../experience/main.js', import.meta.url).href
@@ -71,9 +71,11 @@ const session = {
   message(d, from) { emit('message', d, from) },
   roomChanged(info, reason) {
     if (unloading) return
+    info = info && { ...info, link: roomLink(info.code) } // link: null where only the code is shared
     web.room = info
     if (info) keepRoom(); else ss.set(ROOM_KEY, null)
-    try { history.replaceState(null, '', info ? '?room=' + info.code : location.pathname) } catch { /* fine */ }
+    // the address bar shows the room's link only where this page's address is one to give
+    if (platform.allowLinks) try { history.replaceState(null, '', info ? '?room=' + info.code : location.pathname) } catch { /* fine */ }
     hooks.roomChanged(info)
     emit('room', info, reason)
   },
@@ -98,12 +100,12 @@ const room = {
   input() {},
   on: (e, f) => on(e, f),
 }
-const dialog = onlineDialog({ net, me })
+const dialog = onlineDialog({ net, me, links: roomLinks })
 const web = {
   platform, // the site this runs on (web/platform.js)
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
-  room: null, // { code, quick, link } while in an online room
+  room: null, // { code, quick, link } while in an online room; link is null where only the code is shared
   online() { dialog.open() },
   share() { return shareRoom(web.room) },
   leave() { net.leave() },
@@ -201,8 +203,8 @@ async function boot() {
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
-  // the room this tab was in before a reload: back to it; a room's link: ask for a name and join
-  const code = cleanCode(q.get('room'))
+  // the room this tab was in before a reload: back to it; a room's link (or the site's invite): ask for a name and join
+  const code = cleanCode(q.get('room') || hooks.inviteRoom())
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
   if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {

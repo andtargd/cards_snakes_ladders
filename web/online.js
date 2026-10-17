@@ -17,7 +17,8 @@ function messageFor(e) {
   }
 }
 
-export function onlineDialog({ net, me }) {
+/** `links()`: whether rooms get links here (else Create a Room gives only a code). */
+export function onlineDialog({ net, me, links = () => true }) {
   const el = document.createElement('div')
   el.className = 'ol'
   el.hidden = true
@@ -30,7 +31,7 @@ export function onlineDialog({ net, me }) {
     <input id="ol-name" class="ol-input" maxlength="14" autocomplete="nickname" spellcheck="false" placeholder="Your name">
     <div class="ol-choices">
       <div class="ol-choice"><button class="ol-btn ol-orange" type="button" data-act="quick">Quick Match</button><span>Sit down with players looking for a game</span></div>
-      <div class="ol-choice"><button class="ol-btn ol-navy" type="button" data-act="create">Create a Room</button><span>Get a code and a link to send to friends</span></div>
+      <div class="ol-choice"><button class="ol-btn ol-navy" type="button" data-act="create">Create a Room</button><span class="ol-create-sub"></span></div>
     </div>
     <div class="ol-or"><span>or join with a code</span></div>
     <form class="ol-join" autocomplete="off">
@@ -99,6 +100,7 @@ export function onlineDialog({ net, me }) {
   }
   function open({ code } = {}) {
     setBusy(null)
+    $('.ol-create-sub').textContent = links() ? 'Get a code and a link to send to friends' : 'Get a room code to send to friends'
     inviteEl.hidden = !code
     el.classList.toggle('invited', !!code)
     if (code) { codeIn.value = cleanCode(code); inviteEl.textContent = `You are invited to room ${codeIn.value}` }
@@ -113,21 +115,30 @@ export function onlineDialog({ net, me }) {
   return { open, close, resume, get isOpen() { return !el.hidden } }
 }
 
-/** Send the room's link: the share sheet on phones, the clipboard elsewhere. */
+/**
+ * Send friends the way into the room: its link where there is one (the share sheet on phones, the
+ * clipboard elsewhere), else just its code, which they type into Play Online.
+ * 'shared' | 'copied' | 'cancelled' | 'failed' | 'none'
+ */
 export async function shareRoom(room) {
   if (!room) return 'none'
-  const text = `Join my table in Cards, Snakes & Ladders: room ${room.code}`
+  const text = room.link ? `Join my table in Cards, Snakes & Ladders: room ${room.code}` : `Join my table in Cards, Snakes & Ladders: Play Online, room code ${room.code}`
   if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-    try { await navigator.share({ title: 'Cards, Snakes & Ladders', text, url: room.link }); return 'shared' } catch (e) { if (e?.name === 'AbortError') return 'cancelled' }
+    try { await navigator.share(room.link ? { title: 'Cards, Snakes & Ladders', text, url: room.link } : { title: 'Cards, Snakes & Ladders', text }); return 'shared' } catch (e) { if (e?.name === 'AbortError') return 'cancelled' }
   }
-  try { await navigator.clipboard.writeText(room.link); return 'copied' } catch { /* try the old way */ }
+  // only the code goes on the clipboard: it fits the code field as it is
+  return (await copyText(room.link || room.code)) ? 'copied' : 'failed'
+}
+
+async function copyText(s) {
+  try { await navigator.clipboard.writeText(s); return true } catch { /* try the old way */ }
   const ta = document.createElement('textarea')
-  ta.value = room.link
+  ta.value = s
   ta.style.cssText = 'position:fixed;opacity:0;left:0;top:0'
   document.body.appendChild(ta)
   ta.select()
   let ok = false
   try { ok = document.execCommand('copy') } catch { /* no clipboard */ }
   ta.remove()
-  return ok ? 'copied' : 'failed'
+  return ok
 }

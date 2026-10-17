@@ -24,7 +24,6 @@ const json = v => JSON.stringify(v ?? null)
 export const cleanCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
 export const cleanName = s => String(s || '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 14)
 const randomCode = () => Array.from({ length: 5 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('')
-const linkFor = code => location.origin + location.pathname + '?room=' + code
 
 const LOAD_MS = 15000 // PeerJS comes from a CDN only when the player goes online
 const OPEN_MS = 20000 // the signalling server gives a peer its id
@@ -75,7 +74,7 @@ export class Net {
     setInterval(() => this.tick(), HB_MS)
   }
   get online() { return this.mode !== 'off' }
-  info(fresh) { return { code: this.code, quick: this.quick, link: linkFor(this.code), fresh: !!fresh } }
+  info(fresh) { return { code: this.code, quick: this.quick, fresh: !!fresh } } // the link is the site's to give (p0web.js)
   hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back } }
 
   // ---------- what p0.room calls ----------
