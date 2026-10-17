@@ -3,8 +3,9 @@
 // (bots and pass-and-play); online (web/net.js) a room stands in for the lot, so the game's
 // Shared Table works as it does in Project 0. There is no city here.
 import * as THREE from 'three'
-import { Net, cleanCode } from './net.js'
+import { Net, cleanCode, cleanName } from './net.js'
 import { onlineDialog, shareRoom } from './online.js'
+import { platform, hooks, mute } from './platform.js'
 
 const q = new URLSearchParams(location.search)
 const entry = new URL('../experience/main.js', import.meta.url).href
@@ -73,6 +74,7 @@ const session = {
     web.room = info
     if (info) keepRoom(); else ss.set(ROOM_KEY, null)
     try { history.replaceState(null, '', info ? '?room=' + info.code : location.pathname) } catch { /* fine */ }
+    hooks.roomChanged(info)
     emit('room', info, reason)
   },
   reset() {
@@ -98,6 +100,9 @@ const room = {
 }
 const dialog = onlineDialog({ net, me })
 const web = {
+  platform, // the site this runs on (web/platform.js)
+  hooks, // what the game tells the site: loading, gameplay, wins, between games
+  get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
   room: null, // { code, quick, link } while in an online room
   online() { dialog.open() },
   share() { return shareRoom(web.room) },
@@ -128,8 +133,15 @@ const p0 = {
   hud() {},
   loading(f, label) { barEl.style.width = Math.round(f * 100) + '%'; if (label) labelEl.textContent = label },
   sound: {
-    play(path, o = {}) { try { const a = new Audio(p0.asset(path)); a.volume = Math.min(1, (o.volume ?? 1) * 0.5); a.loop = !!o.loop; a.playbackRate = o.rate ?? 1; a.play().catch(() => {}); return a } catch { return 0 } },
-    stop(a) { try { a.pause() } catch {} }, stopAll() {},
+    play(path, o = {}) {
+      if (mute.on && !o.loop) return 0
+      try {
+        const a = new Audio(p0.asset(path)); a.volume = Math.min(1, (o.volume ?? 1) * 0.5); a.loop = !!o.loop; a.playbackRate = o.rate ?? 1; a.muted = mute.on
+        sounding.add(a); a.addEventListener('ended', () => sounding.delete(a))
+        a.play().catch(() => sounding.delete(a)); return a
+      } catch { return 0 }
+    },
+    stop(a) { try { a.pause(); sounding.delete(a) } catch {} }, stopAll() {},
   },
   music: { play() {}, stop() {}, volume() {}, seek() {}, time: 0, playing: false, duration: 0 },
   exit() {},
@@ -142,6 +154,10 @@ const p0 = {
   duel: null, duelResult() {}, buy: async () => ({ ok: false, reason: 'cancelled' }), purchases: [], invite() {}, invitation: null,
   log: (...a) => console.log('[game]', ...a),
 }
+
+// sounds still playing go quiet while the site mutes everything, and come back after
+const sounding = new Set()
+mute.listen(on => { for (const a of sounding) a.muted = on })
 
 function resize() {
   view.width = innerWidth; view.height = innerHeight; view.dpr = Math.min(devicePixelRatio || 1, 2)
@@ -175,8 +191,14 @@ addEventListener('keyup', e => { input.keys.delete(e.code); if (!typing(e)) emit
 addEventListener('blur', () => input.keys.clear())
 
 async function boot() {
+  hooks.loadingStart()
+  // the site's own name for the player, if it has one, stands in for the one they type
+  const user = Promise.resolve(hooks.getUser()).catch(() => null)
   const mod = await import(entry)
   await mod.default(p0)
+  const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), 3000))])
+  if (u?.name && cleanName(u.name)) me.name = cleanName(u.name)
+  hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
   // the room this tab was in before a reload: back to it; a room's link: ask for a name and join

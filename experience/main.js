@@ -360,7 +360,7 @@ class App {
   }
   playSound(name, volume = 0.5) {
     const v = this.sound.on ? volume * this.sound.vol : 0
-    if (v < 0.005) return
+    if (v < 0.005 || this.p0.web?.muted) return
     try { this.p0.sound.play(`sfx/${name}.mp3`, { volume: v }) } catch { /* sound is optional */ }
   }
   saveSettings() {
@@ -411,6 +411,8 @@ class App {
     return true
   }
   startSolo() {
+    // the first game after one that ended waits for whatever the site shows between games
+    if (this.finished) { this.finished = false; this.betweenGames(() => this.startSolo()); return }
     this.saveSettings()
     this.reward = null
     this.ui.logLines = []
@@ -442,6 +444,29 @@ class App {
     this.startSolo()
   }
   openGameMenu() { this.menuOpen = !this.menuOpen; this.ui.dirty = true }
+
+  // ----- the site the web build runs on (p0.web.hooks; Project 0 has none, so all of this is skipped there) -----
+  hook(name, ...a) { try { return this.p0.web?.hooks?.[name]?.(...a) } catch { return undefined } }
+  /** A game is being played on this screen: not a menu, the game's own menu or a game that has ended. */
+  inPlay() { return this.screen === 'game' && !!this.table && this.table.kind !== 'idle' && !this.menuOpen && this.view.state?.ph !== 'over' }
+  /** Tells the site when play starts and stops; a game here that ended makes the next one wait (see startSolo). */
+  syncGameplay() {
+    const playing = this.inPlay()
+    if (playing === !!this.gameplay) return
+    this.gameplay = playing
+    if (!playing && this.table?.kind === 'solo' && this.view.state?.ph === 'over') this.finished = true
+    this.hook(playing ? 'gameplayStart' : 'gameplayStop')
+  }
+  /** Between two games here the site may show something (an ad); no input until it is done, then `then`. A shared game's rematch does not wait: everyone at the table would. */
+  betweenGames(then) {
+    const ad = this.hook('midgameAd')
+    if (!ad?.then) { then(); return }
+    this.adBusy = true
+    // something else took the screen meanwhile (an online room was joined, say): it stays
+    const table = this.table, screen = this.screen
+    const done = () => { this.adBusy = false; this.ui.dirty = true; if (this.table === table && this.screen === screen) then() }
+    ad.then(done, done)
+  }
   act(a) { return this.table && this.screen === 'game' ? this.table.act(a) : false }
 
   // ----- shared table lobby (kept in room.state 'lob', written by the host) -----
@@ -644,6 +669,7 @@ class App {
     score = Math.round(score * (0.6 + 0.4 * n / 100))
     if (s.mode === 'fool') score = Math.round(score * 0.8)
     this.reward = T.scoreSent(score)
+    this.hook('happytime')
     try { this.p0.score(score); this.p0.win() } catch (e) { this.p0.log('score', String(e)) }
   }
   onReward(r) {
@@ -657,6 +683,7 @@ class App {
     if (this.invite && (this.invite.t -= dt) <= 0) { this.invite = null; this.ui.dirty = true }
     this.syncStatus()
     this.table?.update(dt)
+    this.syncGameplay()
     const trayOn = this.view.trayVisible > 0
     if (trayOn !== this.trayWas) { this.trayWas = trayOn; this.ui.dirty = true }
     if (this.turnLeft != null && Math.ceil(this.turnLeft) !== this.turnShown) { this.turnShown = Math.ceil(this.turnLeft); this.ui.dirty = true }
@@ -680,6 +707,7 @@ export default async function start(p0) {
   // input
   let down = null
   p0.on('pointerdown', e => {
+    if (app.adBusy) { down = null; return } // the site is showing something between games
     // a slider follows the pointer until it lets go
     const h = app.ui.hitAt(e.x, e.y)
     if (h?.drag) { app.ui.drag = h; h.drag(e.x); down = null; return }
@@ -706,9 +734,9 @@ export default async function start(p0) {
     const hit = app.view.pick(e.x, e.y)
     if (!app.ui.boardClick(hit) && app.ui.selected >= 0 && !app.ui.target) { app.ui.selected = -1; app.ui.dirty = true }
   })
-  p0.on('wheel', e => { if (app.screen === 'game') app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
+  p0.on('wheel', e => { if (app.screen === 'game' && !app.adBusy) app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
   p0.on('keydown', e => {
-    if (e.repeat) return
+    if (e.repeat || app.adBusy) return
     if (app.screen === 'local' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
     if ((app.screen === 'local' || app.screen === 'help') && e.code === 'Escape') { app.screen = 'menu'; app.ui.dirty = true; return }
     if (app.screen !== 'game') return
