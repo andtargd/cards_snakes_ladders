@@ -32,10 +32,12 @@ export default {
   // tier that starts `from` the way along the board or later (0.7: in its last 30%)
   crowdedTier: { snakes: 3, from: 0.7 },
 
-  // the start is gentle, the end is hard: at least this share of the ladders stands in the board's first
-  // half, and at least this share of the snakes in its second half (0.6 of 8 rounds up to 5)
-  laddersFirstHalf: 0.6,
-  snakesSecondHalf: 0.6,
+  // the start is gentle, the end is hard: [fewest, most] share of the ladders that stand in the board's
+  // first half, and of the snakes in its second half; the rest stand in the other half. Each share is
+  // rounded to the nearest count (8 at [0.6, 0.8]: 5 to 6; 6: 4 to 5; 4: 2 to 3), and each board takes
+  // a count from that range by its seed
+  laddersFirstHalf: [0.6, 0.8],
+  snakesSecondHalf: [0.6, 0.8],
 
   // a snake's head stands 1 to this many cells before the finish (0: no such snake is required)
   finalSnake: 5,

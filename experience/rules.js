@@ -119,8 +119,10 @@ export function boardProblems(els, blocked = null, n = CFG.cells) {
 // A snake or ladder stands on the tier where a piece steps on it: a ladder's foot, a snake's head.
 /** The most snakes tier t may hold: more on the one crowded tier the board may have near its end. */
 const snakeCap = (t, n) => (t * CFG.perTier >= FIELD.crowdedTier.from * n ? Math.max(FIELD.perTier.snakes, FIELD.crowdedTier.snakes) : FIELD.perTier.snakes)
-const laddersEarly = bc => Math.ceil(FIELD.laddersFirstHalf * bc.ladders - 1e-9)
-const snakesLate = bc => Math.ceil(FIELD.snakesSecondHalf * bc.snakes - 1e-9)
+/** [fewest, most] of `total` for a [fewest, most] share, each rounded to the nearest count. */
+const shareRange = (share, total) => share.map(f => Math.min(total, Math.max(0, Math.round(f * total + 1e-9))))
+const laddersEarly = bc => shareRange(FIELD.laddersFirstHalf, bc.ladders)
+const snakesLate = bc => shareRange(FIELD.snakesSecondHalf, bc.snakes)
 
 /** Checks where the base board's snakes and ladders stand: per tier, per half, the snake before the finish. */
 export function layoutProblems(els, n = CFG.cells) {
@@ -136,8 +138,11 @@ export function layoutProblems(els, n = CFG.cells) {
   const crowded = sn.map((k, t) => t).filter(t => sn[t] > FIELD.perTier.snakes)
   if (crowded.length > 1 || crowded.some(t => sn[t] > snakeCap(t, n))) return 'too many snakes on a tier'
   if (lad.filter((k, t) => !k && !sn[t]).length > bc.emptyTiers) return 'too many empty tiers'
-  if (early < laddersEarly(bc)) return 'too few ladders in the first half'
-  if (late < snakesLate(bc)) return 'too few snakes in the second half'
+  const [earlyMin, earlyMax] = laddersEarly(bc), [lateMin, lateMax] = snakesLate(bc)
+  if (early < earlyMin) return 'too few ladders in the first half'
+  if (early > earlyMax) return 'too many ladders in the first half'
+  if (late < lateMin) return 'too few snakes in the second half'
+  if (late > lateMax) return 'too many snakes in the second half'
   if (FIELD.finalSnake > 0 && !final) return 'no snake before the finish'
   for (const type of [0, 1]) {
     const sides = [0, 0]
@@ -279,22 +284,31 @@ export function generateBoard(seed, n = CFG.cells) {
   const key = n + ':' + seed
   if (boardCache.has(key)) return boardCache.get(key)
   const bc = boardCfg(n), half = Math.floor(n / 2)
-  // where each one's entry may go, [type, lowest cell, highest cell]: the snake before the finish first,
-  // then the ladders of the first half and the snakes of the second, then the rest anywhere
-  const snakes = [], ladders = []
-  if (FIELD.finalSnake > 0) snakes.push([0, n - Math.max(1, FIELD.finalSnake), n - 1])
-  while (snakes.length < Math.min(bc.snakes, snakesLate(bc))) snakes.push([0, half + 1, n - 1])
-  while (snakes.length < bc.snakes) snakes.push([0, 2, n - 1])
-  while (ladders.length < Math.min(bc.ladders, laddersEarly(bc))) ladders.push([1, 2, half])
-  while (ladders.length < bc.ladders) ladders.push([1, 2, n - 1])
-  const slots = []
-  for (let i = 0; i < Math.max(snakes.length, ladders.length); i++) {
-    if (i < snakes.length) slots.push(snakes[i])
-    if (i < ladders.length) slots.push(ladders[i])
-  }
   const r = mulberry32(seed ^ 0x5bd1e995)
+  const pick = ([lo, hi]) => lo + Math.floor(r() * (hi - lo + 1))
+  // where each one's entry may go, [type, lowest cell, highest cell]: the snake before the finish first,
+  // then the ladders of the first half and the snakes of the second (as many as this attempt takes from
+  // their ranges), then the rest in the other half
+  const slotsFor = () => {
+    const [lateMin, lateMax] = snakesLate(bc)
+    const late = pick([Math.max(lateMin, FIELD.finalSnake > 0 ? 1 : 0), Math.max(lateMax, FIELD.finalSnake > 0 ? 1 : 0)])
+    const early = pick(laddersEarly(bc))
+    const snakes = [], ladders = []
+    if (FIELD.finalSnake > 0) snakes.push([0, n - Math.max(1, FIELD.finalSnake), n - 1])
+    while (snakes.length < late) snakes.push([0, half + 1, n - 1])
+    while (snakes.length < bc.snakes) snakes.push([0, 2, half])
+    while (ladders.length < early) ladders.push([1, 2, half])
+    while (ladders.length < bc.ladders) ladders.push([1, half + 1, n - 1])
+    const slots = []
+    for (let i = 0; i < Math.max(snakes.length, ladders.length); i++) {
+      if (i < snakes.length) slots.push(snakes[i])
+      if (i < ladders.length) slots.push(ladders[i])
+    }
+    return slots
+  }
   let els = null
   for (let attempt = 0; attempt < 4000 && !els; attempt++) {
+    const slots = slotsFor()
     const list = [], used = new Set(), perTier = new Array(bc.tiers).fill(0), crossings = []
     const lad = new Array(bc.tiers).fill(0), sn = new Array(bc.tiers).fill(0)
     // how many lean each way, of the snakes [left, right] and of the ladders
