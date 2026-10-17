@@ -26,13 +26,28 @@ export const cleanName = s => String(s || '').replace(/[\u0000-\u001f\u007f]/g, 
 const randomCode = () => Array.from({ length: 5 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('')
 const linkFor = code => location.origin + location.pathname + '?room=' + code
 
+const LOAD_MS = 15000 // PeerJS comes from a CDN only when the player goes online
+const OPEN_MS = 20000 // the signalling server gives a peer its id
+const peerClass = () => globalThis.peerjs?.Peer || globalThis.Peer
+
 let lib = null
 function loadPeer() {
+  if (peerClass()) return Promise.resolve(peerClass()) // a slow load that came in after all
   lib ||= new Promise((res, rej) => {
     const sc = document.createElement('script')
+    let timer = 0
+    const done = err => {
+      clearTimeout(timer)
+      sc.onload = sc.onerror = null
+      if (!err && peerClass()) return res(peerClass())
+      lib = null
+      if (err !== 'late') sc.remove()
+      rej(fail('lib', 'PeerJS did not load'))
+    }
     sc.src = PEERJS
-    sc.onload = () => { const P = globalThis.peerjs?.Peer || globalThis.Peer; if (P) res(P); else { lib = null; rej(fail('network')) } }
-    sc.onerror = () => { lib = null; sc.remove(); rej(fail('network', 'PeerJS did not load')) }
+    sc.onload = () => done(null)
+    sc.onerror = () => done('error')
+    timer = setTimeout(() => done('late'), LOAD_MS) // kept: if it still loads, the next try finds it
     document.head.appendChild(sc)
   })
   return lib
@@ -195,8 +210,10 @@ export class Net {
     const Peer = await loadPeer()
     return new Promise((res, rej) => {
       const p = code ? new Peer(PREFIX + code, { debug: 0 }) : new Peer({ debug: 0 })
-      const onError = e => { p.off('open', onOpen); try { p.destroy() } catch { /* gone */ } rej(fail(e?.type || 'network', e?.message)) }
+      const onError = e => { clearTimeout(timer); p.off('open', onOpen); try { p.destroy() } catch { /* gone */ } rej(fail(e?.type || 'network', e?.message)) }
+      const timer = setTimeout(() => onError({ type: 'network', message: 'the signalling server did not answer' }), OPEN_MS)
       const onOpen = () => {
+        clearTimeout(timer)
         p.off('error', onError)
         p.on('error', e => { if (e?.type !== 'peer-unavailable') console.warn('[net]', e?.type, e?.message) })
         // the signalling server dropped us: open data channels stay up, reconnect for new ones

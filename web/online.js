@@ -12,6 +12,7 @@ function messageFor(e) {
     case 'timeout': case 'closed': return 'The room did not answer. Try again in a moment.'
     case 'busy': return 'All quick tables are busy right now. Create a room instead.'
     case 'browser-incompatible': return 'This browser cannot play online (WebRTC is turned off).'
+    case 'lib': return 'Online play could not load. Check your connection (or an ad blocker) and try again.'
     default: return 'Could not reach the game server. Check your connection and try again.'
   }
 }

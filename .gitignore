@@ -3,3 +3,6 @@ tmp/
 csl tasks.txt
 __pycache__/
 graphify-out/
+
+# the CrazyGames build (tools/build_cg.py)
+dist/

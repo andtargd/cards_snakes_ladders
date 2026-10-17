@@ -32,6 +32,18 @@ python -m http.server 8765
 
 Then visit <http://localhost:8765>.
 
+three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the game imports. Only PeerJS comes from a CDN, and only when a player goes online.
+
+## The CrazyGames build
+
+```bash
+python tools/build_cg.py
+```
+
+It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `index.html` with `window.CSL_PLATFORM = 'crazygames'` (see `web/platform.js`), `web/`, `experience/` and `vendor/` — nothing else. It stops if a page or module loads anything by an absolute path, and prints the number of files and the size against the portal's limits (1500 files, 50 MB). `dist/` is not committed.
+
+To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build.
+
 ## Project structure
 
 ```
@@ -39,10 +51,12 @@ index.html          the web page (GitHub Pages entry)
 web/p0web.js        browser stand-in for the Project 0 runtime the game is written for
 web/net.js          online rooms: WebRTC through PeerJS, one player relays, host handover
 web/online.js       the Play Online dialog
+web/platform.js     the site it runs on (GitHub Pages or CrazyGames) and the hooks a site's SDK answers
+vendor/three/       three.js and the addons the game uses
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
   cards.config.js   the deck's names, texts, rarity, targets and numbers, for tuning
   board.config.js   where snakes and ladders may stand, for tuning
-tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews
+tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews, the CrazyGames build
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page
 ```

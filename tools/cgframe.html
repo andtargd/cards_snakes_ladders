@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrazyGames frame</title>
+<!--
+  The game in an iframe of the sizes CrazyGames tests at, the way the portal shows it.
+  tools/cgframe.html?src=../dist/crazygames/index.html&size=1216x684
+  src: the build to open (relative to this page, or a full URL on another port for a cross-origin frame);
+  size: one of the sizes below; fit: scale a frame larger than the window down to fit (the game still
+  sees its full size). Time to menu: from setting the frame's src until the loading screen goes
+  (same-origin frames only).
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #20232a; color: #e6e6e6; font: 13px system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  #bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; background: #2b2f38; }
+  #bar input[type=text] { width: 320px; max-width: 60vw; }
+  #bar input, #bar select, #bar button { font: inherit; padding: 3px 6px; border-radius: 4px; border: 1px solid #555; background: #1b1d22; color: inherit; }
+  #bar button { cursor: pointer; }
+  #info { margin-left: auto; font-variant-numeric: tabular-nums; color: #9fd39f; }
+  #info.wait { color: #e8c46a; }
+  #info.err { color: #ff8a80; }
+  #stage { flex: 1; min-height: 0; overflow: auto; display: flex; padding: 8px; }
+  #holder { flex: none; margin: auto; overflow: hidden; }
+  #holder iframe { transform-origin: top left; }
+  iframe { display: block; border: 0; background: #000; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <label>build <input id="src" type="text" spellcheck="false"></label>
+  <label>size <select id="size"></select></label>
+  <label><input id="fit" type="checkbox"> fit</label>
+  <button id="go" type="button">Reload</button>
+  <span id="info"></span>
+</div>
+<div id="stage"><div id="holder"><iframe id="frame" allow="autoplay; fullscreen; clipboard-write" title="game"></iframe></div></div>
+<script>
+const SIZES = [
+  ['907x510', 'window'], ['1216x684', 'window'], ['1077x606', 'window'], ['821x462', 'window'],
+  ['1366x768', 'fullscreen'], ['1920x1080', 'fullscreen'], ['1536x864', 'fullscreen'], ['1280x720', 'fullscreen'],
+  ['800x450', 'phone'], ['1080x607', 'tablet'],
+]
+const q = new URLSearchParams(location.search)
+const $ = id => document.getElementById(id)
+const srcIn = $('src'), sizeIn = $('size'), fitIn = $('fit'), frame = $('frame'), holder = $('holder'), info = $('info'), stage = $('stage')
+for (const [s, kind] of SIZES) sizeIn.add(new Option(`${s} (${kind})`, s))
+srcIn.value = q.get('src') || '../dist/crazygames/index.html'
+sizeIn.value = SIZES.some(([s]) => s === q.get('size')) ? q.get('size') : '1216x684'
+fitIn.checked = q.has('fit')
+
+function layout() {
+  const [w, h] = sizeIn.value.split('x').map(Number)
+  frame.style.width = w + 'px'; frame.style.height = h + 'px'
+  const k = fitIn.checked ? Math.min(1, (stage.clientWidth - 16) / w, (stage.clientHeight - 16) / h) : 1
+  frame.style.transform = k < 1 ? `scale(${k})` : ''
+  holder.style.width = w * k + 'px'; holder.style.height = h * k + 'px'
+}
+function remember() {
+  const p = new URLSearchParams({ src: srcIn.value, size: sizeIn.value })
+  if (fitIn.checked) p.set('fit', '')
+  history.replaceState(null, '', '?' + p)
+}
+
+let watch = 0
+function load() {
+  layout(); remember()
+  clearInterval(watch)
+  info.className = 'wait'; info.textContent = 'loading…'
+  let old = null
+  try { old = frame.contentDocument } catch { /* another origin */ }
+  const t0 = performance.now()
+  frame.src = new URL(srcIn.value, location.href).href
+  watch = setInterval(() => {
+    const ms = Math.round(performance.now() - t0)
+    let doc = null
+    try { doc = frame.contentDocument } catch { /* another origin */ }
+    if (doc && (doc === old || doc.URL === 'about:blank')) { info.textContent = `loading… ${(ms / 1000).toFixed(1)} s`; return } // not there yet
+    if (!doc) { clearInterval(watch); info.className = ''; info.textContent = 'cross-origin frame: no time to menu'; return }
+    const el = doc.getElementById('loading')
+    if (el?.classList.contains('error')) { clearInterval(watch); info.className = 'err'; info.textContent = `error after ${ms} ms: ${el.textContent.trim()}` }
+    else if (el?.classList.contains('done') || (doc.readyState === 'complete' && !el && doc.getElementById('c'))) {
+      clearInterval(watch); info.className = ''; info.textContent = `menu in ${ms} ms`
+      console.log('[cgframe]', sizeIn.value, 'menu in', ms, 'ms')
+    } else info.textContent = `loading… ${(ms / 1000).toFixed(1)} s`
+  }, 50)
+}
+$('go').onclick = load
+sizeIn.onchange = load
+fitIn.onchange = () => { layout(); remember() }
+srcIn.onkeydown = e => { if (e.key === 'Enter') load() }
+addEventListener('resize', layout)
+load()
+</script>
+</body>
+</html>
