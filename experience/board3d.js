@@ -166,6 +166,8 @@ export const SNAKE_COLORS = [
   ['#3fae49', '#256b2c'], ['#7b4fd6', '#4a2b99'], ['#e0533d', '#9c2b1b'], ['#1f8fbf', '#0f5675'],
   ['#f08a24', '#a8540a'], ['#c2368f', '#7d1a5a'], ['#6b8f2a', '#3f5714'], ['#2b5fbf', '#173a80'],
 ]
+// colours that look alike (greens, purples, reds, blues): snakes that cross take ones from different groups
+const SNAKE_HUE = [0, 1, 2, 3, 2, 1, 0, 3]
 const LIFT = 0.035, THICK = 0.022
 const FLAT = () => 0
 
@@ -247,10 +249,10 @@ function snakeLine(from, to, index, lod = 0) {
   return { head, len, ux, uz, px, pz, N, pts, widths }
 }
 
-/** A snake from its head (cell `from`) down to its tail (cell `to`). */
-export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0, up = FLAT } = {}) {
+/** A snake from its head (cell `from`) down to its tail (cell `to`); color, its SNAKE_COLORS (by index if not given). */
+export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0, up = FLAT, color = index } = {}) {
   const b = new Builder()
-  const [body, dark] = SNAKE_COLORS[index % SNAKE_COLORS.length].map(h => col(h))
+  const [body, dark] = SNAKE_COLORS[color % SNAKE_COLORS.length].map(h => col(h))
   const light = body.clone().lerp(new THREE.Color('#ffffff'), 0.35)
   const { head, len, ux, uz, px, pz, N, pts, widths } = snakeLine(from, to, index, lod)
   const colors = []
@@ -361,17 +363,19 @@ const HOLD = 0.06, RAMP = 0.16, GAP = 0.008
 /**
  * The paper an element covers, as capsules: a segment a-b with a half width r, and top, how high its paper
  * stands there over the element's own lift (a ladder's rails, a snake's head and eyes). A snake's head, its
- * tongue and its neck are also listed apart, as head.
+ * tongue and its neck are also listed apart, as head, and the end of its tail as tail.
  */
-const NECK = 0.5
+const NECK = 0.5, TAIL = 0.5
 function footprint(el, index) {
-  const caps = [], head = []
+  const caps = [], head = [], tail = []
   if (el[0] === 0) {
     const { head: h, ux, uz, pts, widths } = snakeLine(el[1], el[2], index)
+    const t = pts[0]
     for (let i = 0; i + 1 < pts.length; i++) {
       const c = { a: pts[i], b: pts[i + 1], r: Math.max(widths[i], widths[i + 1]) / 2, top: 0.004 }
       caps.push(c)
       if (Math.hypot(pts[i].x - h.x, pts[i].z - h.z) < NECK) head.push(c)
+      if (Math.hypot(pts[i + 1].x - t.x, pts[i + 1].z - t.z) < TAIL) tail.push(c)
     }
     head.push({ a: h, b: h, r: 0.31, top: 0.022 })
     head.push({ a: { x: h.x + ux * 0.2, z: h.z + uz * 0.2 }, b: { x: h.x + ux * 0.47, z: h.z + uz * 0.47 }, r: 0.08, top: 0.012 })
@@ -389,17 +393,17 @@ function footprint(el, index) {
     box[0] = Math.min(box[0], p.x - reach); box[1] = Math.max(box[1], p.x + reach)
     box[2] = Math.min(box[2], p.z - reach); box[3] = Math.max(box[3], p.z + reach)
   }
-  return { caps, head, box }
+  return { caps, head, tail, box }
 }
 function segDist(x, z, { a, b }) {
   const dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz
   const t = l2 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0
   return Math.hypot(x - a.x - dx * t, z - a.z - dz * t)
 }
-/** Whether two sets of capsules touch (their paper overlaps). */
-function touch(A, B) {
+/** Whether two sets of capsules touch (their paper overlaps), or come closer than gap. */
+function touch(A, B, gap = HOLD) {
   for (const c of A) for (const d of B) {
-    const r = c.r + d.r + HOLD
+    const r = c.r + d.r + gap
     if (segDist(c.a.x, c.a.z, d) < r || segDist(c.b.x, c.b.z, d) < r || segDist(d.a.x, d.a.z, c) < r || segDist(d.b.x, d.b.z, c) < r) return true
   }
   return false
@@ -409,9 +413,10 @@ const boxesMeet = (p, q) => p[0] < q[1] && q[0] < p[1] && p[2] < q[3] && q[2] < 
 /**
  * Where snakes and ladders cross, one lies over the other like paper over paper instead of the two
  * sharing a height and flickering: ladders on the board, snakes over them. Of two snakes that cross, the
- * one whose head lies on the other goes on top, a head is never hidden; else the shorter one (it is small
- * enough as it is: it stays in sight). A snake goes over or under another whole, its neck can't slip
- * through. For each element: up(x, z), how far its paper rises there to clear what lies under it.
+ * one whose head lies on the other goes on top, a head is never hidden; then the one whose tail end lies on
+ * the other, so where a snake leads stays in sight too; else the shorter one (it is small enough as it is:
+ * it stays in sight). A snake goes over or under another whole, its neck can't slip through. For each
+ * element: up(x, z), how far its paper rises there to clear what lies under it.
  */
 export function stackElements(els) {
   const fps = els.map((e, i) => footprint(e, i))
@@ -422,7 +427,8 @@ export function stackElements(els) {
   for (const i of snakes) for (const j of snakes) {
     if (j <= i || !boxesMeet(fps[i].box, fps[j].box) || !touch(fps[i].caps, fps[j].caps)) continue
     const hi = touch(fps[i].head, fps[j].caps), hj = touch(fps[j].head, fps[i].caps)
-    const top = hi !== hj ? (hi ? i : j) : len(i) !== len(j) ? (len(i) < len(j) ? i : j) : j
+    const ti = touch(fps[i].tail, fps[j].caps), tj = touch(fps[j].tail, fps[i].caps)
+    const top = hi !== hj ? (hi ? i : j) : ti !== tj ? (ti ? i : j) : len(i) !== len(j) ? (len(i) < len(j) ? i : j) : j
     over.get(top).push(top === i ? j : i)
   }
   // laid from the bottom: ladders, then each snake once those it lies over are down, the longest first;
@@ -466,6 +472,30 @@ export function stackElements(els) {
     laid.push({ ...fp, thick })
   }
   return ups
+}
+
+const NEAR = 0.35
+/**
+ * The colour of each snake (an index into SNAKE_COLORS; null for a ladder): the next in turn, unless a snake
+ * it crosses or comes close to already has one alike, then the first that differs from theirs.
+ */
+export function snakeColors(els) {
+  const fps = els.map((e, i) => (e[0] === 0 ? footprint(e, i) : null))
+  const out = els.map(() => null), n = SNAKE_COLORS.length
+  let k0 = 0
+  els.forEach((e, i) => {
+    if (e[0] !== 0) return
+    const close = out.map((c, j) => j).filter(j => out[j] != null && boxesMeet(fps[i].box, fps[j].box) && touch(fps[i].caps, fps[j].caps, NEAR))
+    const near = close.map(j => out[j])
+    const cross = close.filter(j => touch(fps[i].caps, fps[j].caps)).map(j => out[j])
+    const unlike = (c, cs) => cs.every(o => SNAKE_HUE[o] !== SNAKE_HUE[c])
+    const tries = Array.from({ length: n }, (_, k) => (k0 + k) % n)
+    k0++
+    // unlike every snake near, else unlike those it crosses and not the same as one near, else just not the same
+    out[i] = tries.find(c => unlike(c, near)) ?? tries.find(c => unlike(c, cross) && !near.includes(c)) ??
+      tries.find(c => unlike(c, cross)) ?? tries.find(c => !cross.includes(c)) ?? tries[0]
+  })
+  return out
 }
 
 /** A snake or a ladder for an element [type, from, to]. */

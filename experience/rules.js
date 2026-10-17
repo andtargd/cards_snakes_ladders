@@ -1079,18 +1079,13 @@ function cardEffect(s, pi, cardId, target, ev) {
       break
     }
     case 'M3': {
-      // both land on their new cells: the player who played the card first, then the other
-      // it takes the place of this turn's roll
+      // it takes the place of this turn's roll; the new cells don't take effect (no snake, ladder,
+      // trampoline, portal or swamp): the pieces only trade places
       s.rolled = true
       const a = p.pos
       p.pos = who.pos; who.pos = a
       ev.push({ e: 'swap', a: pi, b: target })
       trail(p, ['p', who.pos, p.pos]); trail(who, ['p', p.pos, who.pos])
-      for (const q of [pi, target]) {
-        if (s.ph === 'over' || s.pl[q].d || s.pl[q].pos <= 0) continue
-        if (!s.pl[q].fx.bo && markerAt(s, s.pl[q].pos, 'sw')) { ev.push({ e: 'swamp', p: q, c: s.pl[q].pos }); continue }
-        resolveLanding(s, q, ev)
-      }
       break
     }
     case 'M4': rollAndMove(s, target, undefined, ev, true); break

@@ -200,9 +200,9 @@ export class View {
   buildBoard(els, mk, mods) {
     for (const m of this.elMeshes) { m.geometry.dispose(); this.elGroup.remove(m) }
     for (const m of this.mkMeshes) { m.geometry.dispose(); this.mkGroup.remove(m) }
-    const ups = G.stackElements(els)
+    const ups = G.stackElements(els), cols = G.snakeColors(els)
     this.elMeshes = els.map((e, i) => {
-      const m = new THREE.Mesh(G.elementGeometry(e, i, { up: ups[i] }), this.mat.paper)
+      const m = new THREE.Mesh(G.elementGeometry(e, i, { up: ups[i], color: cols[i] }), this.mat.paper)
       m.userData = { el: i, path: G.elementPath(e, i, ups[i]), flipped: mods.includes(i) }
       this.elGroup.add(m)
       return m
