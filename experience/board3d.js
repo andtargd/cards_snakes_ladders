@@ -210,19 +210,25 @@ function ribbon(b, pts, widths, colors, lift, { walls = true, up = FLAT } = {}) 
   }
   return { at }
 }
-function disc(b, cx, cz, rx, rz, ang, lift, c, seg = 14, wall = false, flatY = null, up = FLAT) {
+/**
+ * An oval of paper. With step (metres), it is cut into rings and segments no longer than that, so it follows
+ * the steps and up(x, z) closely instead of cutting through them as a coarse fan; what lies on it then stays on it.
+ */
+function disc(b, cx, cz, rx, rz, ang, lift, c, seg = 14, wall = false, flatY = null, up = FLAT, step = 0) {
   const ca = Math.cos(ang), sa = Math.sin(ang)
-  const at = (k) => {
-    const a = (k / seg) * Math.PI * 2
-    const x = cx + Math.cos(a) * rx * ca - Math.sin(a) * rz * sa
-    const z = cz + Math.cos(a) * rx * sa + Math.sin(a) * rz * ca
+  const rings = step ? Math.max(1, Math.ceil(Math.max(rx, rz) / step)) : 1
+  if (step) seg = Math.max(seg, Math.ceil(2 * Math.PI * Math.max(rx, rz) / step))
+  const at = (k, r = 1) => {
+    const a = (k / seg) * Math.PI * 2, ox = Math.cos(a) * rx * r, oz = Math.sin(a) * rz * r
+    const x = cx + ox * ca - oz * sa, z = cz + ox * sa + oz * ca
     return V(x, flatY ?? drapeY(z) + lift + up(x, z), z)
   }
   const mid = V(cx, flatY ?? drapeY(cz) + lift + up(cx, cz), cz)
   for (let k = 0; k < seg; k++) {
-    const p = at(k), q = at(k + 1)
-    b.tri(mid, q, p, c)
+    b.tri(mid, at(k + 1, 1 / rings), at(k, 1 / rings), c)
+    for (let j = 1; j < rings; j++) b.quad(at(k, j / rings), at(k + 1, j / rings), at(k + 1, (j + 1) / rings), at(k, (j + 1) / rings), c)
     if (wall) {
+      const p = at(k), q = at(k + 1)
       const dc = c.clone().multiplyScalar(0.7)
       const d = v => V(v.x, (flatY ?? drapeY(v.z) + lift) - THICK, v.z)
       b.quad(d(q), d(p), p, q, dc)
@@ -278,15 +284,16 @@ export function snakeGeometry(from, to, index = 0, { lift = LIFT, lod = 0, up = 
       }
     }
   }
-  // head, eyes and tongue on the head cell
+  // head, eyes and tongue on the head cell: cut fine, so the spot and the eyes stay on the head where it
+  // bends over a step or rises over what lies under it, as the diamonds stay on the body
   const ang = Math.atan2(uz, ux)
-  const hl = lift + 0.01
-  disc(b, head.x - ux * 0.02, head.z - uz * 0.02, 0.3, 0.23, ang, hl, body, lod ? 8 : 18, !lod, null, up)
-  disc(b, head.x + ux * 0.02, head.z + uz * 0.02, 0.2, 0.15, ang, hl + 0.004, dark, 14, false, null, up)
+  const hl = lift + 0.01, fine = lod ? 0 : 0.025
+  disc(b, head.x - ux * 0.02, head.z - uz * 0.02, 0.3, 0.23, ang, hl, body, lod ? 8 : 18, !lod, null, up, fine)
+  disc(b, head.x + ux * 0.02, head.z + uz * 0.02, 0.2, 0.15, ang, hl + 0.004, dark, 14, false, null, up, fine)
   for (const sgn of [-1, 1]) {
     const ex = head.x + ux * 0.1 + px * 0.11 * sgn, ez = head.z + uz * 0.1 + pz * 0.11 * sgn
-    disc(b, ex, ez, 0.065, 0.065, 0, hl + 0.008, col('#ffffff'), 10, false, null, up)
-    disc(b, ex + ux * 0.015, ez + uz * 0.015, 0.032, 0.032, 0, hl + 0.012, col('#141414'), 8, false, null, up)
+    disc(b, ex, ez, 0.065, 0.065, 0, hl + 0.008, col('#ffffff'), 10, false, null, up, fine)
+    disc(b, ex + ux * 0.015, ez + uz * 0.015, 0.032, 0.032, 0, hl + 0.012, col('#141414'), 8, false, null, up, fine)
   }
   const ty = z => drapeY(z) + hl
   const t0 = V(head.x + ux * 0.28, 0, head.z + uz * 0.28)
@@ -477,14 +484,16 @@ export function stackElements(els) {
 const NEAR = 0.35
 /**
  * The colour of each snake (an index into SNAKE_COLORS; null for a ladder): the next in turn, unless a snake
- * it crosses or comes close to already has one alike, then the first that differs from theirs.
+ * it crosses or comes close to already has one alike, then the first that differs from theirs. keep: colours
+ * already given (by index; those of the base board, say), kept for the snakes that are still snakes, so a
+ * card that turns a ladder into a snake or back doesn't repaint the others; only the new ones are chosen.
  */
-export function snakeColors(els) {
+export function snakeColors(els, keep = null) {
   const fps = els.map((e, i) => (e[0] === 0 ? footprint(e, i) : null))
-  const out = els.map(() => null), n = SNAKE_COLORS.length
-  let k0 = 0
+  const out = els.map((e, i) => (e[0] === 0 && keep?.[i] != null ? keep[i] : null)), n = SNAKE_COLORS.length
+  let k0 = out.filter(c => c != null).length
   els.forEach((e, i) => {
-    if (e[0] !== 0) return
+    if (e[0] !== 0 || out[i] != null) return
     const close = out.map((c, j) => j).filter(j => out[j] != null && boxesMeet(fps[i].box, fps[j].box) && touch(fps[i].caps, fps[j].caps, NEAR))
     const near = close.map(j => out[j])
     const cross = close.filter(j => touch(fps[i].caps, fps[j].caps)).map(j => out[j])

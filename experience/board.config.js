@@ -18,7 +18,8 @@ export default {
     100: { snakes: 8, ladders: 8, maxLen: 60, rolls: [25, 45], emptyTiers: 2 },
   },
 
-  // the shortest a snake or ladder may run, in cells (every one also joins two different tiers)
+  // the shortest a snake or ladder may run, in cells (every one also joins two different tiers, and no two
+  // snakes, nor two ladders, join the same two tiers; a snake and a ladder may)
   minLen: 8,
 
   // on one tier, at most:

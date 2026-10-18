@@ -30,5 +30,10 @@ export default function start(p0) {
   const cam = { top: [[0, 11.5, 9.2], [0, 1.5, -0.6]], side: [[-14, 6, 6], [0, 1.5, 0]], front: [[0, 4, 16], [0, 2, 0]], back: [[3, 8, -18], [0, 2, 0]] }[view]
   p0.camera.fov = 60; p0.camera.updateProjectionMatrix()
   p0.camera.position.set(...cam[0]); p0.camera.lookAt(...cam[1])
+  // look=<cell>: close up on one cell, from the front (a snake's head, say)
+  if (q.get('look')) {
+    const c = G.cellPos(+q.get('look'))
+    p0.camera.position.set(c.x, c.y + 1.1, c.z + 1.3); p0.camera.lookAt(c)
+  }
   p0.log('els', JSON.stringify(els))
 }

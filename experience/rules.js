@@ -111,8 +111,17 @@ export function boardProblems(els, blocked = null, n = CFG.cells) {
     if (type === 1) rise += len; else fall += len
   }
   if (perTier.some(n => n > CFG.maxEndsPerTier)) return 'too many ends on a tier'
+  const twin = twinIn(els)
+  if (twin) return twin[0] ? 'two ladders join the same tiers' : 'two snakes join the same tiers'
   if (rise && fall && Math.abs(rise - fall) / Math.max(rise, fall) > CFG.balance) return 'balance'
   return crossingProblems(els) || ladderEndProblems(els)
+}
+
+/** Two snakes, or two ladders, that join the same two tiers (a snake and a ladder may): the first such, or null. */
+const twins = (e, f) => e[0] === f[0] && tierOf(e[1]) === tierOf(f[1]) && tierOf(e[2]) === tierOf(f[2])
+function twinIn(els) {
+  for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (twins(els[i], els[j])) return els[i]
+  return null
 }
 
 // ---------- layout: where snakes and ladders stand (board.config.js) ----------
@@ -323,6 +332,8 @@ export function generateBoard(seed, n = CFG.cells) {
         const tf = tierOf(from), tt = tierOf(to)
         // every snake and ladder joins two tiers: none lies flat along one
         if (tf === tt || perTier[tf] + 1 > CFG.maxEndsPerTier || perTier[tt] + 1 > CFG.maxEndsPerTier) continue
+        // no two snakes, nor two ladders, join the same two tiers
+        if (list.some(e => twins(e, [type, from, to]))) continue
         // few ladders and snakes stand on one tier, a few more snakes on one tier near the end
         if (type === 1 && lad[tf] + 1 > FIELD.perTier.ladders) continue
         const over = type === 0 && sn[tf] + 1 > FIELD.perTier.snakes

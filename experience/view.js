@@ -184,6 +184,7 @@ export class View {
     this.state = s
     this.buildFrame(s.n || CFG.cells)
     const boardKey = JSON.stringify([effectiveElements(s), s.mk.map(m => [m.k, m.c]), s.mods.map(m => m.i)])
+    this.baseEls = s.base
     if (boardKey !== this.boardKey) { this.buildBoard(effectiveElements(s), s.mk, s.mods.map(m => m.i)); this.boardKey = boardKey }
     this.updateBadges(s)
     if (!prev || prev.pl.length !== s.pl.length || prev.seed !== s.seed || prev.gid !== s.gid || this.tokens.length !== s.pl.length) this.buildTokens(s, players)
@@ -200,7 +201,9 @@ export class View {
   buildBoard(els, mk, mods) {
     for (const m of this.elMeshes) { m.geometry.dispose(); this.elGroup.remove(m) }
     for (const m of this.mkMeshes) { m.geometry.dispose(); this.mkGroup.remove(m) }
-    const ups = G.stackElements(els), cols = G.snakeColors(els)
+    // each snake keeps the colour it has on the base board, whatever cards flip or quakes shift
+    const base = this.baseEls?.length === els.length ? this.baseEls : els
+    const ups = G.stackElements(els), cols = G.snakeColors(els, G.snakeColors(base))
     this.elMeshes = els.map((e, i) => {
       const m = new THREE.Mesh(G.elementGeometry(e, i, { up: ups[i], color: cols[i] }), this.mat.paper)
       m.userData = { el: i, path: G.elementPath(e, i, ups[i]), flipped: mods.includes(i) }
