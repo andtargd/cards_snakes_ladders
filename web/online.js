@@ -1,5 +1,6 @@
 // The web build's Play Online dialog: a name, then Quick Match, a new room or a room's code.
-import { cleanCode, cleanName } from './net.js'
+import { cleanCode } from './net.js'
+import { cleanName, isClean, randomName, MAX_NAME } from './names.js'
 
 const NAME_KEY = 'csl-name'
 const load = k => { try { return localStorage.getItem(k) } catch { return null } }
@@ -23,8 +24,11 @@ function detailFor(e) {
   return [e?.type, ways && `direct ${d.rtc}`, ways && `relay servers ${d.brokers}`].filter(Boolean).join(' · ')
 }
 
-/** `links()`: whether rooms get links here (else Create a Room gives only a code). */
-export function onlineDialog({ net, me, links = () => true }) {
+/**
+ * `links()`: whether rooms get links here (else Create a Room gives only a code). `siteName()`: the
+ * site's own name for the player, or null; with one there is no name field.
+ */
+export function onlineDialog({ net, me, links = () => true, siteName = () => null }) {
   const el = document.createElement('div')
   el.className = 'ol'
   el.hidden = true
@@ -33,8 +37,15 @@ export function onlineDialog({ net, me, links = () => true }) {
     <button class="ol-x" type="button" aria-label="Close">✕</button>
     <h2 id="ol-title">Play Online</h2>
     <p class="ol-invite" hidden></p>
-    <label class="ol-label" for="ol-name">Your name</label>
-    <input id="ol-name" class="ol-input" maxlength="14" autocomplete="nickname" spellcheck="false" placeholder="Your name">
+    <div class="ol-name">
+      <label class="ol-label" for="ol-name">Your name</label>
+      <div class="ol-name-row">
+        <input id="ol-name" class="ol-input" maxlength="${MAX_NAME}" autocomplete="nickname" spellcheck="false" placeholder="Your name">
+        <button class="ol-btn ol-dice" type="button" aria-label="Another random name" title="Another random name">🎲</button>
+      </div>
+      <div class="ol-name-note" aria-live="polite"></div>
+    </div>
+    <p class="ol-as" hidden></p>
     <div class="ol-choices">
       <div class="ol-choice"><button class="ol-btn ol-orange" type="button" data-act="quick">Quick Match</button><span>Sit down with players looking for a game</span></div>
       <div class="ol-choice"><button class="ol-btn ol-navy" type="button" data-act="create">Create a Room</button><span class="ol-create-sub"></span></div>
@@ -50,7 +61,7 @@ export function onlineDialog({ net, me, links = () => true }) {
   </div>`
   document.body.appendChild(el)
   const $ = s => el.querySelector(s)
-  const nameIn = $('#ol-name'), codeIn = $('#ol-code'), status = $('.ol-status'), detail = $('.ol-detail'), cancelBtn = $('.ol-cancel'), inviteEl = $('.ol-invite')
+  const nameIn = $('#ol-name'), nameNote = $('.ol-name-note'), codeIn = $('#ol-code'), status = $('.ol-status'), detail = $('.ol-detail'), cancelBtn = $('.ol-cancel'), inviteEl = $('.ol-invite')
   nameIn.value = load(NAME_KEY) || ''
   let busy = false
 
@@ -63,9 +74,16 @@ export function onlineDialog({ net, me, links = () => true }) {
     detail.textContent = ''
     cancelBtn.hidden = !busy
   }
+  /** The typed name, or a random one in place of an empty or rude one (said quietly under the field). */
+  function checkName() {
+    const n = cleanName(nameIn.value)
+    if (n && !isClean(n)) { nameIn.value = randomName(); nameNote.textContent = 'That name is not allowed here, so you got a random one.' }
+    else nameIn.value = n || randomName()
+    return nameIn.value
+  }
   function applyName() {
-    const n = cleanName(nameIn.value) || 'Player ' + (10 + Math.floor(Math.random() * 90))
-    nameIn.value = n
+    if (siteName()) { me.name = siteName(); return }
+    const n = checkName()
     me.name = n
     save(NAME_KEY, n)
   }
@@ -107,6 +125,9 @@ export function onlineDialog({ net, me, links = () => true }) {
     const at = Math.min(a + 1, codeIn.value.length)
     try { codeIn.setSelectionRange(at, at) } catch { /* fine */ }
   })
+  nameIn.addEventListener('change', checkName)
+  nameIn.addEventListener('input', () => { nameNote.textContent = '' })
+  $('.ol-dice').onclick = () => { nameIn.value = randomName(); nameNote.textContent = ''; nameIn.focus() }
   cancelBtn.onclick = () => { net.cancel(); setBusy(null) }
   $('.ol-x').onclick = () => close()
   el.addEventListener('pointerdown', e => { if (e.target === el && !busy) close() })
@@ -123,8 +144,13 @@ export function onlineDialog({ net, me, links = () => true }) {
     inviteEl.hidden = !code
     el.classList.toggle('invited', !!code)
     if (code) { codeIn.value = cleanCode(code); inviteEl.textContent = `You are invited to room ${codeIn.value}` }
+    const site = siteName()
+    $('.ol-name').hidden = !!site
+    $('.ol-as').hidden = !site
+    $('.ol-as').textContent = site ? `Playing as ${site}` : ''
+    if (!site) { nameNote.textContent = ''; checkName() } // an empty field gets a random name
     el.hidden = false
-    requestAnimationFrame(() => (code ? $('[data-act=join]') : nameIn.value ? $('[data-act=quick]') : nameIn).focus())
+    requestAnimationFrame(() => (code ? $('[data-act=join]') : $('[data-act=quick]')).focus())
   }
   function close() {
     if (busy) return

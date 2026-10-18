@@ -14,6 +14,7 @@
 // or open a free one and wait; someone waiting alone in a higher one moves to a lower one.
 import { Brokers, topic } from './mq.js'
 import { every } from './clock.js'
+import { safeName } from './names.js'
 
 const PREFIX = 'andtargd-csl-v1-'
 const QUICK_SLOTS = 8
@@ -38,7 +39,6 @@ const rid = n => Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123
 // Cyrillic letters that look like the Latin ones in a code (a phone's Russian keyboard)
 const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X' }
 export const cleanCode = s => String(s || '').toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, c => LOOKALIKE[c]).replace(/[^A-Z0-9]/g, '').slice(0, 5)
-export const cleanName = s => String(s || '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 14)
 const randomCode = () => Array.from({ length: 5 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('')
 
 const LOAD_MS = 15000 // PeerJS is loaded only when the player goes online
@@ -493,8 +493,9 @@ export class Net {
       if (m.id === this.s.me.id) return deny('taken')
       if (!known && this.roster.size >= (this.quick ? 6 : 12)) return deny('full')
       // a player seated at the table may come back to a quick room that is playing: after a reload, or
-      // under a new id (the page was closed) to the seat a bot keeps under their name
-      const name = cleanName(m.name)
+      // under a new id (the page was closed) to the seat a bot keeps under their name. A name is
+      // checked here too: a client may send anything, and a rude one gets its same stand-in every time
+      const name = safeName(m.name)
       const seated = this.s.state.g?.s?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
       if (!known && !seated && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
@@ -502,7 +503,7 @@ export class Net {
       // the new link first: closing the old one then drops no one
       this.conns.set(id, conn); this.heard.set(id, Date.now()); this.pending.delete(id)
       if (prev && prev !== conn) try { prev.close() } catch { /* gone */ }
-      const p = known || { id, name: cleanName(m.name) || 'Player', color: COLORS[this.seq % COLORS.length], at: this.seq++ }
+      const p = known || { id, name, color: COLORS[this.seq % COLORS.length], at: this.seq++ }
       this.roster.set(id, p)
       this.welcome(conn, p)
       if (!known) { this.broadcast({ t: 'join', p }, id); this.s.addPlayer(p) }

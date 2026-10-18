@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>names tests</title>
+<pre id="out">running…</pre>
+<script type="module">
+import { isClean, safeName, randomName, cleanName, POOL, MAX_NAME } from '../web/names.js'
+const out = []
+const say = (...a) => { out.push(a.join(' ')); document.getElementById('out').textContent = out.join('\n') }
+let fails = 0
+const check = (ok, what) => { if (!ok) { fails++; say('FAIL', what) } }
+
+// rude names, with the usual disguises
+const BAD = [
+  'fuck', 'FUCK', 'Fuck You', 'f.u.c.k', 'f u c k', 'f_u_c_k', 'f-u-c-k', 'fuuuuck', 'f*ck', 'fսck', 'phuck', 'fvck', 'motherfucker', 'MrFuckFace',
+  'shit', 'sh1t', '$hit', 'bullshit', 'cunt', 'c u n t', 'сunt', 'bitch', 'b1tch', 'biatch', 'b!tch', 'whore', 'slut', 'nigger', 'n1gg3r', 'nigga', 'faggot',
+  'ass', 'a$$', 'a s s', 'asshole', 'dumbass', 'dick', 'Big Dick', 'cock', 'tits', 'pussy', 'porn', 'penis', 'boobs', 'cum', 'anal', 'rape', 'rapist',
+  'nazi', 'Hitler', 'retard', 'kys', 'Sexy Girl', 'dildo', 'wank3r', 'jizz', 'piss off', 'ｆｕｃｋ',
+  'хуй', 'ХУЙ', 'х у й', 'xyй', 'хуйло', 'нахуй', 'пизда', 'пиzда'.replace('z', 'з'), 'п1зда', 'блядь', 'бля', 'блять', 'сука', 'cyka', 'сучка', 'ебать', 'ёбаный', 'заебал', 'уебок',
+  'еблан', 'мудак', 'пидор', 'пидорас', 'гандон', 'шлюха', 'залупа', 'долбоёб', 'жопа', 'говно', 'хер', 'херня', 'чмо',
+  'blyat', 'suka', 'pizda', 'huy', 'xuy', 'nahui', 'pidor', 'mudak', 'eblan',
+]
+// ordinary names, some with a rude word inside
+const GOOD = [
+  'Scunthorpe', 'Assassin', 'Class Act', 'Bass Player', 'Grass', 'Passion', 'Massive', 'Cocktail', 'Peacock', 'Hancock', 'Cockatoo', 'Dickens', 'Benedict',
+  'Analysis', 'Titanic', 'Titan', 'Title', 'Petite', 'Sextant', 'Essex', 'Sussex', 'Therapist', 'Grape', 'Drape', 'Shiitake', 'Matsushita', 'Pizza', 'Spice',
+  'Cucumber', 'Document', 'Raccoon', 'Homogen', 'Japan', 'Sheila', 'Rebate', 'Ebony', 'Hubert', 'Mississippi', 'Saltwater', 'Swanky', 'Niggle',
+  'Alice', 'Bob', 'Andrey', 'Kate', 'Lucky Ladder', 'Paper Fox', 'Mike', 'Ann-Marie', "O'Neil", 'Jean_Luc', 'Player 42', 'xX_Pro_Xx', 'Dragon', 'Night Owl',
+  'Хлеб', 'Небо', 'Хлебать', 'Колебался', 'Художник', 'Хуан', 'Барсук', 'Сукно', 'Страх', 'Мандарин', 'Гребля', 'Андрей', 'Катя', 'Мишка', 'Лиса', 'Удача',
+  'Учебник', 'Ребус', 'Погреб', 'Змей Горыныч', 'Педикюр', 'Нигерия', 'Mудрый'.replace('M', 'М'), 'Скребок', 'Хребет',
+  '李小龙', 'José', 'Zoë', 'Ödön', '🦊 Fox', 'A', '12345',
+]
+for (const n of BAD) check(!isClean(n), `rude name passed: ${JSON.stringify(n)}`)
+for (const n of GOOD) check(isClean(n), `ordinary name blocked: ${JSON.stringify(n)}`)
+say(`rude ${BAD.length}, ordinary ${GOOD.length}`)
+
+// every random name is short, clean and its own stand-in
+for (const n of POOL) {
+  check(n.length <= MAX_NAME, `too long: ${n}`)
+  check(isClean(n), `random name blocked: ${n}`)
+  check(safeName(n) === n, `random name changed: ${n}`)
+}
+for (let i = 0; i < 200; i++) check(POOL.includes(randomName()), 'randomName outside the pool')
+say(`random names ${POOL.length}`)
+
+// stand-ins: clean, steady for the same text, the name itself when clean
+for (const n of BAD) {
+  const a = safeName(n), b = safeName(n)
+  check(a === b && isClean(a) && POOL.includes(a), `stand-in for ${JSON.stringify(n)}: ${a} / ${b}`)
+}
+check(safeName('') === 'Player' && safeName('  ', '') === '', 'empty name fallback')
+check(safeName('  Alice   Smith  ') === 'Alice Smith', 'spaces squeezed')
+check(cleanName('a\u0000b\u200bc\u202ed') === 'abcd', 'control and invisible characters out')
+check(cleanName('x'.repeat(40)).length === MAX_NAME, '14 characters at most')
+
+// speed: the host checks every name that comes in
+const t0 = performance.now()
+for (let i = 0; i < 2000; i++) isClean(GOOD[i % GOOD.length] + i)
+say(`2000 checks in ${Math.round(performance.now() - t0)} ms`)
+
+say(fails ? `${fails} FAILED` : 'all passed')
+</script>

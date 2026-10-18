@@ -3,7 +3,8 @@
 // (bots and pass-and-play); online (web/net.js) a room stands in for the lot, so the game's
 // Shared Table works as it does in Project 0. There is no city here.
 import * as THREE from 'three'
-import { Net, cleanCode, cleanName } from './net.js'
+import { Net, cleanCode } from './net.js'
+import { safeName } from './names.js'
 import { onlineDialog, shareRoom } from './online.js'
 import { platform, hooks, mute, roomLink, roomLinks } from './platform.js'
 import { every } from './clock.js'
@@ -51,7 +52,7 @@ let myId = ss.get(ID_KEY)
 if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = newId(); ss.set(ID_KEY, myId) }
 let savedName = ''
 try { savedName = localStorage.getItem('csl-name') || '' } catch { /* private mode */ }
-const me = { id: myId, name: (q.get('name') || savedName).slice(0, 14), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
+const me = { id: myId, name: safeName(q.get('name') || savedName, ''), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
 const players = new Map([[myId, me]])
 const state = {}
 let host = myId
@@ -65,7 +66,7 @@ const session = {
   get host() { return host },
   addPlayer(p) {
     if (p.id === myId || players.has(p.id)) return
-    const pl = { id: p.id, name: String(p.name || 'Player').slice(0, 14), color: p.color || '#9a948a', avatar: null, position: new THREE.Vector3(), yaw: 0, isMe: false }
+    const pl = { id: p.id, name: safeName(p.name), color: p.color || '#9a948a', avatar: null, position: new THREE.Vector3(), yaw: 0, isMe: false }
     players.set(p.id, pl)
     emit('join', pl)
   },
@@ -131,7 +132,9 @@ const room = {
   input() {},
   on: (e, f) => on(e, f),
 }
-const dialog = onlineDialog({ net, me, links: roomLinks })
+// the site's own name for the player (hooks.getUser), if it has one: then there is no name to type
+let siteName = null
+const dialog = onlineDialog({ net, me, links: roomLinks, siteName: () => siteName })
 const web = {
   platform, // the site this runs on (web/platform.js)
   hooks, // what the game tells the site: loading, gameplay, wins, between games
@@ -230,7 +233,7 @@ async function boot() {
   const mod = await import(entry)
   await mod.default(p0)
   const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), 3000))])
-  if (u?.name && cleanName(u.name)) me.name = cleanName(u.name)
+  if (u?.name && safeName(u.name, '')) me.name = siteName = safeName(u.name, '')
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
