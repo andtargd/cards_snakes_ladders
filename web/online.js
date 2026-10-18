@@ -41,7 +41,7 @@ export function onlineDialog({ net, me, links = () => true, siteName = () => nul
       <label class="ol-label" for="ol-name">Your name</label>
       <div class="ol-name-row">
         <input id="ol-name" class="ol-input" maxlength="${MAX_NAME}" autocomplete="nickname" spellcheck="false" placeholder="Your name">
-        <button class="ol-btn ol-dice" type="button" aria-label="Another random name" title="Another random name">🎲</button>
+        <button class="ol-btn ol-dice" type="button" aria-label="Another random name" title="Another random name"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#fff" stroke="currentColor" stroke-width="2"/><g fill="currentColor"><circle cx="8" cy="8" r="1.8"/><circle cx="16" cy="8" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="8" cy="16" r="1.8"/><circle cx="16" cy="16" r="1.8"/></g></svg></button>
       </div>
       <div class="ol-name-note" aria-live="polite"></div>
     </div>
