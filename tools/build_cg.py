@@ -24,8 +24,10 @@ SKIP_EXT = ('.md', '.docx', '.py', '.pyc', '.map')
 
 MAX_FILES = 1500
 TARGET_MB, MAX_MB = 20, 50
-# loaded from outside the zip on purpose: PeerJS, only when the player goes online (web/net.js)
-EXTERNAL_OK = ('https://unpkg.com/peerjs@',)
+# loaded from outside the zip on purpose: nothing now (PeerJS is in vendor/peerjs/)
+EXTERNAL_OK = ()
+# servers online play connects to (wss://, the brokers in web/mq.js): listed, not errors
+WSS_URL = re.compile(r'''["'](wss://[^"'\s]+)["']''')
 
 PLATFORM_TAG = "<script>window.CSL_PLATFORM = 'crazygames'</script>\n"
 
@@ -55,7 +57,7 @@ def strip_js_comments(src):
 
 def check_paths(base, files):
     """Absolute paths ('/x', '//cdn') are errors; outside URLs other than the allowed ones are errors too."""
-    errors, external = [], set()
+    errors, external, connects = [], set(), set()
 
     def look(where, value):
         v = value.strip()
@@ -85,7 +87,9 @@ def check_paths(base, files):
             if not r.startswith('vendor/'):  # three.js names URLs in its docs and error texts
                 for m in JS_URL.finditer(text):
                     look(r, m.group(1))
-    return errors, sorted(external)
+                for m in WSS_URL.finditer(text):
+                    connects.add(m.group(1))
+    return errors, sorted(external), sorted(connects)
 
 
 def build():
@@ -119,7 +123,7 @@ def build():
                 shutil.copy2(src, dst)
                 copied.append(dst)
 
-    errors, external = check_paths(OUT, copied)
+    errors, external, connects = check_paths(OUT, copied)
     if errors:
         print('Paths that will not work on the portal:')
         for e in errors:
@@ -138,6 +142,8 @@ def build():
     print(f'dist/crazygames.zip: {zmb:.2f} MB')
     for u in external:
         print(f'loaded from outside: {u}')
+    for u in connects:
+        print(f'online play connects to: {u} (and the PeerJS signalling server)')
     if len(copied) > MAX_FILES or mb > MAX_MB:
         sys.exit('over the CrazyGames limits')
     if mb > TARGET_MB:

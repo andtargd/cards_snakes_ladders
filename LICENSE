@@ -23,4 +23,4 @@ This game uses the following libraries, which remain under their own licenses
 and are not covered by the notice above:
 
 - three.js (https://threejs.org), MIT License, Copyright (c) 2010-2026 three.js authors
-- PeerJS (https://peerjs.com), MIT License, Copyright (c) 2015 Michelle Bu and Eric Zhang
+- PeerJS (https://peerjs.com), MIT License, Copyright (c) 2015 Michelle Bu and Eric Zhang (vendor/peerjs/, with its license)

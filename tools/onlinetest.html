@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Online game: stage tests</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13.5px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p { margin: 0 0 10px; color: #5b544c; }
+  #frames { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  #frames figure { margin: 0; } #frames figcaption { font-weight: bold; }
+  iframe { width: 400px; height: 250px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
+  table { border-collapse: collapse; width: 100%; max-width: 1240px; background: #fffdf8; }
+  td, th { padding: 5px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<h1>Online game: stage tests</h1>
+<p>Three players, each a whole game in an iframe (<code>index.html?sid=…</code>), through the real Play Online dialog,
+  lobby and Shared Table, over the real signalling server and brokers. Bob has no direct path (brokers only).
+  Results in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
+<div id="frames"></div>
+<table><thead><tr><th>#</th><th>Stage</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+import * as R from '../experience/rules.js'
+
+// a game against bots saved here earlier would come back on every screen instead of the menu
+try { localStorage.removeItem('csl-game') } catch { /* no storage */ }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const ok = (v, what) => { if (!v) throw new Error(what) }
+async function waitFor(fn, ms, what) {
+  const t0 = Date.now()
+  for (;;) {
+    let v = false
+    try { v = fn() } catch { /* not yet */ }
+    if (v) return Date.now() - t0
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    await sleep(100)
+  }
+}
+
+// ---------- the players ----------
+// ?ice=relay: no player gets a direct connection (a strict NAT everywhere): everything goes through the brokers
+const ICE = new URLSearchParams(location.search).get('ice') === 'relay' ? '&ice=relay' : ''
+const box = document.getElementById('frames')
+const F = {}
+function open(key, name, extra = '') {
+  let fig = document.getElementById('fig-' + key)
+  if (!fig) {
+    fig = document.createElement('figure'); fig.id = 'fig-' + key
+    fig.innerHTML = `<figcaption>${name}</figcaption>`
+    box.appendChild(fig)
+  }
+  fig.querySelector('iframe')?.remove()
+  const f = document.createElement('iframe')
+  f.src = `../index.html?sid=${key}&name=${name}${ICE}${extra}`
+  fig.appendChild(f)
+  F[key] = f
+  return waitFor(() => f.contentWindow.__csl && f.contentWindow.__cslNet && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false, 40000, name + ' loaded')
+}
+const W = k => F[k].contentWindow
+const app = k => W(k).__csl
+const net = k => W(k).__cslNet
+const doc = k => F[k].contentDocument
+const table = k => app(k).shared?.s
+const seatOf = k => app(k).mySeat()
+const fast = k => { app(k).speedIdx = 3; app(k).view.speed = 60 }
+/** Who is at the table and where things stand, as one string to compare between screens. */
+const sig = s => s && JSON.stringify([s.gid, s.seq, s.cur, s.ph, s.round, s.turnNo, s.rolled, s.pl.map(p => [p.pos, p.h.length, p.b, p.id])])
+
+/** Plays every seat this screen holds when its turn comes, as a bot would, until `until()` (or `ms`). */
+async function autoplay(keys, until, ms, what) {
+  const t0 = Date.now()
+  while (!until()) {
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    for (const k of keys) {
+      const a = F[k]?.isConnected && app(k), s = a?.shared?.s
+      if (!s || s.ph === 'over' || a.view.busy || a.waiting > 0) continue
+      const me = a.mySeat()
+      if (me < 0 || s.cur !== me) continue
+      a.act(R.botAction(R.clone(s), me))
+    }
+    await sleep(120)
+  }
+  return Date.now() - t0
+}
+async function agree(keys, ms = 8000) {
+  return waitFor(() => { const v = keys.map(k => sig(table(k))); return v[0] && v.every(x => x === v[0]) }, ms, 'every screen at the same point: ' + keys.join(', '))
+}
+
+// typing a code: a phone's Russian keyboard gives Cyrillic look-alikes, a desktop one the letters on the same keys
+const LOOK = { A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н', P: 'Р', C: 'С', T: 'Т', X: 'Х', Y: 'У' }
+const RU_KEYS = { A: 'ф', B: 'и', C: 'с', D: 'в', E: 'у', F: 'а', G: 'п', H: 'р', J: 'о', K: 'л', M: 'ь', N: 'т', P: 'з', R: 'к', S: 'ы', T: 'е', U: 'г', V: 'м', W: 'ц', X: 'ч', Y: 'н', Z: 'я' }
+function dialog(k, name) {
+  const d = doc(k)
+  d.getElementById('ol-name').value = name
+  return d
+}
+
+let code = null
+const steps = []
+const step = (title, fn) => steps.push([title, fn])
+
+step('Three players load the game', async note => {
+  await Promise.all([open('a', 'Ann'), open('b', 'Bob'), open('c', 'Cid')])
+  ok(app('a').screen === 'menu' && app('b').screen === 'menu', 'not at the menu')
+  note('menu on all three')
+})
+step('Ann creates a room from Play Online', async note => {
+  W('a').__csl.p0.web.online()
+  const d = dialog('a', 'Ann')
+  d.querySelector('[data-act=create]').click()
+  const ms = await waitFor(() => app('a').p0.web.room?.code && d.querySelector('.ol').hidden, 15000, 'a room and the dialog closed')
+  code = app('a').p0.web.room.code
+  await waitFor(() => app('a').screen === 'lobby' && app('a').lobby().seats[0]?.n === 'Ann', 3000, 'Ann seated in the lobby')
+  note(`room ${code} in ${ms} ms, link ${app('a').p0.web.room.link}`)
+  return ms
+})
+step('Bob types the code on a Russian keyboard and joins with no direct path', async note => {
+  net('b').rtcOff = true
+  W('b').__csl.p0.web.online()
+  const d = dialog('b', 'Bob'), input = d.getElementById('ol-code')
+  // a desktop layout: keydown with the key's place
+  input.value = ''
+  for (const ch of code) {
+    if (/\d/.test(ch)) { input.value += ch; continue }
+    input.dispatchEvent(new KeyboardEvent('keydown', { code: 'Key' + ch, key: RU_KEYS[ch], bubbles: true, cancelable: true }))
+  }
+  ok(input.value === code, `desktop layout typed ${input.value}`)
+  // a phone: the look-alike letters come in as they are
+  input.value = [...code].map(ch => LOOK[ch] || ch).join('').toLowerCase()
+  input.dispatchEvent(new Event('input'))
+  ok(input.value === code, `phone typed ${input.value}`)
+  input.value = code
+  d.querySelector('.ol-join').requestSubmit()
+  const ms = await waitFor(() => app('b').screen === 'lobby' && app('a').lobby().seats.some(s => s?.n === 'Bob'), 25000, 'Bob seated')
+  ok(net('b').via?.startsWith('mq:'), 'Bob came by ' + net('b').via)
+  note(`joined in ${ms} ms by ${net('b').via}`)
+  return ms
+})
+step('Cid opens the room\'s link and joins', async note => {
+  await open('c', 'Cid', '&room=' + code)
+  const d = doc('c')
+  ok(!d.querySelector('.ol').hidden && d.getElementById('ol-code').value === code, 'the link did not open the dialog with the code')
+  dialog('c', 'Cid')
+  d.querySelector('.ol-join').requestSubmit()
+  const ms = await waitFor(() => app('c').screen === 'lobby' && ['Ann', 'Bob', 'Cid'].every(n => app('a').lobby().seats.some(s => s?.n === n)), 20000, 'Cid seated')
+  note(`joined in ${ms} ms by ${net('c').via}`)
+  return ms
+})
+step('Lobby: the host sets the table, a guest cannot', async note => {
+  app('b').lobbyCmd({ t: 'size', size: 70 })
+  await sleep(1500)
+  ok(app('a').lobby().size === 100, 'a guest changed the board size')
+  app('a').lobbyCmd({ t: 'size', size: 50 })
+  await waitFor(() => app('b').lobby().size === 50, 3000, 'the size on a guest\'s screen')
+  app('a').lobbyCmd({ t: 'size', size: 100 }) // a long game: the stages below happen in the middle of it
+  app('a').lobbyCmd({ t: 'bot' })
+  await waitFor(() => app('a').lobby().seats.filter(Boolean).length === 4, 3000, 'a bot seated')
+  const bot = app('a').lobby().seats.findIndex(s => s?.b)
+  app('a').lobbyCmd({ t: 'botlvl', seat: bot })
+  await waitFor(() => ['b', 'c'].every(k => app(k).lobby().size === 100 && app(k).lobby().seats[bot]?.b === 3), 5000, 'the table as the host set it, on every screen')
+  note('sizes 50 then 100 on every screen, a hard bot; the guest\'s change was ignored')
+})
+step('Ann starts the game: everyone sits at the same table', async note => {
+  for (const k of ['a', 'b', 'c']) fast(k)
+  app('a').lobbyCmd({ t: 'start' })
+  const ms = await waitFor(() => ['a', 'b', 'c'].every(k => app(k).screen === 'game' && table(k)?.gid === table('a').gid), 10000, 'all three at the table')
+  const seats = ['a', 'b', 'c'].map(seatOf)
+  ok(new Set(seats).size === 3 && seats.every(x => x >= 0), 'seats: ' + seats)
+  note(`game ${table('a').gid}, seats ${seats.join(', ')}, ${table('a').pl.length} players`)
+  return ms
+})
+step('Turns go round, and every screen agrees', async note => {
+  const seq0 = table('a').seq
+  const ms = await autoplay(['a', 'b', 'c'], () => table('a').seq >= seq0 + 30 || table('a').ph === 'over', 120000, '30 moves')
+  await agree(['a', 'b', 'c'])
+  note(`${table('a').seq - seq0} moves in ${ms} ms, round ${table('a').round}; all three agree`)
+  return ms
+})
+step('Out of time: the host plays the turn for a player', async note => {
+  const bob = seatOf('b')
+  await autoplay(['a', 'c'], () => table('a').cur === bob && !app('a').view.busy || table('a').ph === 'over', 60000, 'Bob\'s turn')
+  if (table('a').ph === 'over') { note('the game ended first'); return }
+  const seq = table('a').seq, turn = table('a').turnNo
+  app('a').shared.turnStart = 44.6
+  await waitFor(() => table('a').seq > seq, 6000, 'the host acting for Bob')
+  await waitFor(() => table('a').turnNo > turn || table('a').ph === 'over', 12000, 'Bob\'s turn over')
+  ok(table('a').pl[bob].b === 0, 'Bob lost his seat')
+  note('the host took the turn; Bob keeps his seat')
+})
+step('Bob reloads mid-game: a bot holds his seat, then it is his again', async note => {
+  const bob = seatOf('b')
+  F.b.contentWindow.location.reload()
+  await waitFor(() => table('a').pl[bob].b > 0 && table('a').pl[bob].rb, 8000, 'a bot in Bob\'s seat')
+  const t0 = Date.now()
+  await waitFor(() => W('b').__csl && app('b').shared && table('a').pl[bob].b === 0 && seatOf('b') === bob, 40000, 'Bob back in his seat')
+  fast('b')
+  await autoplay(['a', 'b', 'c'], () => false || table('a').seq > 0 && sig(table('a')) === sig(table('b')), 15000, 'Bob in step')
+  note(`back in his seat ${Date.now() - t0} ms after the reload, by ${net('b').via}`)
+})
+step('Cid leaves the room: a bot keeps his seat', async note => {
+  const cid = seatOf('c')
+  app('c').p0.web.leave()
+  await waitFor(() => table('a').pl[cid].b > 0 && app('c').screen === 'menu' && !app('c').p0.web.room, 6000, 'Cid gone, a bot in his seat')
+  await waitFor(() => !app('a').p0.players.has(app('c').p0.me.id), 3000, 'Cid out of the room')
+  note('seat to a bot, Cid at the menu')
+})
+step('The host closes the game: Bob takes the table over and it goes on', async note => {
+  const ann = seatOf('a'), seq = table('b').seq
+  F.a.remove()
+  const ms = await waitFor(() => app('b').p0.room.isHost && net('b').mode === 'relay', 30000, 'Bob hosting')
+  await waitFor(() => table('b').pl[ann].b > 0, 6000, 'a bot in Ann\'s seat')
+  await autoplay(['b'], () => table('b').seq > seq + 4 || table('b').ph === 'over', 30000, 'the game going on')
+  note(`Bob hosts ${ms} ms after Ann left; the game goes on`)
+  return ms
+})
+step('Cid comes back with the code: the bot gives his seat back', async note => {
+  W('c').__csl.p0.web.online()
+  const d = dialog('c', 'Cid')
+  d.getElementById('ol-code').value = code
+  d.querySelector('.ol-join').requestSubmit()
+  await waitFor(() => app('c').screen === 'game' && table('c')?.gid === table('b').gid, 20000, 'Cid at the table')
+  await waitFor(() => seatOf('c') >= 0 && table('b').pl[seatOf('c')].b === 0, 5000, 'Cid in his seat again')
+  fast('c')
+  await autoplay(['b', 'c'], () => table('b').seq > 0 && sig(table('b')) === sig(table('c')), 20000, 'Cid in step')
+  note(`seat back, by ${net('c').via}`)
+})
+step('The game plays to the end; the host starts a rematch', async note => {
+  const ms = await autoplay(['b', 'c'], () => table('b').ph === 'over', 240000, 'the end of the game')
+  await waitFor(() => table('c')?.ph === 'over', 8000, 'Cid sees the end')
+  const gid = table('b').gid
+  app('b').rematch()
+  await waitFor(() => table('b')?.gid !== gid && app('b').screen === 'game', 8000, 'a new game')
+  note(`ended after ${ms} ms (round ${R.clone(table('c') || {}).round ?? '?'}); rematch ${table('b').gid} with ${table('b').pl.length} players`)
+  return ms
+})
+step('Everyone leaves: the room is gone', async note => {
+  app('b').p0.web.leave(); app('c').p0.web.leave()
+  await sleep(1500)
+  let err = null
+  try { await net('c').join(code) } catch (e) { err = e }
+  ok(err?.type === 'not-found', 'joined, or ' + err?.type)
+  note('not-found')
+})
+
+const rows = document.getElementById('rows')
+window.results = []
+window.done = (async () => {
+  let failed = false
+  for (const [i, [title, fn]] of steps.entries()) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${i + 1}</td><td>${title}</td><td class="run">${failed ? 'skipped' : 'running'}</td><td></td><td class="note"></td>`
+    rows.appendChild(tr)
+    if (failed) { window.results.push({ i: i + 1, title, ok: false, skipped: true }); continue }
+    const notes = [], t0 = Date.now(), r = { i: i + 1, title }
+    try {
+      const v = await fn(t => notes.push(t))
+      Object.assign(r, { ok: true, ms: typeof v === 'number' ? v : Date.now() - t0 })
+    } catch (e) { failed = true; Object.assign(r, { ok: false, ms: Date.now() - t0, error: String(e?.message || e) }); console.error(title, e) }
+    r.notes = notes.join('; ')
+    window.results.push(r)
+    tr.children[2].className = r.ok ? 'pass' : 'fail'
+    tr.children[2].textContent = r.ok ? 'pass' : 'FAIL'
+    tr.children[3].textContent = r.ms
+    tr.children[4].textContent = r.ok ? r.notes : r.error + (r.notes ? ' — ' + r.notes : '')
+  }
+  return window.results
+})()
+</script>
+</body>
+</html>

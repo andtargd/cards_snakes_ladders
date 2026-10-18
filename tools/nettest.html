@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Online rooms: network tests</title>
+<style>
+  body { margin: 0; padding: 16px; font: 14px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: #5b544c; }
+  table { border-collapse: collapse; width: 100%; max-width: 980px; background: #fffdf8; }
+  td, th { padding: 6px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<h1>Online rooms: network tests</h1>
+<p>Real PeerJS signalling and the real public brokers, several players in this one page (web/net.js with stand-in sessions).
+  <code>?only=S1,S5</code> runs some of them. Results are in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
+<table><thead><tr><th>#</th><th>Scenario</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+import { Net } from '../web/net.js'
+
+const q = new URLSearchParams(location.search)
+const only = q.get('only') ? new Set(q.get('only').split(',')) : null
+// quick rooms of this run only, so real players are not met (and not bothered)
+const QP = 'X' + 'ABCDEFGHJKMNPRSTUVWXYZ'[Math.floor(Math.random() * 22)]
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const ok = (v, what) => { if (!v) throw new Error(what) }
+async function waitFor(fn, ms, what) {
+  const t0 = Date.now()
+  for (;;) {
+    let v = false
+    try { v = fn() } catch { /* not yet */ }
+    if (v) return Date.now() - t0
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    await sleep(100)
+  }
+}
+async function rejects(p, type, what) {
+  try { await p } catch (e) { if (e.type === type) return e; throw new Error(`${what}: ${e.type} instead of ${type}`) }
+  throw new Error(what + ': it did not fail')
+}
+
+// ---------- players: a Net and a stand-in for the session p0web.js keeps ----------
+let nextId = 1000 + Math.floor(Math.random() * 80000)
+const all = new Set()
+function player(name, { rtcOff = false, id } = {}) {
+  const me = { id: id ?? nextId++, name, color: '#888' }
+  const s = {
+    me, players: new Map([[me.id, me]]), state: {}, host: me.id, room: null, got: [], log: [],
+    addPlayer(p) { if (p.id === me.id || this.players.has(p.id)) return; this.players.set(p.id, { ...p }); this.log.push(['join', p.id]) },
+    removePlayer(id) { if (id === me.id || !this.players.delete(id)) return; this.log.push(['leave', id]) },
+    setHost(id) { if (id !== this.host) { this.host = id; this.log.push(['host', id]) } },
+    applyState(k, v) { if (v == null) delete this.state[k]; else this.state[k] = v },
+    message(d, from) { this.got.push({ d, from }) },
+    roomChanged(info, reason) { this.room = info; this.log.push(['room', info && info.code, reason]) },
+    reset() { for (const id of [...this.players.keys()]) this.removePlayer(id); for (const k of Object.keys(this.state)) delete this.state[k]; this.setHost(me.id) },
+    renewId() { this.players.delete(me.id); me.id = nextId++; this.players.set(me.id, me); this.host = me.id },
+  }
+  const net = new Net(s, { quick: QP })
+  net.rtcOff = rtcOff
+  const P = { name, s, net, get id() { return me.id } }
+  all.add(P)
+  return P
+}
+const set = (P, k, v) => { P.s.applyState(k, v, P.id); P.net.set(k, v) }
+const say = (P, d, to) => P.net.send(d, to)
+const got = (P, from, pred) => P.s.got.some(x => x.from === from && pred(x.d))
+async function timed(p) { const t0 = Date.now(); const v = await p; return [v, Date.now() - t0] }
+function cleanup() { for (const P of all) { try { P.net.unload() } catch { /* gone */ } } all.clear() }
+/** The relay's page stops: no word to anyone, its signalling and broker connections die, nothing it gets is handled. */
+function freeze(P) {
+  const n = P.net, saved = { sendConn: n.sendConn, tick: n.tick, relayMq: n.relayMq, reconnect: n.peer?.reconnect }
+  n.sendConn = () => {}; n.tick = () => {}; n.relayMq = () => {}
+  if (n.peer) { n.peer.reconnect = () => {}; n.peer.off('connection'); try { n.peer.socket._socket.close() } catch { /* gone */ } }
+  for (const b of n.mq.list) { b.want = false; try { b.ws?.close() } catch { /* gone */ } }
+  return () => { // back again
+    Object.assign(n, { sendConn: saved.sendConn, tick: saved.tick, relayMq: saved.relayMq })
+    if (n.peer) { n.peer.reconnect = saved.reconnect; n.peer.on('connection', c => n.incoming(c)) }
+    for (const b of n.mq.list) b.want = true
+    n.wake()
+  }
+}
+
+// ---------- the scenarios ----------
+const S = {}
+S.S1 = ['Join directly (WebRTC): state and messages both ways', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'), [, ms] = await timed(B.net.join(code))
+  ok(B.net.via === 'rtc', 'B came by ' + B.net.via)
+  await waitFor(() => A.s.players.has(B.id) && B.s.players.has(A.id) && B.s.host === A.id, 3000, 'both in the room')
+  set(A, 'x', { v: 1 }); set(B, 'y', 2)
+  await waitFor(() => B.s.state.x?.v === 1 && A.s.state.y === 2, 3000, 'state both ways')
+  say(B, { hi: 1 }); say(A, { only: 'B' }, B.id)
+  await waitFor(() => got(A, B.id, d => d.hi) && got(B, A.id, d => d.only), 3000, 'messages both ways')
+  note(`joined in ${ms} ms`)
+  return ms
+}]
+S.S2 = ['Join through a broker when no direct path opens', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B', { rtcOff: true }), [, ms] = await timed(B.net.join(code))
+  ok(B.net.via?.startsWith('mq:'), 'B came by ' + B.net.via)
+  await waitFor(() => A.s.players.has(B.id) && B.s.host === A.id, 3000, 'both in the room')
+  set(A, 'x', 'from A'); set(B, 'y', 'from B')
+  await waitFor(() => B.s.state.x === 'from A' && A.s.state.y === 'from B', 4000, 'state both ways')
+  say(B, { hi: 1 }); say(A, { only: 'B' }, B.id)
+  await waitFor(() => got(A, B.id, d => d.hi) && got(B, A.id, d => d.only), 4000, 'messages both ways')
+  note(`joined in ${ms} ms by ${B.net.via}`)
+  return ms
+}]
+S.S3 = ['Three players, one direct and one through a broker', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'); await B.net.join(code)
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  await waitFor(() => B.s.players.has(C.id) && C.s.players.has(B.id), 4000, 'everyone sees everyone')
+  say(B, { to: 'C' }, C.id); say(C, { to: 'B' }, B.id); set(C, 'z', 3)
+  await waitFor(() => got(C, B.id, d => d.to === 'C') && got(B, C.id, d => d.to === 'B') && B.s.state.z === 3, 4000, 'B and C through the relay')
+  note(`B ${B.net.via}, C ${C.net.via}`)
+}]
+S.S4 = ['A wrong code says so quickly', async note => {
+  const B = player('B')
+  const [, ms] = await timed(rejects(B.net.join('ZZZZ9'), 'not-found', 'wrong code'))
+  ok(ms < 5000, 'took ' + ms + ' ms')
+  note(`not-found in ${ms} ms`)
+  return ms
+}]
+S.S5 = ['The relay leaves: the oldest takes the room over, the game state stays', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'); await B.net.join(code)
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  set(A, 'k', 'before')
+  await waitFor(() => B.s.state.k === 'before' && C.s.state.k === 'before', 4000, 'state everywhere')
+  const t0 = Date.now()
+  A.net.leave()
+  await waitFor(() => B.net.mode === 'relay' && C.net.mode === 'member' && C.s.host === B.id, 20000, 'B relays, C follows')
+  const ms = Date.now() - t0
+  ok(!B.s.players.has(A.id) && !C.s.players.has(A.id), 'A is still listed')
+  ok(B.s.state.k === 'before' && C.s.state.k === 'before', 'state lost')
+  const D = player('D'); await D.net.join(code)
+  ok(D.s.host === B.id, 'a newcomer reaches the new relay')
+  note(`taken over in ${ms} ms; C by ${C.net.via}, D by ${D.net.via}`)
+  return ms
+}]
+S.S6 = ['A room is gone once its last player leaves', async note => {
+  const A = player('A'), code = await A.net.create()
+  await waitFor(() => A.net.mq.anyUp, 6000, 'the relay at a broker')
+  A.net.leave()
+  await waitFor(() => A.net.mq.list.every(b => !b.up && !b.subs.size) && !A.net.served, 2000, 'brokers closed and topics forgotten')
+  const D = player('D')
+  const [, ms] = await timed(rejects(D.net.join(code), 'not-found', 'join after the room closed'))
+  note(`not-found ${ms} ms after; no broker connection left`)
+  return ms
+}]
+S.S7 = ['A player who leaves is gone from the room at once', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'); await B.net.join(code)
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  B.net.leave(); C.net.leave()
+  const ms = await waitFor(() => !A.s.players.has(B.id) && !A.s.players.has(C.id), 4000, 'both gone')
+  note(`gone in ${ms} ms`)
+  return ms
+}]
+S.S8 = ['A player through a broker who vanishes is dropped after the heartbeat window', async note => {
+  const A = player('A'), code = await A.net.create()
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  await waitFor(() => A.s.players.has(C.id), 3000, 'C in')
+  C.net.relayLost = () => {}; C.net.tick = () => {}
+  for (const b of C.net.mq.list) { b.want = false; try { b.ws?.close() } catch { /* gone */ } }
+  const ms = await waitFor(() => !A.s.players.has(C.id), 32000, 'C dropped')
+  ok(ms > 12000, 'dropped too soon: ' + ms)
+  note(`dropped after ${ms} ms`)
+  return ms
+}]
+S.S9 = ['The relay vanishes without a word, then comes back and joins the new relay', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'); await B.net.join(code)
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  await waitFor(() => A.net.mq.anyUp && C.s.players.has(B.id), 5000, 'all in')
+  const t0 = Date.now()
+  const back = freeze(A)
+  await waitFor(() => B.net.mode === 'relay' && C.net.mode === 'member' && C.s.host === B.id, 45000, 'B took over')
+  const ms = Date.now() - t0
+  back()
+  const ms2 = await waitFor(() => A.net.mode === 'member' && A.s.host === B.id && B.s.players.has(A.id), 30000, 'A back as a member')
+  ok(B.net.mode === 'relay' && C.s.host === B.id, 'only B relays')
+  note(`took over in ${ms} ms; old relay stepped down and rejoined in ${ms2} ms (by ${A.net.via})`)
+  return ms
+}]
+S.S10 = ['Reload: a player rejoins with the same id; a host alone reopens its room', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B'); await B.net.join(code)
+  const id = B.id
+  B.net.unload(); all.delete(B)
+  await waitFor(() => !A.s.players.has(id), 3000, 'B gone on unload')
+  const B2 = player('B', { id }); await B2.net.rejoin(code, false, {})
+  ok(B2.net.mode === 'member' && A.s.players.has(id), 'B back')
+  // the host alone reloads: no one answers, so it opens the room again with its state
+  const H = player('H'), hcode = await H.net.create()
+  set(H, 'lob', { seats: [1] })
+  const hid = H.id
+  H.net.unload(); all.delete(H)
+  const H2 = player('H', { id: hid })
+  const [, ms] = await timed(H2.net.rejoin(hcode, false, { lob: { seats: [1] } }))
+  ok(H2.net.mode === 'relay' && H2.s.state.lob?.seats?.[0] === 1, 'room reopened with its state')
+  note(`member back at once; host alone reopened in ${ms} ms`)
+}]
+S.S11 = ['Quick Match: two players find each other', async note => {
+  const A = player('A'), codeA = await A.net.quickMatch()
+  ok(A.net.mode === 'relay' && codeA.startsWith(QP), 'A waits in ' + codeA)
+  const B = player('B'), [codeB, ms] = await timed(B.net.quickMatch())
+  ok(codeB === codeA && B.s.host === A.id, `B went to ${codeB}`)
+  note(`${codeA}; B found it in ${ms} ms`)
+  return ms
+}]
+S.S12 = ['Cancelling a join leaves no one behind in the room', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B', { rtcOff: true })
+  const p = B.net.join(code)
+  await sleep(3200)
+  B.net.cancel()
+  try { await p } catch (e) { ok(e.type === 'cancelled', 'not cancelled: ' + e.type) }
+  if (B.net.online) B.net.leave() // the welcome came first: leaving is the user's next step
+  await sleep(4000)
+  ok(!A.s.players.has(B.id), 'B is still in the room')
+  ok(B.net.mq.list.every(b => !b.up), 'B kept a broker connection')
+  note('no ghost, no broker connection left')
+}]
+S.S13 = ['A duplicated tab (the same player id) gets a new id and joins', async note => {
+  const A = player('A'), code = await A.net.create()
+  const B = player('B', { id: A.id }); await B.net.join(code)
+  ok(B.id !== A.id && A.s.players.has(B.id), 'B did not join under a new id')
+  note(`B renamed to ${B.id}`)
+}]
+S.S14 = ['A player\'s broker drops: they reconnect and keep their place', async note => {
+  const A = player('A'), code = await A.net.create()
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  const up = C.net.up, b = up.broker
+  let dropped = false
+  const was = A.s.removePlayer.bind(A.s); A.s.removePlayer = id => { if (id === C.id) dropped = true; was(id) }
+  try { b.ws.close() } catch { /* gone */ }
+  const state = n => `${n.s.me.name}: ${n.mode} via ${n.via}, brokers ${n.mq.list.map(x => x.name + (x.up ? '+' : '-') + [...x.acked].length).join(' ')}, links ${n.links.size}`
+  const ms = await waitFor(() => C.net.mode === 'member' && C.net.up && C.net.up !== up, 20000, 'C back').catch(e => { throw new Error(e.message + ' — ' + state(C.net) + ' / ' + state(A.net)) })
+  ok(!dropped && A.s.players.has(C.id), 'C lost their place')
+  note(`back in ${ms} ms by ${C.net.via}`)
+  return ms
+}]
+S.S15 = ['The relay\'s broker blips: the players through it stay', async note => {
+  const A = player('A'), code = await A.net.create()
+  const C = player('C', { rtcOff: true }); await C.net.join(code)
+  const via = C.net.via, b = C.net.up.broker
+  const relayB = A.net.mq.list.find(x => x.url === b.url)
+  try { relayB.ws.close() } catch { /* gone */ }
+  await sleep(9000)
+  ok(C.net.mode === 'member' && A.s.players.has(C.id), 'C left')
+  ok(Date.now() - A.net.heard.get(C.id) < 5000, 'the relay no longer hears C')
+  note(`C stayed (${via}); relay at ${relayB.name} again: ${relayB.up}`)
+}]
+S.S16 = ['One hello by two ways gets one welcome', async note => {
+  const A = player('A'); await A.net.create()
+  const fake = () => {
+    const f = { open: true, sent: [], closed: false, fns: {}, on(e, fn) { (this.fns[e] ||= []).push(fn) }, off() {}, send(m) { this.sent.push(m) }, close() { this.closed = true; this.open = false; for (const fn of this.fns.close || []) fn() } }
+    f.feed = m => { for (const fn of f.fns.data || []) fn(m) }
+    return f
+  }
+  const L1 = fake(), L2 = fake(), L3 = fake()
+  A.net.incoming(L1); A.net.incoming(L2); A.net.incoming(L3)
+  const hello = n => ({ t: 'hello', v: 1, id: 77777, name: 'Z', n })
+  L1.feed(hello('same')); L2.feed(hello('same'))
+  ok(L1.sent.some(m => m.t === 'welcome') && !L2.sent.length && L2.closed, 'the second way was not turned down')
+  L3.feed(hello('other')) // a new attempt (a reload): it takes over from the old link
+  ok(L3.sent.some(m => m.t === 'welcome') && L1.closed && A.s.players.has(77777), 'a new attempt was not let in')
+  note('dup closed quietly; a new attempt replaces the old link')
+}]
+S.S17 = ['The host\'s page does not answer: the join says so', async note => {
+  const A = player('A'), code = await A.net.create()
+  await waitFor(() => A.net.mq.anyUp, 6000, 'relay at a broker')
+  A.net.peer.off('connection'); A.net.relayMq = () => {}
+  const B = player('B')
+  const [e, ms] = await timed(rejects(B.net.join(code), 'timeout', 'join to a page that does not answer'))
+  note(`timeout after ${ms} ms (direct ${e.detail?.rtc}, relay servers ${e.detail?.brokers})`)
+  return ms
+}]
+
+// ---------- run ----------
+const rows = document.getElementById('rows')
+window.results = []
+window.done = (async () => {
+  for (const [key, [title, fn]] of Object.entries(S)) {
+    if (only && !only.has(key)) continue
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${key}</td><td>${title}</td><td class="run">running</td><td></td><td class="note"></td>`
+    rows.appendChild(tr)
+    const notes = []
+    const t0 = Date.now()
+    const r = { key, title }
+    try {
+      const v = await Promise.race([fn(t => notes.push(t)), sleep(120000).then(() => { throw new Error('scenario took over 2 minutes') })])
+      Object.assign(r, { ok: true, ms: typeof v === 'number' ? v : Date.now() - t0 })
+    } catch (e) { Object.assign(r, { ok: false, ms: Date.now() - t0, error: String(e?.message || e) }); console.error(key, e) }
+    r.notes = notes.join('; ')
+    window.results.push(r)
+    tr.children[2].className = r.ok ? 'pass' : 'fail'
+    tr.children[2].textContent = r.ok ? 'pass' : 'FAIL'
+    tr.children[3].textContent = r.ms
+    tr.children[4].textContent = r.ok ? r.notes : r.error + (r.notes ? ' — ' + r.notes : '')
+    cleanup()
+    await sleep(800)
+  }
+  return window.results
+})()
+</script>
+</body>
+</html>

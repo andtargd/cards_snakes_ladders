@@ -9,12 +9,18 @@ function messageFor(e) {
   switch (e?.type) {
     case 'not-found': return 'There is no room with this code. Check it, or create a new room.'
     case 'deny': return e.why === 'full' ? 'That room is full.' : e.why === 'playing' ? 'That table has just started. Try again.' : 'Could not join that room.'
-    case 'timeout': case 'closed': return 'The room did not answer. Try again in a moment.'
+    case 'timeout': case 'closed': return 'The room did not answer. Its host should keep the game open on screen (on a phone too), then try again.'
+    case 'unreachable': return 'Could not get through to the room from this network. Try another connection (Wi-Fi or mobile data), or without a VPN.'
     case 'busy': return 'All quick tables are busy right now. Create a room instead.'
-    case 'browser-incompatible': return 'This browser cannot play online (WebRTC is turned off).'
+    case 'browser-incompatible': return 'This browser cannot open rooms (WebRTC is turned off). You can still join a friend\'s room with its code.'
     case 'lib': return 'Online play could not load. Check your connection (or an ad blocker) and try again.'
     default: return 'Could not reach the game server. Check your connection and try again.'
   }
+}
+/** What the attempt saw, small under the message: for telling someone what went wrong. */
+function detailFor(e) {
+  const d = e?.detail, ways = d && (e.type === 'timeout' || e.type === 'unreachable') // what got through, where it matters
+  return [e?.type, ways && `direct ${d.rtc}`, ways && `relay servers ${d.brokers}`].filter(Boolean).join(' · ')
 }
 
 /** `links()`: whether rooms get links here (else Create a Room gives only a code). */
@@ -39,11 +45,12 @@ export function onlineDialog({ net, me, links = () => true }) {
       <button class="ol-btn" type="submit" data-act="join">Join</button>
     </form>
     <div class="ol-status" role="status" aria-live="polite"></div>
+    <div class="ol-detail"></div>
     <button class="ol-btn ol-cancel" type="button" hidden>Cancel</button>
   </div>`
   document.body.appendChild(el)
   const $ = s => el.querySelector(s)
-  const nameIn = $('#ol-name'), codeIn = $('#ol-code'), status = $('.ol-status'), cancelBtn = $('.ol-cancel'), inviteEl = $('.ol-invite')
+  const nameIn = $('#ol-name'), codeIn = $('#ol-code'), status = $('.ol-status'), detail = $('.ol-detail'), cancelBtn = $('.ol-cancel'), inviteEl = $('.ol-invite')
   nameIn.value = load(NAME_KEY) || ''
   let busy = false
 
@@ -53,6 +60,7 @@ export function onlineDialog({ net, me, links = () => true }) {
     for (const c of el.querySelectorAll('input, .ol-btn:not(.ol-cancel), .ol-x')) c.disabled = busy
     status.textContent = text || ''
     status.classList.remove('err')
+    detail.textContent = ''
     cancelBtn.hidden = !busy
   }
   function applyName() {
@@ -75,12 +83,13 @@ export function onlineDialog({ net, me, links = () => true }) {
       setBusy(null)
       status.textContent = messageFor(e)
       status.classList.add('err')
+      detail.textContent = detailFor(e)
     }
   }
   function join() {
     const code = cleanCode(codeIn.value)
     codeIn.value = code
-    if (code.length < 3) { status.textContent = 'Type the room code your friend sent you.'; status.classList.add('err'); codeIn.focus(); return }
+    if (code.length < 3) { status.textContent = 'Type the room code your friend sent you.'; status.classList.add('err'); detail.textContent = ''; codeIn.focus(); return }
     go(`Joining room ${code}…`, () => net.join(code))
   }
 
@@ -88,6 +97,16 @@ export function onlineDialog({ net, me, links = () => true }) {
   $('[data-act=create]').onclick = () => go('Opening a room…', () => net.create())
   $('.ol-join').onsubmit = e => { e.preventDefault(); join() }
   codeIn.oninput = () => { const v = cleanCode(codeIn.value); if (v !== codeIn.value) codeIn.value = v }
+  // a non-Latin keyboard layout (Russian, say): the key's place gives the Latin letter on it
+  codeIn.addEventListener('keydown', e => {
+    const m = /^Key([A-Z])$/.exec(e.code || '')
+    if (!m || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || /[A-Za-z0-9]/.test(e.key)) return
+    e.preventDefault()
+    const a = codeIn.selectionStart ?? codeIn.value.length, b = codeIn.selectionEnd ?? a
+    codeIn.value = cleanCode(codeIn.value.slice(0, a) + m[1] + codeIn.value.slice(b))
+    const at = Math.min(a + 1, codeIn.value.length)
+    try { codeIn.setSelectionRange(at, at) } catch { /* fine */ }
+  })
   cancelBtn.onclick = () => { net.cancel(); setBusy(null) }
   $('.ol-x').onclick = () => close()
   el.addEventListener('pointerdown', e => { if (e.target === el && !busy) close() })

@@ -6,6 +6,7 @@ import * as THREE from 'three'
 import { Net, cleanCode, cleanName } from './net.js'
 import { onlineDialog, shareRoom } from './online.js'
 import { platform, hooks, mute, roomLink, roomLinks } from './platform.js'
+import { every } from './clock.js'
 
 const q = new URLSearchParams(location.search)
 const entry = new URL('../experience/main.js', import.meta.url).href
@@ -38,13 +39,16 @@ function getRenderer() {
 }
 
 // this tab keeps its player id through a reload, so an online table gives it its seat back
-const ID_KEY = 'csl-id', ROOM_KEY = 'csl-room', ROOM_FRESH_MS = 120000
+// (?sid= keeps several players apart in one tab: the online tests put each in an iframe)
+const NS = q.get('sid') ? ':' + String(q.get('sid')).replace(/\W/g, '').slice(0, 12) : ''
+const ID_KEY = 'csl-id' + NS, ROOM_KEY = 'csl-room' + NS, ROOM_FRESH_MS = 120000
+const newId = () => Math.floor(Math.random() * 90000) + 1000
 const ss = {
   get(k) { try { return JSON.parse(sessionStorage.getItem(k) || 'null') } catch { return null } },
   set(k, v) { try { if (v == null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, JSON.stringify(v)) } catch { /* private mode */ } },
 }
 let myId = ss.get(ID_KEY)
-if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = Math.floor(Math.random() * 90000) + 1000; ss.set(ID_KEY, myId) }
+if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = newId(); ss.set(ID_KEY, myId) }
 let savedName = ''
 try { savedName = localStorage.getItem('csl-name') || '' } catch { /* private mode */ }
 const me = { id: myId, name: (q.get('name') || savedName).slice(0, 14), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
@@ -75,7 +79,13 @@ const session = {
     web.room = info
     if (info) keepRoom(); else ss.set(ROOM_KEY, null)
     // the address bar shows the room's link only where this page's address is one to give
-    if (platform.allowLinks) try { history.replaceState(null, '', info ? '?room=' + info.code : location.pathname) } catch { /* fine */ }
+    if (platform.allowLinks) {
+      try {
+        const u = new URL(location.href) // only ?room changes: ?debug, ?platform and the like stay
+        if (info) u.searchParams.set('room', info.code); else u.searchParams.delete('room')
+        history.replaceState(null, '', u.pathname + u.search + u.hash)
+      } catch { /* fine */ }
+    }
     hooks.roomChanged(info)
     emit('room', info, reason)
   },
@@ -84,8 +94,29 @@ const session = {
     for (const k of Object.keys(state)) session.applyState(k, null, myId)
     session.setHost(myId)
   },
+  /** Another tab of this browser has my id (a duplicated tab copies sessionStorage): take a new one. Only while in no room. */
+  renewId() {
+    if (net.online) return
+    const old = myId
+    do myId = newId(); while (myId === old)
+    players.delete(old); me.id = myId; players.set(myId, me)
+    if (host === old) host = myId
+    ss.set(ID_KEY, myId)
+  },
 }
-const net = new Net(session)
+// ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round)
+const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay' })
+// a duplicated tab asks whether its id is someone's already, and takes a new one if so
+try {
+  const tabs = new BroadcastChannel('csl-tabs'), born = Date.now()
+  tabs.onmessage = e => {
+    const d = e.data
+    if (!d || d.id !== myId) return
+    if (d.ask) tabs.postMessage({ id: myId, mine: 1 })
+    else if (d.mine && Date.now() - born < 5000) session.renewId()
+  }
+  tabs.postMessage({ id: myId, ask: 1 })
+} catch { /* no BroadcastChannel: the room says 'taken' and net.js takes a new id then */ }
 globalThis.__cslNet = net // for local testing from the console
 const checkSize = (what, v, max) => { const n = new TextEncoder().encode(JSON.stringify(v ?? null)).byteLength; if (n > max) throw new RangeError(`${what}: ${n} bytes; at most ${max}`) }
 const room = {
@@ -210,17 +241,19 @@ async function boot() {
   if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
     dialog.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
   } else if (code.length >= 3) dialog.open({ code })
-  // a hidden tab gets no animation frames: a timer keeps the game (and an online table it hosts) going
-  let prev = performance.now()
-  const next = () => (document.hidden ? setTimeout(() => frame(performance.now()), 100) : requestAnimationFrame(frame))
-  const frame = now => {
-    const dt = Math.min(document.hidden ? 0.5 : 0.1, Math.max(0, (now - prev) / 1000)); prev = now
+  // animation frames stop in a hidden tab, and in some windows that still count as visible (an
+  // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an
+  // online table it hosts, going
+  let prev = performance.now(), lastRaf = prev
+  const frame = (now, cap) => {
+    const dt = Math.min(cap, Math.max(0, (now - prev) / 1000)); prev = now
     p0.time += dt
     emit('frame', dt, p0.time)
     if (p0.autoRender) getRenderer().render(scene, camera)
-    next()
   }
-  next()
+  const loop = now => { lastRaf = performance.now(); frame(now, 0.1); requestAnimationFrame(loop) }
+  requestAnimationFrame(loop)
+  every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5) })
 }
 boot().catch(e => {
   console.error(e)

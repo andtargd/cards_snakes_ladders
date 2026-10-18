@@ -32,7 +32,7 @@ python -m http.server 8765
 
 Then visit <http://localhost:8765>.
 
-three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the game imports. Only PeerJS comes from a CDN, and only when a player goes online.
+three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the game imports. PeerJS (1.5.4) is in `vendor/peerjs/` and loads only when a player goes online. Nothing comes from a CDN.
 
 ## The CrazyGames build
 
@@ -50,19 +50,27 @@ To try the build the way the portal shows it, serve the project folder (`python 
 index.html          the web page (GitHub Pages entry)
 web/p0web.js        browser stand-in for the Project 0 runtime the game is written for
 web/net.js          online rooms: WebRTC through PeerJS, one player relays, host handover
+web/mq.js           the way round when WebRTC cannot connect: a small MQTT client for public brokers
+web/clock.js        a timer that keeps going in a background tab (heartbeats, a hosted table)
 web/online.js       the Play Online dialog
 web/platform.js     the site it runs on (GitHub Pages or CrazyGames) and the hooks a site's SDK answers
 vendor/three/       three.js and the addons the game uses
+vendor/peerjs/      PeerJS
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
   cards.config.js   the deck's names, texts, rarity, targets and numbers, for tuning
   board.config.js   where snakes and ladders may stand, for tuning
-tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews, the CrazyGames build
+tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews, the CrazyGames build,
+                    online tests (nettest.html: the network; onlinetest.html: three players through a whole game)
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page
 ```
 
 ## How online play works
 
-There is no game server: players connect to each other directly over WebRTC, using [PeerJS](https://peerjs.com) and its free public signalling and TURN servers. A room is a PeerJS id; the browser that holds it relays messages for everyone and hosts the game (runs the rules and the bots). If it leaves, the oldest remaining player takes the room over and the game goes on, with a bot in the leaver's seat. Quick Match uses a few shared rooms (`QM1`…`QM8`).
+There is no game server: players connect to each other directly over WebRTC, using [PeerJS](https://peerjs.com) and its free public signalling server. A room is a PeerJS id; the browser that holds it relays messages for everyone and hosts the game (runs the rules and the bots). If it leaves, the oldest remaining player takes the room over and the game goes on, with a bot in the leaver's seat. Quick Match uses a few shared rooms (`QM1`…`QM8` on GitHub Pages, `CG1`… on CrazyGames).
+
+Two browsers behind strict NATs (mobile internet, CGNAT, some Wi-Fi) cannot open a WebRTC channel without a TURN relay, and there is no free one that works (PeerJS's own `*.turn.peerjs.com` no longer resolve). So the room's holder also listens on two free public MQTT brokers (`broker.emqx.io`, `test.mosquitto.org`, see `web/mq.js`), and a player whose data channel has not opened in 2.5 s says hello there too; the relay answers the first hello and the player stays on that way. These are public test brokers, with no promises and no encryption beyond TLS to the broker. A TURN server of your own (a free Metered account, Cloudflare) can go into `ICE` in `web/net.js`.
+
+To test it: serve the folder (`python tools/server.py 5500`) and open `tools/nettest.html` (17 network scenarios: direct and broker joins, takeover, a vanished relay or player, reloads, Quick Match, rooms closing) and `tools/onlinetest.html` (three players in iframes through the dialog, the lobby, a whole game, a reload, the host leaving, a rematch). Both use the real servers; `?sid=` on `index.html` keeps several players apart in one tab, and `?ice=relay` (on `index.html` or `onlinetest.html`) blocks direct connections the way a strict NAT does, so everything goes through the brokers.
 
 The game was made for [Project 0](https://project0.city), where everyone in a lot can sit down together at the Shared Table; on the web an online room stands in for the lot.
