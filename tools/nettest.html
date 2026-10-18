@@ -283,6 +283,22 @@ S.S17 = ['The host\'s page does not answer: the join says so', async note => {
   return ms
 }]
 
+S.S18 = ['A quick table that is playing: back under a new id to the seat a bot keeps under your name; a stranger waits', async note => {
+  const A = player('A'), code = await A.net.quickMatch()
+  const B = player('B'); await B.net.join(code)
+  const bid = B.id
+  set(A, 'lob', { status: 'playing' })
+  B.net.unload(); all.delete(B)
+  await waitFor(() => !A.s.players.has(bid), 3000, 'B gone on unload')
+  // the game gave B's seat to a bot
+  set(A, 'g', { s: { pl: [{ id: A.id, n: 'A', b: 0 }, { id: bid, n: 'B', b: 2, rb: 1 }] } })
+  const e = await rejects(player('Z').net.join(code), 'deny', 'a stranger joining a quick table that is playing')
+  ok(e.why === 'playing', 'the stranger was told ' + e.why)
+  const B2 = player('B'); await B2.net.join(code) // the page was closed: a new id
+  ok(B2.id !== bid && A.s.players.has(B2.id), 'B did not come back')
+  note(`stranger: ${e.why}; B back as ${B2.id} (was ${bid})`)
+}]
+
 // ---------- run ----------
 const rows = document.getElementById('rows')
 window.results = []

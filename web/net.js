@@ -492,8 +492,10 @@ export class Net {
       const known = this.roster.get(m.id)
       if (m.id === this.s.me.id) return deny('taken')
       if (!known && this.roster.size >= (this.quick ? 6 : 12)) return deny('full')
-      // a player seated at the table may come back to a quick room that is playing (after a reload)
-      const seated = this.s.state.g?.s?.pl?.some?.(p => p && p.id === m.id)
+      // a player seated at the table may come back to a quick room that is playing: after a reload, or
+      // under a new id (the page was closed) to the seat a bot keeps under their name
+      const name = cleanName(m.name)
+      const seated = this.s.state.g?.s?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
       if (!known && !seated && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
       conn.helloN = m.n

@@ -209,7 +209,7 @@ class SharedTable {
     this.app.waiting = 0
     this.load(g, false)
   }
-  /** Host: a seated player left the session; a bot takes the seat with the same hand (until they come back). */
+  /** Host: a seated player left the session (or the game); a bot takes the seat with the same hand (until they are back and take it again). */
   replace(id) {
     const s = this.s
     const i = s.pl.findIndex(p => p.id === id && !p.b)
@@ -221,17 +221,36 @@ class SharedTable {
     s.seq++
     this.publish([{ e: 'log', text }])
   }
-  /** Host: a player whose seat a bot took came back (after reloading the page, say): the seat is theirs again. */
-  restore(id) {
-    const s = this.s
-    const p = s.pl.find(q => q.id === id && q.rb)
-    if (!p || s.ph === 'over') return
+  /**
+   * Seats a bot holds that player `id` may take back: their own; else, when they have none, those whose
+   * players have left the room (someone back under a new id after closing the page). None for a player
+   * who holds a seat.
+   */
+  claimable(id) {
+    const s = this.s, seats = s.pl.map((p, i) => i)
+    if (s.ph === 'over' || s.pl.some(p => p.id === id && !p.b)) return []
+    const own = seats.filter(i => s.pl[i].rb && s.pl[i].id === id)
+    return own.length ? own : seats.filter(i => s.pl[i].rb && s.pl[i].id !== this.p0.me.id && !this.p0.players.has(s.pl[i].id))
+  }
+  /** The seat this screen's player can take back from its bot (the one under their name first), or -1. */
+  myClaim() {
+    const list = this.claimable(this.p0.me.id), key = n => String(n || '').trim().toLowerCase()
+    return list.find(i => key(this.s.pl[i].n) === key(this.p0.me.name)) ?? list[0] ?? -1
+  }
+  /** Host: a player back at the table takes seat `i` from the bot that played it meanwhile (they press Continue Playing). */
+  takeBack(id, i) {
+    const s = this.s, p = s.pl[i]
+    if (!this.claimable(id).includes(i)) return false
+    const old = p.id
+    p.id = id
     p.b = 0
     delete p.rb
     const text = T.seatBack(p.n)
     s.log.push(text); if (s.log.length > 6) s.log.shift()
     s.seq++
     this.publish([{ e: 'log', text }])
+    this.app.keepLobbySeat(id, old)
+    return true
   }
   /** Host: seated players who are not in the session (the table was opened again after a reload) get a while to come back. */
   checkAbsent(dt) {
@@ -523,7 +542,7 @@ class App {
     this.p0.room.set('lob', lob)
     const g = { gid: seed, s: R.pack(s), ev: null }
     this.p0.room.set('g', g)
-    this.joinShared(g)
+    if (this.shared?.s.gid !== seed) this.joinShared(g) // (setting 'g' sits me down already when I am at the table)
   }
   joinShared(g) {
     if (this.table?.kind === 'solo') clearGame()
@@ -536,9 +555,11 @@ class App {
     this.screen = 'game'
     this.ui.dirty = true
   }
+  /** At the Shared Table: in its lobby, or at its game (playing, watching, or looking at the results). */
+  atTable() { return this.screen === 'lobby' || (this.screen === 'game' && this.table?.kind === 'shared') }
   onRoomState(key, value, from) {
     if (key === 'lob') {
-      if (value && value.status === 'playing' && (this.screen === 'lobby' || (this.screen === 'game' && this.table?.kind === 'shared'))) {
+      if (value && value.status === 'playing' && this.atTable()) {
         const g = this.p0.room.state.g
         if (g && g.gid === value.gid && (!this.shared || this.shared.s.gid !== value.gid)) this.joinShared(g)
       }
@@ -547,7 +568,8 @@ class App {
     }
     if (key === 'g' && value) {
       if (this.shared && this.shared.s.gid === value.gid) this.shared.onState(value, from)
-      else if (this.screen === 'lobby' && this.lobby().status === 'playing' && this.lobby().gid === value.gid) this.joinShared(value)
+      // a new game at the table (the first one, or the host's rematch while the last one's results are up): everyone at it moves on to it
+      else if (this.atTable() && this.lobby().status === 'playing' && this.lobby().gid === value.gid) this.joinShared(value)
     }
   }
   // ----- who is doing what in the lot, and invitations to the Shared Table -----
@@ -617,7 +639,38 @@ class App {
     if (m.t === 'act' && this.p0.room.isHost && this.shared && m.gid === this.shared.s.gid) this.shared.applyFrom(from, m.a)
     else if (m.t === 'err') { this.waiting = 0; this.ui.hidden = null; this.ui.say(String(m.text).slice(0, 60)) }
     else if (m.t === 'lob' && this.p0.room.isHost && m.cmd) this.handleLobby(from, m.cmd)
-    else if (m.t === 'leaveSeat' && this.p0.room.isHost && this.shared) this.shared.replace(from)
+    else if (m.t === 'leaveSeat' && this.p0.room.isHost) this.leftTable(from)
+    else if (m.t === 'claim' && this.p0.room.isHost && this.shared && m.gid === this.shared.s.gid) {
+      if (!this.shared.takeBack(from, m.i)) this.p0.room.sendTo(from, { t: 'err', text: T.seatNotFree })
+    }
+  }
+  /** Back at the Shared Table while a bot plays my seat: Continue Playing takes it back. */
+  takeSeatBack() {
+    const sh = this.shared, i = this.seatToTakeBack()
+    if (i < 0 || this.waiting > 0) return
+    if (this.p0.room.isHost) { sh.takeBack(this.p0.me.id, i); return }
+    this.p0.room.sendTo(this.p0.room.host, { t: 'claim', gid: sh.s.gid, i })
+    this.waiting = 2.5
+    this.ui.dirty = true
+  }
+  /** The seat I can take back from its bot at the Shared Table's game, or -1. */
+  seatToTakeBack() { return this.screen === 'game' && this.table?.kind === 'shared' && this.table === this.shared ? this.shared.myClaim() : -1 }
+  /** Host: a player went from the Shared Table's game to the menu: a bot plays their seat, and the next game goes without them. */
+  leftTable(id) {
+    this.shared?.replace(id)
+    const lob = this.lobby(), i = lob.seats.findIndex(s => s && !s.b && s.id === id)
+    if (i >= 0 && lob.status === 'playing') { lob.seats[i] = null; this.p0.room.set('lob', lob) }
+  }
+  /** Host: player `id` (who sat there as `old`) took their seat back: their seat in the lobby follows, so a rematch seats them. */
+  keepLobbySeat(id, old) {
+    const lob = this.lobby()
+    if (lob.seats.some(s => s && !s.b && s.id === id)) return
+    const k = lob.seats.findIndex(s => s && !s.b && s.id === old), free = lob.seats.findIndex(s => !s)
+    const seat = { id, n: (this.nameOf(id) || 'Player').slice(0, 14), b: 0 }
+    if (k >= 0) lob.seats[k] = seat
+    else if (free >= 0) lob.seats[free] = seat
+    else return
+    this.p0.room.set('lob', lob)
   }
   /** The web build joined an online room (sit down at its table) or left it. */
   onWebRoom(room, reason) {
@@ -742,6 +795,7 @@ export default async function start(p0) {
     if (app.screen !== 'game') return
     const s = app.view.state, me = app.mySeat()
     if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }
+    if ((e.code === 'Enter' || e.code === 'NumpadEnter') && app.seatToTakeBack() >= 0 && !app.menuOpen) { app.takeSeatBack(); return }
     const mine = s && me >= 0 && s.cur === me && s.ph === 'main'
     if (e.code === 'Space' && mine && !s.rolled && !R.choiceMax(s.pl[me].fx)) app.act({ t: 'roll' })
     else if (e.code === 'Space' && mine && s.rolled && !app.view.busy && !app.menuOpen) { if (app.ui.target) app.ui.cancelTarget(); app.act({ t: 'end' }) }
@@ -757,7 +811,7 @@ export default async function start(p0) {
   p0.room.on('state', (k, v, from) => app.onRoomState(k, v, from))
   p0.room.on('message', (m, from) => app.onMessage(m, from))
   p0.on('join', p => {
-    if (p && p0.room.isHost && app.shared) app.shared.restore(p.id)
+    // (a player back at the table whose seat a bot plays takes it back with Continue Playing, when they are ready)
     // tell the newcomer what I am doing, for their invite list
     if (p && p.id !== p0.me.id && app.statusSent) { try { p0.room.sendTo(p.id, { t: 'st', s: app.statusSent }) } catch { /* they ask again */ } }
     app.ui.dirty = true

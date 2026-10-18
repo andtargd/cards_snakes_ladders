@@ -192,12 +192,21 @@ step('Out of time: the host plays the turn for a player', async note => {
   ok(table('a').pl[bob].b === 0, 'Bob lost his seat')
   note('the host took the turn; Bob keeps his seat')
 })
-step('Bob reloads mid-game: a bot holds his seat, then it is his again', async note => {
+/** Presses Continue Playing on a screen that is back at the table while a bot plays its seat. */
+async function takeBack(k, seat, who) {
+  await waitFor(() => app(k).seatToTakeBack() === seat && app(k).ui.hits.some(h => h.key === 'takeback'), 8000, `Continue Playing on ${who}'s screen`)
+  app(k).ui.hits.find(h => h.key === 'takeback').action()
+}
+step('Bob reloads mid-game: a bot plays his seat until he presses Continue Playing', async note => {
   const bob = seatOf('b')
   F.b.contentWindow.location.reload()
   await waitFor(() => table('a').pl[bob].b > 0 && table('a').pl[bob].rb, 8000, 'a bot in Bob\'s seat')
   const t0 = Date.now()
-  await waitFor(() => W('b').__csl && app('b').shared && table('a').pl[bob].b === 0 && seatOf('b') === bob, 40000, 'Bob back in his seat')
+  await waitFor(() => W('b').__csl && app('b').shared?.s.gid === table('a').gid && app('b').p0.players.size === 3, 40000, 'Bob back at the table')
+  await sleep(2500)
+  ok(table('a').pl[bob].b > 0 && seatOf('b') < 0, 'the seat went back to Bob before he asked for it')
+  await takeBack('b', bob, 'Bob')
+  await waitFor(() => table('a').pl[bob].b === 0 && seatOf('b') === bob, 8000, 'Bob back in his seat')
   fast('b')
   await autoplay(['a', 'b', 'c'], () => false || table('a').seq > 0 && sig(table('a')) === sig(table('b')), 15000, 'Bob in step')
   note(`back in his seat ${Date.now() - t0} ms after the reload, by ${net('b').via}`)
@@ -218,31 +227,57 @@ step('The host closes the game: Bob takes the table over and it goes on', async 
   note(`Bob hosts ${ms} ms after Ann left; the game goes on`)
   return ms
 })
-step('Cid comes back with the code: the bot gives his seat back', async note => {
+step('Cid comes back with the code: Continue Playing gives him his seat back', async note => {
+  const cid = table('b').pl.findIndex(p => p.id === app('c').p0.me.id)
   W('c').__csl.p0.web.online()
   const d = dialog('c', 'Cid')
   d.getElementById('ol-code').value = code
   d.querySelector('.ol-join').requestSubmit()
   await waitFor(() => app('c').screen === 'game' && table('c')?.gid === table('b').gid, 20000, 'Cid at the table')
-  await waitFor(() => seatOf('c') >= 0 && table('b').pl[seatOf('c')].b === 0, 5000, 'Cid in his seat again')
+  ok(seatOf('c') < 0 && table('b').pl[cid].b > 0, 'the seat went back to Cid before he asked for it')
+  await takeBack('c', cid, 'Cid')
+  await waitFor(() => seatOf('c') === cid && table('b').pl[cid].b === 0, 8000, 'Cid in his seat again')
   fast('c')
   await autoplay(['b', 'c'], () => table('b').seq > 0 && sig(table('b')) === sig(table('c')), 20000, 'Cid in step')
   note(`seat back, by ${net('c').via}`)
 })
-step('The game plays to the end; the host starts a rematch', async note => {
-  const ms = await autoplay(['b', 'c'], () => table('b').ph === 'over', 240000, 'the end of the game')
-  await waitFor(() => table('c')?.ph === 'over', 8000, 'Cid sees the end')
+step('Cid closes the page and opens the link in a new one: a new id, his seat back by name', async note => {
+  const cid = seatOf('c'), oldId = app('c').p0.me.id
+  F.c.remove()
+  await waitFor(() => table('b').pl[cid].b > 0 && !app('b').p0.players.has(oldId), 30000, 'a bot in Cid\'s seat')
+  await open('d', 'Cid', '&room=' + code) // another page: a new player id, the same name
+  const d = doc('d')
+  ok(!d.querySelector('.ol').hidden && app('d').p0.me.id !== oldId, 'the link did not open the dialog, or the id is the same')
+  dialog('d', 'Cid')
+  d.querySelector('.ol-join').requestSubmit()
+  await waitFor(() => app('d').screen === 'game' && table('d')?.gid === table('b').gid, 20000, 'Cid at the table again')
+  await takeBack('d', cid, 'Cid')
+  await waitFor(() => seatOf('d') === cid && table('b').pl[cid].b === 0 && table('b').pl[cid].id === app('d').p0.me.id, 8000, 'Cid in his seat under the new id')
+  await waitFor(() => app('b').lobby().seats.some(s => s && s.id === app('d').p0.me.id), 4000, 'his seat for the rematch')
+  fast('d')
+  await autoplay(['b', 'd'], () => table('b').seq > 0 && sig(table('b')) === sig(table('d')), 20000, 'Cid in step')
+  note(`seat ${cid} back under id ${app('d').p0.me.id}, by ${net('d').via}`)
+})
+step('The game plays to the end; the rematch seats everyone and they all play', async note => {
+  const ms = await autoplay(['b', 'd'], () => table('b').ph === 'over', 240000, 'the end of the game')
+  await waitFor(() => table('d')?.ph === 'over', 8000, 'Cid sees the end')
   const gid = table('b').gid
   app('b').rematch()
-  await waitFor(() => table('b')?.gid !== gid && app('b').screen === 'game', 8000, 'a new game')
-  note(`ended after ${ms} ms (round ${R.clone(table('c') || {}).round ?? '?'}); rematch ${table('b').gid} with ${table('b').pl.length} players`)
+  await waitFor(() => ['b', 'd'].every(k => app(k).screen === 'game' && table(k)?.gid !== gid && table(k)?.gid === table('b').gid), 10000, 'the new game on both screens')
+  ok(seatOf('b') >= 0 && seatOf('d') >= 0, 'seats in the rematch: ' + ['b', 'd'].map(seatOf))
+  ok(table('b').pl.filter(p => !p.b).length === 2, 'players in the rematch: ' + table('b').pl.map(p => p.n + (p.b ? '(bot)' : '')))
+  fast('b'); fast('d')
+  const seq0 = table('b').seq, turns = new Set()
+  await autoplay(['b', 'd'], () => { const s = table('b'); if (!s.pl[s.cur].b) turns.add(s.cur); return turns.size >= 2 && s.seq >= seq0 + 6 || s.ph === 'over' }, 90000, 'both players taking turns in the rematch')
+  await agree(['b', 'd'])
+  note(`ended after ${ms} ms; rematch ${table('b').gid}: ${table('b').pl.map(p => p.n + (p.b ? ' (bot)' : '')).join(', ')}; both took turns`)
   return ms
 })
 step('Everyone leaves: the room is gone', async note => {
-  app('b').p0.web.leave(); app('c').p0.web.leave()
+  app('b').p0.web.leave(); app('d').p0.web.leave()
   await sleep(1500)
   let err = null
-  try { await net('c').join(code) } catch (e) { err = e }
+  try { await net('d').join(code) } catch (e) { err = e }
   ok(err?.type === 'not-found', 'joined, or ' + err?.type)
   note('not-found')
 })

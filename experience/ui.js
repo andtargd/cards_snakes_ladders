@@ -995,6 +995,21 @@ export class UI {
     }
     // log
     this.drawLog()
+    // back at the Shared Table while a bot plays my seat: the way to take it back
+    const back = app.seatToTakeBack()
+    if (back >= 0 && !app.menuOpen && !app.invite) this.drawTakeBack(s.pl[back])
+  }
+  /** At the bottom, where my hand goes once the seat is mine again: clear of the log and the dice tray. */
+  drawTakeBack(p) {
+    const W = this.W, H = this.H, u = this.u, app = this.app
+    const left = !this.narrow && this.logRect ? this.logRect.x + this.logRect.w + 10 * u : 10 * u
+    const right = this.narrow ? W - 10 * u : this.trayBox().x - 14 * u
+    const pw = Math.min(380 * u, right - left), ph = 108 * u
+    const x = THREE.MathUtils.clamp((W - pw) / 2, left, right - pw), y = H - ph - (this.narrow ? 12 * u : 46 * u)
+    const color = P.PLAYER_COLORS[p.c % 6]
+    this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.97)', stroke: color, lw: 3 })
+    this.text(T.botPlaysForYou, x + pw / 2, y + 27 * u, { size: 16, align: 'center', max: pw - 24 * u })
+    this.button('takeback', T.continuePlaying, x + 20 * u, y + 50 * u, pw - 40 * u, 44 * u, () => app.takeSeatBack(), { primary: true, color, disabled: app.waiting > 0, size: 18 })
   }
   /** The peeked hand stays until the end of the turn; I can put it away sooner, and then the turn ends after the roll as usual. */
   peekKey(s) { return s?.peek ? `${s.gid}:${s.turnNo}:${s.peek.tg}` : null }
