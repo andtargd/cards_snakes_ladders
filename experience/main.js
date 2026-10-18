@@ -14,6 +14,10 @@ const BOT_DELAY = 1.1
 const TURN_SECONDS = 45
 const INVITE_SECONDS = 45
 const ABSENT_SECONDS = 20 // a seated player missing from the session this long gets a bot in their seat
+// Quick Match (the web build's quick rooms): bots take the empty seats when no one else comes for a while
+const QUICK_WAIT = 25 // seconds from the first player sitting down
+const QUICK_MORE = 10 // someone sat down: at least this long to look round
+const QUICK_TABLE = 4 // players at the table the bots fill it up to
 const SETTINGS_KEY = 'csl-settings'
 const GAME_KEY = 'csl-game' // the game being played in this browser, so a reload carries on with it
 
@@ -161,6 +165,7 @@ class SharedTable {
     const s = R.unpack(g.s)
     s.gid = g.gid
     const fresh = !this.s || this.s.gid !== g.gid
+    const watched = !fresh && this.mySeat() < 0
     const ev = g.ev
     const nextSeq = this.s && !fresh && ev && s.seq === this.s.seq + 1
     this.s = s
@@ -170,6 +175,7 @@ class SharedTable {
       if (fresh) { this.app.ui.logLines = []; this.app.view.overview() }
       for (const l of (fresh ? s.log : [])) this.app.ui.log(l)
     } else this.app.view.play(ev, R.clone(s), { players: this.p0.players })
+    if (watched && this.mySeat() >= 0 && this.app.quick()) this.app.ui.say(T.quickSeated, 3)
     if (s.ph === 'over') this.app.gameOver(s, this.mySeat())
   }
   mySeat() { return this.s.pl.findIndex(p => !p.b && p.id === this.p0.me.id) }
@@ -330,6 +336,8 @@ function resolution(renderer, p0) {
 }
 
 const bytes = v => new TextEncoder().encode(JSON.stringify(v ?? null)).byteLength
+/** A Quick Match countdown for the lobby: `n` tells it from the one before (whoever hosts), `left` is in seconds. */
+const countdown = left => ({ n: Math.floor(Math.random() * 1e9), left: Math.round(left * 10) / 10 })
 function shuffle(a, seed) {
   const r = R.mulberry32(seed)
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
@@ -445,6 +453,9 @@ class App {
     this.sfx('draw', 0.4)
   }
   toMenu() {
+    // a Quick Match table is left with its room: the game goes on without me (a bot takes my seat), and
+    // no one there waits for a host who is in the menu (onWebRoom brings me here again, out of the room)
+    if (this.quick() && this.atTable()) { this.p0.web.leave(); return }
     if (this.table?.kind === 'solo') clearGame()
     if (this.table?.kind === 'shared') {
       if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.pruneSeats(lob); this.p0.room.set('lob', lob) }
@@ -506,7 +517,10 @@ class App {
     this.lobbyCmd({ t: 'sit' })
     this.ui.dirty = true
   }
-  leaveLobby() { this.lobbyCmd({ t: 'stand' }); this.screen = 'menu'; this.ui.dirty = true }
+  leaveLobby() {
+    if (this.quick()) { this.p0.web.leave(); return }
+    this.lobbyCmd({ t: 'stand' }); this.screen = 'menu'; this.ui.dirty = true
+  }
   lobbyCmd(cmd) {
     if (this.p0.room.isHost) this.handleLobby(this.p0.me.id, cmd)
     else this.p0.room.sendTo(this.p0.room.host, { t: 'lob', cmd })
@@ -517,8 +531,10 @@ class App {
     const host = from === this.p0.me.id
     const seated = lob.seats.findIndex(s => s && s.id === from && !s.b)
     const free = lob.seats.findIndex(s => !s)
-    if (cmd.t === 'sit' && seated < 0 && free >= 0) lob.seats[free] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
-    else if (cmd.t === 'stand' && seated >= 0) lob.seats[seated] = null
+    if (cmd.t === 'sit' && seated < 0 && free >= 0) {
+      lob.seats[free] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
+      if (this.quick() && lob.status === 'lobby') lob.wait = countdown(Math.max(this.quickLeft() ?? QUICK_WAIT, QUICK_MORE))
+    } else if (cmd.t === 'stand' && seated >= 0) lob.seats[seated] = null
     else if (!host) return
     else if (cmd.t === 'mode') lob.mode = cmd.mode
     else if (cmd.t === 'size' && R.SIZES.includes(cmd.size)) lob.size = cmd.size
@@ -538,7 +554,10 @@ class App {
     const seed = (Math.random() * 2 ** 31) >>> 0
     const s = R.createGame({ seed, mode: lob.mode, cells: lob.size || 100, players: seats.map(x => ({ n: x.n, b: x.b, id: x.id, c: x.c })) })
     s.gid = seed
+    // at a Quick Match table every bot keeps its seat for a player who comes during the game (seatNewcomer)
+    if (this.quick()) for (const p of s.pl) if (p.b) p.f = 1
     lob.status = 'playing'; lob.gid = seed
+    delete lob.wait
     this.p0.room.set('lob', lob)
     const g = { gid: seed, s: R.pack(s), ev: null }
     this.p0.room.set('g', g)
@@ -559,6 +578,9 @@ class App {
   atTable() { return this.screen === 'lobby' || (this.screen === 'game' && this.table?.kind === 'shared') }
   onRoomState(key, value, from) {
     if (key === 'lob') {
+      const w = value?.wait
+      if (!w) this.quickWait = null
+      else if (w.n !== this.quickWait?.n) this.quickWait = { n: w.n, at: this.p0.time + (+w.left || 0), len: +w.left || 1 }
       if (value && value.status === 'playing' && this.atTable()) {
         const g = this.p0.room.state.g
         if (g && g.gid === value.gid && (!this.shared || this.shared.s.gid !== value.gid)) this.joinShared(g)
@@ -709,6 +731,60 @@ class App {
     this.ui.dirty = true
   }
 
+  // ----- Quick Match (the web build's quick rooms; Project 0 has none) -----
+  /** In a Quick Match room: players who look for a game, and bots in the empty seats. */
+  quick() { return !!this.p0.web?.room?.quick }
+  /** Seconds before bots take the empty seats of the Quick Match table, or null when it does not wait. */
+  quickLeft() { return this.quickWait ? Math.max(0, this.quickWait.at - this.p0.time) : null }
+  /** Host of a Quick Match table in its lobby: the countdown runs while someone sits there, and at its end the game starts. */
+  quickTick() {
+    if (!this.quick() || !this.p0.room.isHost || this.screen !== 'lobby') return
+    const l = this.p0.room.state.lob
+    if (l && l.status !== 'lobby') return
+    const humans = !!l?.seats?.some(s => s && !s.b)
+    if (humans !== !!l?.wait) {
+      const lob = this.lobby()
+      if (humans) lob.wait = countdown(QUICK_WAIT); else delete lob.wait
+      this.p0.room.set('lob', lob)
+    } else if (humans && this.quickLeft() === 0) this.quickStart()
+  }
+  /** Host: bots take the empty seats of the Quick Match table (up to QUICK_TABLE players) and the game starts. */
+  quickStart() {
+    const lob = this.lobby()
+    if (!this.quick() || !this.p0.room.isHost || lob.status !== 'lobby') return
+    this.pruneSeats(lob)
+    if (!lob.seats.some(s => s && !s.b)) return
+    const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
+    for (let i = 0; i < lob.seats.length && lob.seats.filter(Boolean).length < QUICK_TABLE; i++) {
+      if (lob.seats[i]) continue
+      const n = BOT_NAMES.find(x => !used.has(x)) || 'Bot'
+      used.add(n)
+      lob.seats[i] = { id: null, n, b: 2 }
+    }
+    this.startShared(lob)
+  }
+  /**
+   * Host: a player who comes to a Quick Match table while its game is on takes a seat a bot keeps
+   * there (the one furthest on), under their own name, and keeps it for the rematch. A player with a
+   * seat of their own here takes it back with Continue Playing instead.
+   */
+  seatNewcomer(id) {
+    const sh = this.shared, s = sh?.s
+    if (!this.quick() || !this.p0.room.isHost || !s || s.ph === 'over' || id === this.p0.me.id || s.pl.some(p => p.id === id)) return
+    const kept = s.pl.map((p, i) => i).filter(i => s.pl[i].f && s.pl[i].b && !s.pl[i].d)
+    if (!kept.length) return
+    const p = s.pl[kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a))], bot = p.n
+    p.id = id; p.b = 0; p.n = (this.nameOf(id) || 'Player').slice(0, 14)
+    delete p.f
+    const text = T.takesSeat(p.n, bot)
+    s.log.push(text); if (s.log.length > 6) s.log.shift()
+    s.seq++
+    sh.publish([{ e: 'log', text }])
+    const lob = this.lobby()
+    lob.seats[p.c] = { id, n: p.n, b: 0 }
+    this.p0.room.set('lob', lob)
+  }
+
   /** Scores for the week's table: wins count, more and harder opponents, a bigger board and fewer rounds count more. */
   gameOver(s, me) {
     if (this.scored === s.gid || me < 0) return
@@ -735,6 +811,9 @@ class App {
     if (this.waiting > 0) { this.waiting -= dt; if (this.waiting <= 0) this.ui.dirty = true }
     if (this.invite && (this.invite.t -= dt) <= 0) { this.invite = null; this.ui.dirty = true }
     this.syncStatus()
+    this.quickTick()
+    const left = this.screen === 'lobby' ? this.quickLeft() : null
+    if (left != null && Math.ceil(left) !== this.quickShown) { this.quickShown = Math.ceil(left); this.ui.dirty = true }
     this.table?.update(dt)
     this.syncGameplay()
     const trayOn = this.view.trayVisible > 0
@@ -814,6 +893,8 @@ export default async function start(p0) {
     // (a player back at the table whose seat a bot plays takes it back with Continue Playing, when they are ready)
     // tell the newcomer what I am doing, for their invite list
     if (p && p.id !== p0.me.id && app.statusSent) { try { p0.room.sendTo(p.id, { t: 'st', s: app.statusSent }) } catch { /* they ask again */ } }
+    // a Quick Match game under way: a seat a bot keeps for them
+    if (p) app.seatNewcomer(p.id)
     app.ui.dirty = true
   })
   p0.on('leave', p => { app.onLeave(p); app.ui.dirty = true })

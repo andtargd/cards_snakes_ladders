@@ -10,8 +10,9 @@
 // whose data channel does not open in a few seconds says hello there too. The relay answers the
 // first hello it gets and the player stays on that way.
 //
-// Quick Match uses a few well-known rooms (QM1, QM2, ...): join the first one that is open,
-// or open a free one and wait; someone waiting alone in a higher one moves to a lower one.
+// Quick Match uses a few well-known rooms (QM1, QM2, ...; each site has a prefix of its own): join the
+// first one that is open, or open a free one and wait; someone waiting alone in a higher one moves to
+// a lower one. A quick room whose game is on is open while a bot there keeps a seat for a player.
 import { Brokers, topic } from './mq.js'
 import { every } from './clock.js'
 import { safeName } from './names.js'
@@ -132,7 +133,8 @@ export class Net {
   /** How this tab reaches the room: 'relay' (it holds it), 'rtc', 'mq:<broker>', or null. */
   get via() { return this.mode === 'relay' ? 'relay' : this.up ? (this.up.kind === 'mq' ? 'mq:' + this.up.broker.name : 'rtc') : null }
   info(fresh) { return { code: this.code, quick: this.quick, fresh: !!fresh } } // the link is the site's to give (p0web.js)
-  hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back } }
+  /** `q`: the site's quick rooms, so a quick room of another site turns the player away (an old page sends none: GitHub Pages' QM). */
+  hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back, q: this.QUICK } }
 
   // ---------- what p0.room calls ----------
   send(d, to) {
@@ -491,13 +493,17 @@ export class Net {
       if (prev && prev !== conn && m.n && prev.helloN === m.n) { try { conn.close() } catch { /* gone */ } return }
       const known = this.roster.get(m.id)
       if (m.id === this.s.me.id) return deny('taken')
+      // a code typed by hand may be another site's quick room: Quick Match players of two sites never meet
+      if (this.quick && String(m.q ?? 'QM') !== this.QUICK) return deny('other')
       if (!known && this.roster.size >= (this.quick ? 6 : 12)) return deny('full')
       // a player seated at the table may come back to a quick room that is playing: after a reload, or
-      // under a new id (the page was closed) to the seat a bot keeps under their name. A name is
-      // checked here too: a client may send anything, and a rude one gets its same stand-in every time
-      const name = safeName(m.name)
-      const seated = this.s.state.g?.s?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
-      if (!known && !seated && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
+      // under a new id (the page was closed) to the seat a bot keeps under their name; and a new player
+      // comes in while a bot that started the game keeps a seat for one (the game sits them down). A
+      // name is checked here too: a client may send anything, and a rude one gets its same stand-in every time
+      const name = safeName(m.name), g = this.s.state.g?.s
+      const seated = g?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
+      const kept = g?.ph !== 'over' && g?.pl?.some?.(p => p && p.f && p.b && !p.d)
+      if (!known && !seated && !kept && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
       conn.helloN = m.n
       // the new link first: closing the old one then drops no one
@@ -544,7 +550,8 @@ export class Net {
     if (this.merging || !(k > 1) || this.roster.size !== 1 || this.s.state.lob?.status === 'playing') return
     this.merging = true
     const gen = this.gen
-    const still = () => gen === this.gen && this.mode === 'relay' && this.roster.size === 1
+    // (a game with bots that started meanwhile keeps me here)
+    const still = () => gen === this.gen && this.mode === 'relay' && this.roster.size === 1 && this.s.state.lob?.status !== 'playing'
     try {
       this.mergeProbe ||= await this.openPeer()
       for (let j = 1; j < k && still(); j++) {

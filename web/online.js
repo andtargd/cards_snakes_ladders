@@ -9,7 +9,7 @@ const save = (k, v) => { try { localStorage.setItem(k, v) } catch { /* private m
 function messageFor(e) {
   switch (e?.type) {
     case 'not-found': return 'There is no room with this code. Check it, or create a new room.'
-    case 'deny': return e.why === 'full' ? 'That room is full.' : e.why === 'playing' ? 'That table has just started. Try again.' : 'Could not join that room.'
+    case 'deny': return e.why === 'full' ? 'That room is full.' : e.why === 'playing' ? 'That table has just started. Try again.' : e.why === 'other' ? 'That is a Quick Match table of another site. Use Quick Match here instead.' : 'Could not join that room.'
     case 'timeout': case 'closed': return 'The room did not answer. Its host should keep the game open on screen (on a phone too), then try again.'
     case 'unreachable': return 'Could not get through to the room from this network. Try another connection (Wi-Fi or mobile data), or without a VPN.'
     case 'busy': return 'All quick tables are busy right now. Create a room instead.'
@@ -47,7 +47,7 @@ export function onlineDialog({ net, me, links = () => true, siteName = () => nul
     </div>
     <p class="ol-as" hidden></p>
     <div class="ol-choices">
-      <div class="ol-choice"><button class="ol-btn ol-orange" type="button" data-act="quick">Quick Match</button><span>Sit down with players looking for a game</span></div>
+      <div class="ol-choice"><button class="ol-btn ol-orange" type="button" data-act="quick">Quick Match</button><span>Players looking for a game; bots take the empty seats</span></div>
       <div class="ol-choice"><button class="ol-btn ol-navy" type="button" data-act="create">Create a Room</button><span class="ol-create-sub"></span></div>
     </div>
     <div class="ol-or"><span>or join with a code</span></div>

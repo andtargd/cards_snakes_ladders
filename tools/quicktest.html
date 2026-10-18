@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quick Match: stage tests</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13.5px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p { margin: 0 0 10px; color: #5b544c; }
+  #frames { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  #frames figure { margin: 0; } #frames figcaption { font-weight: bold; }
+  iframe { width: 400px; height: 250px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
+  table { border-collapse: collapse; width: 100%; max-width: 1240px; background: #fffdf8; }
+  td, th { padding: 5px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<h1>Quick Match: stage tests</h1>
+<p>Four players, each a whole game in an iframe (<code>index.html?sid=…</code>), through the real Play Online dialog over
+  the real signalling server and brokers. Ann and Bob are one site, Cid and Dan another (crazygames): each site has quick
+  rooms of this run's own (<code>?quick=</code>), so real players are not met. Results in <code>window.results</code>;
+  <code>window.done</code> resolves at the end.</p>
+<div id="frames"></div>
+<table><thead><tr><th>#</th><th>Stage</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+// a game against bots saved here earlier would come back on every screen instead of the menu
+try { localStorage.removeItem('csl-game') } catch { /* no storage */ }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const ok = (v, what) => { if (!v) throw new Error(what) }
+async function waitFor(fn, ms, what) {
+  const t0 = Date.now()
+  for (;;) {
+    let v = false
+    try { v = fn() } catch { /* not yet */ }
+    if (v) return Date.now() - t0
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    await sleep(100)
+  }
+}
+
+// ---------- the players ----------
+// the two sites' quick rooms, this run's own: XA… for one, XB… for the other
+const tag = 'ABCDEFGHJKMNPRSTUVWXYZ'[Math.floor(Math.random() * 22)]
+const SITE = { pages: 'X' + tag + 'A', crazygames: 'X' + tag + 'B' }
+const box = document.getElementById('frames')
+const F = {}, NAME = {}
+function open(key, name, site) {
+  NAME[key] = name
+  const fig = document.createElement('figure'); fig.id = 'fig-' + key
+  fig.innerHTML = `<figcaption>${name} · ${site}</figcaption>`
+  box.appendChild(fig)
+  const f = document.createElement('iframe')
+  f.src = `../index.html?sid=${key}&name=${name}&quick=${SITE[site]}${site === 'pages' ? '' : '&platform=' + site}`
+  fig.appendChild(f)
+  F[key] = f
+  return waitFor(() => f.contentWindow.__csl && f.contentWindow.__cslNet && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false, 40000, name + ' loaded')
+}
+const W = k => F[k].contentWindow
+const app = k => W(k).__csl
+const net = k => W(k).__cslNet
+const doc = k => F[k].contentDocument
+const room = k => app(k).p0.web.room
+const table = k => app(k).shared?.s
+const seatOf = k => app(k).mySeat()
+const hit = (k, key) => app(k).ui.hits.find(h => h.key === key)
+/** Presses a button on screen `k` once it is drawn (the screen draws on its next frame). */
+async function press(k, key) { await waitFor(() => hit(k, key), 3000, `${key} on ${NAME[k]}'s screen`); hit(k, key).action() }
+const names = s => s.pl.map(p => p.n + (p.b ? (p.f ? ' (bot, keeps the seat)' : ' (bot)') : '')).join(', ')
+/** Play Online → Quick Match on screen `k`; resolves with the dialog's status line once it closes or fails. */
+async function quickMatch(k) {
+  app(k).p0.web.online()
+  const d = doc(k)
+  d.getElementById('ol-name').value = NAME[k] // the field shows the name the last test saved in this browser
+  d.querySelector('[data-act=quick]').click()
+  await waitFor(() => d.querySelector('.ol').hidden || d.querySelector('.ol-status.err')?.textContent, 40000, 'Quick Match on ' + k)
+  return d.querySelector('.ol-status').textContent
+}
+/** The countdown runs out within a second or two on the host's screen (it is 25 s). */
+const hurry = k => { app(k).quickWait.at = app(k).p0.time + 1.5 }
+
+const steps = []
+const step = (title, fn) => steps.push([title, fn])
+
+step('Four players load the game: Ann and Bob on one site, Cid and Dan on another', async note => {
+  await Promise.all([open('a', 'Ann', 'pages'), open('b', 'Bob', 'pages'), open('c', 'Cid', 'crazygames'), open('d', 'Dan', 'crazygames')])
+  ok(['a', 'b', 'c', 'd'].every(k => app(k).screen === 'menu'), 'not at the menu')
+  ok(app('a').p0.web.platform.quickPrefix === SITE.pages && app('c').p0.web.platform.quickPrefix === SITE.crazygames, 'quick prefixes')
+  note(`quick rooms ${SITE.pages}… and ${SITE.crazygames}…`)
+})
+step('Ann alone: a Quick Match table with a countdown and Start Now', async note => {
+  await quickMatch('a')
+  await waitFor(() => app('a').screen === 'lobby' && room('a')?.quick && app('a').quickLeft() != null, 5000, 'Ann in a quick lobby with a countdown')
+  ok(room('a').code === SITE.pages + '1', 'room ' + room('a').code)
+  const left = app('a').quickLeft()
+  ok(left > 18 && left <= 25, 'countdown ' + left)
+  await waitFor(() => hit('a', 'lstart') && !app('a').ui.hits.some(h => h.key === 'lstart' && h.disabled), 2000, 'Start Now on Ann\'s screen')
+  note(`room ${room('a').code}, ${left.toFixed(1)} s to go, Start Now there`)
+})
+step('Nobody comes: when the countdown ends, bots take the empty seats and the game starts', async note => {
+  hurry('a')
+  const ms = await waitFor(() => app('a').screen === 'game' && table('a')?.ph !== 'over', 8000, 'Ann at the game')
+  const s = table('a')
+  ok(s.pl.length === 4 && s.pl.filter(p => p.b && p.f).length === 3 && seatOf('a') >= 0, 'players: ' + names(s))
+  ok(app('a').lobby().status === 'playing' && !app('a').lobby().wait, 'the lobby still waits')
+  note(names(s))
+  return ms
+})
+step('Bob comes during the game: he takes the seat a bot kept, under his name', async note => {
+  const gid = table('a').gid
+  await quickMatch('b')
+  await waitFor(() => app('b').screen === 'game' && table('b')?.gid === gid && seatOf('b') >= 0, 15000, 'Bob seated at Ann\'s game')
+  const s = table('a'), bob = s.pl.findIndex(p => p.id === app('b').p0.me.id)
+  ok(room('b').code === room('a').code, 'Bob in ' + room('b').code)
+  ok(bob >= 0 && s.pl[bob].n === 'Bob' && !s.pl[bob].b && !s.pl[bob].f, 'Bob\'s seat: ' + JSON.stringify(s.pl[bob]))
+  ok(s.pl.filter(p => p.b && p.f).length === 2, 'bots keeping seats: ' + names(s))
+  ok(app('a').lobby().seats.some(x => x && x.id === app('b').p0.me.id), 'Bob has no seat for the rematch')
+  ok(s.log.some(l => l.includes('Bob joins')), 'no word of it in the log')
+  await waitFor(() => app('b').ui.toast?.text?.includes('kept this seat'), 4000, 'the toast on Bob\'s screen')
+  note(`${names(s)}; log: "${s.log.at(-1)}"`)
+})
+step('Cid on the other site: Quick Match never finds Ann\'s table; her room\'s code turns him away', async note => {
+  await quickMatch('c')
+  await waitFor(() => app('c').screen === 'lobby' && room('c')?.code, 5000, 'Cid in a lobby')
+  ok(room('c').code === SITE.crazygames + '1', 'Cid in ' + room('c').code)
+  ok(!app('a').p0.players.has(app('c').p0.me.id), 'Cid in Ann\'s room')
+  // Back from a Quick Match lobby leaves the room too; then Ann's quick room's code, by hand
+  await press('c', 'lback')
+  await waitFor(() => !room('c') && app('c').screen === 'menu', 3000, 'Cid out of his room')
+  app('c').p0.web.online()
+  const d = doc('c')
+  d.getElementById('ol-name').value = 'Cid'
+  d.getElementById('ol-code').value = room('a').code
+  d.querySelector('.ol-join').requestSubmit()
+  await waitFor(() => d.querySelector('.ol-status.err')?.textContent, 25000, 'an answer to the code')
+  const said = d.querySelector('.ol-status').textContent
+  ok(/another site/.test(said) && !room('c'), 'Cid got: ' + said)
+  ok(!app('a').p0.players.has(app('c').p0.me.id), 'Cid in Ann\'s room')
+  d.querySelector('.ol-x').click()
+  note(`Quick Match: ${SITE.crazygames}1, Back: out of it; ${room('a').code} by hand: "${said}"`)
+})
+step('Cid and Dan find each other: both seated, the same countdown, Start Now seats the bots', async note => {
+  await quickMatch('c')
+  await waitFor(() => app('c').screen === 'lobby' && room('c')?.code === SITE.crazygames + '1', 5000, 'Cid waiting again')
+  await sleep(4000) // a few seconds of his countdown gone
+  await quickMatch('d')
+  await waitFor(() => app('d').screen === 'lobby' && ['Cid', 'Dan'].every(n => app('c').lobby().seats.some(s => s && !s.b && s.n === n)), 15000, 'both seated')
+  await waitFor(() => app('d').quickLeft() != null, 3000, 'the countdown on Dan\'s screen')
+  const lc = app('c').quickLeft(), ld = app('d').quickLeft()
+  ok(lc >= 9 && Math.abs(lc - ld) < 1.5, `countdowns ${lc} and ${ld}`)
+  ok(room('d').code === room('c').code, 'Dan in ' + room('d').code)
+  const host = app('c').p0.room.isHost ? 'c' : 'd', guest = host === 'c' ? 'd' : 'c'
+  ok(!hit(guest, 'lstart'), 'Start Now on the guest\'s screen')
+  await press(host, 'lstart')
+  await waitFor(() => ['c', 'd'].every(k => app(k).screen === 'game' && seatOf(k) >= 0 && table(k)?.gid === table(host).gid), 8000, 'both at the game')
+  const s = table(host)
+  ok(s.pl.length === 4 && s.pl.filter(p => p.b && p.f).length === 2, 'players: ' + names(s))
+  note(`countdowns ${lc.toFixed(1)} / ${ld.toFixed(1)} s; ${names(s)}`)
+})
+step('Bob leaves Ann\'s table by the game menu: out of the room, a bot plays his seat', async note => {
+  const bob = seatOf('b')
+  app('b').openGameMenu()
+  await press('b', 'leave')
+  await waitFor(() => app('b').screen === 'menu' && !room('b'), 4000, 'Bob at the menu, out of the room')
+  await waitFor(() => table('a').pl[bob].b > 0 && !app('a').p0.players.has(app('b').p0.me.id), 6000, 'a bot in Bob\'s seat')
+  note(`seat ${bob}: ${table('a').pl[bob].n}, bot level ${table('a').pl[bob].b}`)
+})
+step('Bob comes back to his seat (Continue Playing); Ann, the host, leaves by Main Menu: Bob takes the table over', async note => {
+  const bob = table('a').pl.findIndex(p => p.id === app('b').p0.me.id)
+  await quickMatch('b')
+  // the seat at Ann's table is his own: its bot plays it until he presses Continue Playing
+  await waitFor(() => app('b').screen === 'game' && table('b')?.gid === table('a').gid && app('b').seatToTakeBack() === bob, 15000, 'Bob at Ann\'s table again, with Continue Playing')
+  await press('b', 'takeback')
+  await waitFor(() => seatOf('b') === bob && table('a').pl[bob].b === 0, 8000, 'Bob in his seat again')
+  app('a').openGameMenu()
+  await press('a', 'leave')
+  await waitFor(() => !room('a') && app('a').screen === 'menu', 4000, 'Ann out of the room')
+  await waitFor(() => app('b').p0.room.isHost && table('b')?.pl.every(p => p.id !== app('a').p0.me.id || p.b), 30000, 'Bob hosts, a bot in Ann\'s seat')
+  note(`Bob took seat ${bob} back; Ann left with the game menu, Bob hosts ${room('b').code}; ${names(table('b'))}`)
+})
+
+const rows = document.getElementById('rows')
+window.results = []
+window.done = (async () => {
+  let failed = false
+  for (const [i, [title, fn]] of steps.entries()) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${i + 1}</td><td>${title}</td><td class="run">${failed ? 'skipped' : 'running'}</td><td></td><td class="note"></td>`
+    rows.appendChild(tr)
+    if (failed) { window.results.push({ i: i + 1, title, ok: false, skipped: true }); continue }
+    const notes = [], t0 = Date.now(), r = { i: i + 1, title }
+    try {
+      const v = await fn(t => notes.push(t))
+      Object.assign(r, { ok: true, ms: typeof v === 'number' ? v : Date.now() - t0 })
+    } catch (e) { failed = true; Object.assign(r, { ok: false, ms: Date.now() - t0, error: String(e?.message || e) }); console.error(title, e) }
+    r.notes = notes.join('; ')
+    window.results.push(r)
+    tr.children[2].className = r.ok ? 'pass' : 'fail'
+    tr.children[2].textContent = r.ok ? 'pass' : 'FAIL'
+    tr.children[3].textContent = r.ms
+    tr.children[4].textContent = r.ok ? r.notes : r.error + (r.notes ? ' — ' + r.notes : '')
+  }
+  // everyone leaves: no test rooms stay behind
+  for (const k of Object.keys(F)) { try { app(k).p0.web.leave() } catch { /* gone */ } }
+  return window.results
+})()
+</script>
+</body>
+</html>

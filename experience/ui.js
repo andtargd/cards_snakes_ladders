@@ -740,7 +740,9 @@ export class UI {
     const pw = Math.min(W - 20 * u, 520 * u), ph = Math.min(H - 20 * u, 634 * u)
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.95)' })
-    this.text(T.sharedTable, W / 2, y + 30 * u, { size: 22, align: 'center' })
+    // Quick Match: the table waits a little for players, then bots take the empty seats (main.js quickTick)
+    const quick = app.quick(), left = quick ? app.quickLeft() : null
+    this.text(quick ? T.quickMatch : T.sharedTable, W / 2, y + 30 * u, { size: 22, align: 'center' })
     const room = this.p0.web?.room, hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
     this.text(room ? `${T.roomCode(room.code)} · ${hostLine}` : hostLine, W / 2, y + 56 * u, { size: 13, align: 'center', bold: false, color: '#5b544c' })
     const bx = x + 24 * u, bw = pw - 48 * u
@@ -757,7 +759,7 @@ export class UI {
       this.panel(bx, ry, bw, 38 * u, { fill: s ? '#ffffff' : 'rgba(255,255,255,0.5)', r: 10 })
       this.g.fillStyle = P.PLAYER_COLORS[i]
       this.g.beginPath(); this.g.arc(bx + 20 * u, ry + 19 * u, 9 * u, 0, Math.PI * 2); this.g.fill()
-      if (!s) { this.text(T.emptySeat, bx + 40 * u, ry + 19 * u, { size: 14, bold: false, color: '#9a948a' }); continue }
+      if (!s) { this.text(quick ? T.waitingSeat : T.emptySeat, bx + 40 * u, ry + 19 * u, { size: 14, bold: false, color: '#9a948a' }); continue }
       const label = s.b ? `${s.n} · ${['', 'Easy', 'Medium', 'Hard'][s.b]} bot` : s.n + (s.id === this.p0.me.id ? ` (${T.you})` : '')
       this.text(label, bx + 40 * u, ry + 19 * u, { size: 14.5, max: bw - 170 * u })
       if (isHost && s.b) {
@@ -778,9 +780,17 @@ export class UI {
     const humans = seats.filter(s => s && !s.b).length
     const can = isHost && n >= 2 && humans >= 1 && (lob.mode !== 'fool' || n >= 3)
     this.button('lback', T.back, bx, yy, 120 * u, 44 * u, () => app.leaveLobby(), { size: 15 })
-    if (isHost) this.button('lstart', T.startGame, bx + 130 * u, yy, bw - 130 * u, 44 * u, () => app.lobbyCmd({ t: 'start' }), { primary: true, disabled: !can, size: 18 })
-    else this.text(T.waitingHost, bx + 130 * u + (bw - 130 * u) / 2, yy + 22 * u, { size: 14, align: 'center', bold: false, color: '#5b544c' })
-    if (isHost && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, W / 2, yy + 58 * u, { size: 12, align: 'center', bold: false, color: '#d64545' })
+    // at a Quick Match table Start Now seats the bots at once
+    if (isHost && quick) this.button('lstart', T.startNow, bx + 130 * u, yy, bw - 130 * u, 44 * u, () => app.quickStart(), { primary: true, disabled: !humans, size: 18 })
+    else if (isHost) this.button('lstart', T.startGame, bx + 130 * u, yy, bw - 130 * u, 44 * u, () => app.lobbyCmd({ t: 'start' }), { primary: true, disabled: !can, size: 18 })
+    else this.text(left != null ? T.quickStartsIn(Math.ceil(left)) : T.waitingHost, bx + 130 * u + (bw - 130 * u) / 2, yy + 22 * u, { size: left != null ? 16 : 14, align: 'center', bold: left != null, color: left != null ? '#2d3a6b' : '#5b544c' })
+    if (left != null) {
+      if (isHost) this.text(T.quickWaiting(Math.ceil(left)), W / 2, yy + 62 * u, { size: 15, align: 'center', color: '#2d3a6b', max: bw })
+      // the time left as a bar that empties
+      const g = this.g, by = yy + (isHost ? 78 : 58) * u, bh = 6 * u, f = Math.min(1, Math.ceil(left) / Math.ceil(app.quickWait.len))
+      g.fillStyle = 'rgba(43,38,34,0.12)'; P.roundRect(g, bx, by, bw, bh, bh / 2); g.fill()
+      if (f > 0) { g.fillStyle = '#e8743b'; P.roundRect(g, bx, by, Math.max(bh, bw * f), bh, bh / 2); g.fill() }
+    } else if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, W / 2, yy + 58 * u, { size: 12, align: 'center', bold: false, color: '#d64545' })
   }
 
   /** The Shared Table's invite list: everyone in the lot who is not sitting here, and the city's invitation. */
