@@ -390,6 +390,7 @@ export class UI {
       }
       case 'offer': return this.offerRect || null
       case 'cell': { const p = this.app.view.cellScreen(tip.cell); return p ? { x: p.x - 12 * u, y: p.y - 14 * u, w: 24 * u, h: 22 * u } : null }
+      case 'el': { const p = this.app.view.elScreen(tip.el, tip.along); return p ? { x: p.x - 12 * u, y: p.y - 12 * u, w: 24 * u, h: 24 * u } : null }
     }
     return null
   }
@@ -401,11 +402,20 @@ export class UI {
   placeTip(r, w, h) {
     const u = this.u, W = this.W, H = this.H, M = 8 * u, L = 66 * Math.max(u, 0.8) // (room for the arrow)
     const clamp = THREE.MathUtils.clamp
+    // the bubble keeps clear of my piece (the camera does not move for it: it would jump as tips come and go)
+    const avoid = this.app.screen === 'game' ? this.app.view.pieceBox(this.app.mySeat()) : null
+    const free = (bx, by) => !avoid || bx >= avoid.x + avoid.w || bx + w <= avoid.x || by >= avoid.y + avoid.h || by + h <= avoid.y
+    const aside = (bx, by) => {
+      if (free(bx, by)) return bx
+      for (const x of [avoid.x - w - M, avoid.x + avoid.w + M]) { const sx = clamp(x, M, W - w - M); if (free(sx, by)) return sx }
+      return null
+    }
     if (!r) {
       // over the hand, and over a card lifted from it
       const tops = this.cards.filter(c => c.kind === 'hand' && c.tx != null).map(c => c.ty - c.ts * 0.7)
       const bottom = Math.min(this.narrow ? (this.trayTop ?? H - this.handHeight()) : H - this.handHeight(), ...tops) - 14 * u
-      return { bx: (W - w) / 2, by: clamp(bottom - h, M, H - h - M), d: null }
+      const by = clamp(bottom - h, M, H - h - M), bx = (W - w) / 2
+      return { bx: aside(bx, by) ?? bx, by, d: null }
     }
     const cx = r.x + r.w / 2, cy = r.y + r.h / 2
     const ways = [['up', cx, r.y, 0, -1], ['down', cx, r.y + r.h, 0, 1], ['left', r.x, cy, -1, 0], ['right', r.x + r.w, cy, 1, 0]]
@@ -416,7 +426,10 @@ export class UI {
       const fits = (!vx || (bx >= M && bx + w <= W - M)) && (!vy || (by >= M && by + h <= H - M))
       const p = { bx: clamp(bx, M, W - w - M), by: clamp(by, M, H - h - M), d, ax, ay, vx, vy }
       first ||= p
-      if (fits) return p
+      if (!fits) continue
+      // moved aside, it still stands over (or under) its arrow
+      const sx = aside(p.bx, p.by)
+      if (sx != null && (vx || Math.abs(ax - clamp(ax, sx, sx + w)) < 30 * u)) return { ...p, bx: sx }
     }
     return first
   }
@@ -435,10 +448,8 @@ export class UI {
     t.skip = null
     const show = t.op > 0.01 && t.cur
     t.bubble.visible = !!show; t.arrow.visible = false
-    if (!show) { t.capBox = null; return }
+    if (!show) return
     const p = this.placeTip(this.tipRect(t.cur), t.w, t.h)
-    // a bubble that stands still on the screen (not one by a cell, which moves with the camera): the camera keeps the pieces clear of it (cover)
-    t.capBox = t.cur.at === 'cell' ? null : { x: p.bx, y: p.by, w: t.w, h: t.h }
     const kick = Math.max(0, 1 - (this.time - t.kick) / 0.45)
     const shake = Math.sin((this.time - t.kick) * 38) * 7 * u * kick
     const pop = Math.min(1, (this.time - t.since) / 0.25), sc = 0.9 + 0.1 * (1 - Math.pow(1 - pop, 3))
@@ -1722,10 +1733,7 @@ export class UI {
     for (const r of this.rowRect) if (r) out.push(r)
     if (this.statusRect) out.push(this.statusRect)
     if (this.logRect) out.push(this.logRect)
-    if (this.tip?.capBox) out.push(this.tip.capBox)
-    // a tip pointing at a cell: the card lifted for it stays clear of that cell too
-    const lifted = this.tip?.cur?.at === 'cell' && this.tip.op > 0.5 && this.cards.find(c => c.kind === 'hand' && c.i === this.selected && c.tx != null)
-    if (lifted) out.push({ x: lifted.tx - lifted.ts / 2, y: lifted.ty - lifted.ts * 0.7, w: lifted.ts, h: lifted.ts * 1.4 })
+    // (the tips' bubbles are not cover: they keep clear of the pieces themselves, the camera would jump as they come and go)
     return out
   }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
@@ -1856,10 +1864,12 @@ export class UI {
     const n = hand.length
     const myTurn = s && me >= 0 && s.cur === me && s.ph !== 'over'
     const { cx, gap } = this.handLayout(n)
+    // while a First Match tip points at the board, the card chosen stays down in the hand: the board is to see
+    const down = ['cell', 'el'].includes(app.tut?.now?.at)
     hand.forEach((c, k) => {
       const x = cx + (k - (n - 1) / 2) * gap
       const hov = this.hover === 'card' + c.i
-      const sel = this.selected === c.i
+      const sel = this.selected === c.i && !down
       const lift = sel ? 0.5 : hov ? 0.32 : 0
       c.tx = x; c.ty = H - cw * 1.4 * 0.42 + 6 * u - lift * cw * 0.7
       c.ts = cw * (sel || hov ? 1.12 : 1)
@@ -1867,7 +1877,7 @@ export class UI {
       c.rot = (k - (n - 1) / 2) * -0.05 * (sel ? 0 : 1)
       const playable = myTurn && (s.ph === 'disc' || !whyNot(s, me, c.id))
       c.dim = myTurn && !playable && s.ph !== 'disc' ? 1 : 0
-      c.lift = sel ? 1 : hov ? 0.6 : 0
+      c.lift = sel || this.selected === c.i ? 1 : hov ? 0.6 : 0
       c.heat = myTurn && s.ph === 'disc' && !app.view.busy ? (hov ? 1 : 0.35) : 0
     })
     const peek = this.cards.filter(c => c.kind === 'peek')

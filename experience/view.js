@@ -932,13 +932,27 @@ export class View {
     return null
   }
 
-  /** The camera goes to cell c as it goes after a piece (a tip points there). */
+  /** A point share f of the way along snake or ladder i as it stands now (from where a piece steps on it), in the world, or null. */
+  elPoint(i, f = 0.5) { const path = this.elMeshes[i]?.userData.path; return path?.length ? path[Math.min(path.length - 1, Math.round((path.length - 1) * f))].clone() : null }
+  /** The camera goes to cell c (or to the middle of snake or ladder i) as it goes after a piece: a tip points there. */
   focusCell(c) { this.manual = 0; this.follow(G.cellPos(c).clone()) }
-  /** Where cell c is on the screen now (CSS px), or null when it is behind the camera. */
-  cellScreen(c) {
-    const v = G.cellPos(c).clone().project(this.p0.camera)
+  focusEl(i, f) { const p = this.elPoint(i, f); if (p) { this.manual = 0; this.follow(p) } }
+  /** Where a world point is on the screen now (CSS px), or null when it is behind the camera. */
+  screenOf(p) {
+    const v = p.clone().project(this.p0.camera)
     if (v.z > 1) return null
     return { x: (v.x + 1) / 2 * this.p0.width, y: (1 - v.y) / 2 * this.p0.height }
+  }
+  cellScreen(c) { return this.screenOf(G.cellPos(c)) }
+  elScreen(i, f) { const p = this.elPoint(i, f); return p ? this.screenOf(p) : null }
+  /** Where piece i stands on the screen, feet to head (CSS px), or null. */
+  pieceBox(i) {
+    const t = this.tokens[i]
+    if (!t?.group.visible) return null
+    const a = this.screenOf(t.group.position), b = this.screenOf(t.group.position.clone().add(new THREE.Vector3(0, 0.85, 0)))
+    if (!a || !b) return null
+    const r = Math.max(14, Math.abs(a.y - b.y) * 0.45)
+    return { x: Math.min(a.x, b.x) - r, y: b.y - r * 0.4, w: Math.abs(a.x - b.x) + r * 2, h: a.y - b.y + r * 0.9 }
   }
 
   /** Points the arrow at a player: for a moment (secs) or until cleared (pointAt(null)). */

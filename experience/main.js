@@ -629,8 +629,9 @@ class App {
     if (!this.table || this.screen !== 'game') return false
     // the First Match's forced tips let through only what they ask for
     if (this.tut && !this.tut.allowsAct(a)) { this.nudge(); return false }
+    const card = a.t === 'play' ? this.table.s?.pl[this.mySeat()]?.h[a.i] : null
     const ok = this.table.act(a)
-    if (ok) this.tut?.onAct(a)
+    if (ok) this.tut?.onAct(a, card)
     return ok
   }
 

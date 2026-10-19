@@ -139,17 +139,23 @@ export class Tutorial {
     }
     return null
   }
+  /** The ladder the player climbed, as an index of the elements now, or -1 (turned already, or gone). */
+  ladder(s) { return R.effectiveElements(s).findIndex(e => e[0] === 1 && e[1] === FIRST.from && e[2] === FIRST.to) }
   /** After the forced part: each tip of ONCE while it is first needed, else a nudge for a player who waits. */
   freeTip(s, me, busy, mine) {
-    const ui = this.app.ui, ready = mine && !busy
+    const app = this.app, ui = app.ui, ready = mine && !busy
+    // Ladder to Snake goes on the ladder the player climbed, the tip by that ladder
+    const el = mine && ui.target?.card === FIRST.next && !this.flipped ? this.ladder(s) : -1
+    if (el < 0) this.lookedEl = false
+    else if (!this.lookedEl) { this.lookedEl = true; app.view.focusEl(el, 0.35) }
     const need = {
       disc: ready && s.ph === 'disc',
       take: ready && s.ph === 'take',
       pick: ready && s.ph === 'pick',
-      target: mine && !!ui.target,
+      target: mine && !!ui.target && el < 0,
       anytime: ready && s.ph === 'main' && !s.rolled && !ui.target && this.caption <= 0,
     }
-    let tip = null
+    let tip = el >= 0 ? { key: 'flip', text: T.tipFlip, at: 'el', el, along: 0.5 } : null
     for (const k of Object.keys(ONCE)) {
       if (need[k] && this.once[k] !== 'done') { this.once[k] = 'on'; tip ||= { key: k, text: ONCE[k].text(), at: ONCE[k].at } }
       else if (!need[k] && this.once[k] === 'on') this.once[k] = 'done'
@@ -177,15 +183,21 @@ export class Tutorial {
     if (this.step === 'card') return a.t === 'play' && s?.pl[me]?.h[a.i] === FIRST.card && a.tg === FIRST.cell
     return true
   }
-  /** Where a card may go: Swamp on cell 1 only while that is the tip. */
+  /** Where a card may go: Swamp on cell 1 only while that is the tip, the first Ladder to Snake on the ladder the player climbed. */
   targets(cardId, list) {
-    return this.forced && this.step === 'card' && cardId === FIRST.card && list.includes(FIRST.cell) ? [FIRST.cell] : list
+    if (this.forced && this.step === 'card' && cardId === FIRST.card && list.includes(FIRST.cell)) return [FIRST.cell]
+    if (!this.off && this.step === 'free' && cardId === FIRST.next && !this.flipped) {
+      const s = this.app.view.state, el = s ? this.ladder(s) : -1
+      if (list.includes(el)) return [el]
+    }
+    return list
   }
 
   // ----- what happens -----
-  /** The rules took an action of this screen's player. */
-  onAct(a) {
+  /** The rules took an action of this screen's player (`card`: the card it played). */
+  onAct(a, card) {
     this.idle = 0
+    if (card === FIRST.next) this.flipped = true
     if (this.off) return
     if (this.step === 'roll' && a.t === 'roll') this.step = 'climb'
     else if (this.step === 'card' && a.t === 'play') this.step = 'bots'

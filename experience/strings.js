@@ -19,6 +19,7 @@ export const T = {
   tipCell: 'Players start here. Trap them!',
   tipStuck: 'Both players stuck!',
   tipAnyTime: 'You can play a card before or after rolling',
+  tipFlip: "Turn your ladder into a snake: the bots can't climb it",
   tipDiscard: 'You keep 3 cards: burn the one you need least',
   tipTake: 'Keep one card: the others burn',
   tipPick: 'Two dice: you move by the one you click',
