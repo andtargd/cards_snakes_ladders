@@ -114,10 +114,12 @@ step('Three players load the game', async note => {
 })
 step('Ann creates a room on the Online screen', async note => {
   online('a', 'Ann')
+  Object.assign(app('a').online, { mode: 'champion', size: 100 }) // a new room starts with the Online screen's mode and board
   await press('a', 'olcreate')
   const ms = await waitFor(() => app('a').p0.web.room?.code && !app('a').p0.web.status, 15000, 'a room, and nothing more about it on screen')
   code = app('a').p0.web.room.code
   await waitFor(() => app('a').screen === 'lobby' && app('a').lobby().seats[0]?.n === 'Ann', 3000, 'Ann seated in the lobby')
+  ok(app('a').lobby().mode === 'champion' && app('a').lobby().size === 100, 'the new table: ' + JSON.stringify(app('a').lobby()))
   note(`room ${code} in ${ms} ms, link ${app('a').p0.web.room.link}`)
   return ms
 })

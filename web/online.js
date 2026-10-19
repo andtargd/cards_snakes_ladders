@@ -72,7 +72,7 @@ export function onlineControl({ net, me, siteName = () => null, changed = () => 
     get invited() { return invited },
     /** A room's link brought the player: the Online screen shows its code to join. */
     invite(code) { invited = cleanCode(code) || null; changed() },
-    quick: mode => go('quick', 'Looking for a table…', () => net.quickMatch(mode)),
+    quick: (mode, size) => go('quick', 'Looking for a table…', () => net.quickMatch(mode, size)),
     create: () => go('create', 'Opening a room…', () => net.create()),
     join(code) {
       code = cleanCode(code)

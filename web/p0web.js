@@ -141,13 +141,13 @@ const web = {
   platform, // the site this runs on (web/platform.js)
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
-  room: null, // { code, quick, mode, link } while in an online room; link is null where only the code is shared
+  room: null, // { code, quick, mode, size, link } while in an online room (mode and size: a quick table's); link is null where only the code is shared
   get links() { return roomLinks() }, // whether rooms get links here (else only codes)
   // the game's Online screen: how an attempt goes (null | { busy } | { error, detail, kind }), and a room's link that brought the player
   get status() { return online.status },
   get invited() { return online.invited },
   onChange(fn) { watchers.add(fn) },
-  quickMatch(mode) { return online.quick(mode) },
+  quickMatch(mode, size) { return online.quick(mode, size) },
   createRoom() { return online.create() },
   joinRoom(code) { return online.join(code) },
   cancel() { online.cancel() },

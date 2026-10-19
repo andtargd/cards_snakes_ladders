@@ -6,7 +6,7 @@ const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n 
 export const T = {
   tagline: 'Roll, play a card, climb the paper tiers to the last cell.',
   // the main menu: Quick Match, then Solo Play, Pass & Play and Online
-  quickMatchSub: mode => `${mode} · find players online`,
+  quickMatchSub: (mode, size) => `${mode} · ${size} cells · find players online`,
   quickGame: 'Quick Game', // Project 0: no online play, a game against bots at once
   quickGameSub: 'One click: you against the bots',
   soloPlay: 'Solo Play',
@@ -27,7 +27,7 @@ export const T = {
   // the Online screen (the web build)
   yourName: 'Your name',
   playingAs: name => `Playing as ${name}`,
-  quickTable: 'Players looking for a game sit down together, up to 4 at a table.',
+  quickTable: n => `Players looking for the same game sit down together, up to ${n} at a table.`,
   createRoom: 'Create a Room',
   createSub: links => (links ? 'Get a code and a link for friends' : 'Get a room code for friends'),
   orJoin: 'or join with a code',
@@ -100,6 +100,7 @@ export const T = {
   startNow: 'Start Now',
   waitingSeat: 'Waiting for a player…',
   quickWaiting: n => `Looking for players · the game starts in ${n} s`,
+  quickSwitch: 'Another mode or board: you look for another table.',
   quickStartsIn: n => (n > 0 ? `The game starts in ${n} s` : 'The game is starting…'),
   takesSeat: (name, old) => `${old} left: ${name} takes the seat`,
   quickSeated: 'You join a game under way: play on!',

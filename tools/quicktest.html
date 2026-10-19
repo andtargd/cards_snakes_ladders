@@ -69,11 +69,11 @@ const hit = (k, key) => app(k).ui.hits.find(h => h.key === key)
 /** Presses a button on screen `k` once it is drawn (the screen draws on its next frame). */
 async function press(k, key) { await waitFor(() => hit(k, key), 3000, `${key} on ${NAME[k]}'s screen`); hit(k, key).action() }
 const names = s => s.pl.map(p => p.n + (p.b ? (p.f ? ' (bot, keeps the seat)' : ' (bot)') : '')).join(', ')
-/** The main menu's Quick Match on screen `k` (for `mode`); resolves with what went wrong, or '' once at a table. */
-async function quickMatch(k, mode = 'champion') {
+/** The main menu's Quick Match on screen `k` (for `mode` on `size` cells); resolves with what went wrong, or '' once at a table. */
+async function quickMatch(k, mode = 'champion', size = 50) {
   const a = app(k), web = a.p0.web
   web.setName(NAME[k]) // else the name the last test saved in this browser
-  a.online.mode = mode
+  Object.assign(a.online, { mode, size })
   a.toScreen('menu')
   await press(k, 'quick')
   await waitFor(() => !web.status || web.status.error, 40000, 'Quick Match on ' + k)
@@ -94,11 +94,11 @@ step('Four players load the game: Ann and Bob on one site, Cid and Dan on anothe
 step('Ann alone: a Quick Match table with a countdown and Start Now', async note => {
   await quickMatch('a')
   await waitFor(() => app('a').screen === 'lobby' && room('a')?.quick && app('a').quickLeft() != null, 5000, 'Ann in a quick lobby with a countdown')
-  ok(room('a').code === SITE.pages + '1', 'room ' + room('a').code)
+  ok(room('a').code === SITE.pages + 'C1', 'room ' + room('a').code)
   const left = app('a').quickLeft()
   ok(left > 18 && left <= 25, 'countdown ' + left)
   await waitFor(() => hit('a', 'lstart'), 2000, 'Start Now on Ann\'s screen')
-  ok(room('a').mode === 'champion' && app('a').lobby().mode === 'champion', 'the table\'s mode')
+  ok(room('a').mode === 'champion' && room('a').size === 50 && app('a').lobby().mode === 'champion' && app('a').lobby().size === 50, 'the table\'s mode and board')
   note(`room ${room('a').code}, ${left.toFixed(1)} s to go, Start Now there`)
 })
 step('Meanwhile bots sit down one by one, under names like the players\' own', async note => {
@@ -133,7 +133,7 @@ step('Bob comes during the game: he takes the seat a bot kept, under his name', 
 step('Cid on the other site: Quick Match never finds Ann\'s table; her room\'s code turns him away', async note => {
   await quickMatch('c')
   await waitFor(() => app('c').screen === 'lobby' && room('c')?.code, 5000, 'Cid in a lobby')
-  ok(room('c').code === SITE.crazygames + '1', 'Cid in ' + room('c').code)
+  ok(room('c').code === SITE.crazygames + 'C1', 'Cid in ' + room('c').code)
   ok(!app('a').p0.players.has(app('c').p0.me.id), 'Cid in Ann\'s room')
   // Back from a Quick Match lobby leaves the room too; then Ann's quick room's code, by hand
   await press('c', 'back')
@@ -148,11 +148,11 @@ step('Cid on the other site: Quick Match never finds Ann\'s table; her room\'s c
   ok(!app('a').p0.players.has(app('c').p0.me.id), 'Cid in Ann\'s room')
   await press('c', 'olok')
   ok(!web.status, 'the message is still up')
-  note(`Quick Match: ${SITE.crazygames}1, Back: out of it; ${room('a').code} by hand: "${said}"`)
+  note(`Quick Match: ${SITE.crazygames}C1, Back: out of it; ${room('a').code} by hand: "${said}"`)
 })
 step('Cid and Dan find each other: both seated, the same countdown, Start Now seats the bots', async note => {
   await quickMatch('c')
-  await waitFor(() => app('c').screen === 'lobby' && room('c')?.code === SITE.crazygames + '1', 5000, 'Cid waiting again')
+  await waitFor(() => app('c').screen === 'lobby' && room('c')?.code === SITE.crazygames + 'C1', 5000, 'Cid waiting again')
   await sleep(4000) // a few seconds of his countdown gone
   await quickMatch('d')
   await waitFor(() => app('d').screen === 'lobby' && ['Cid', 'Dan'].every(n => app('c').lobby().seats.some(s => s && !s.b && s.n === n)), 15000, 'both seated')
@@ -189,15 +189,25 @@ step('Bob comes back to his seat (Continue Playing); Ann, the host, leaves by Ma
   await waitFor(() => app('b').p0.room.isHost && table('b')?.pl.every(p => p.id !== app('a').p0.me.id || p.b), 30000, 'Bob hosts, a bot in Ann\'s seat')
   note(`Bob took seat ${bob} back; Ann left with the game menu, Bob hosts ${room('b').code}; ${names(table('b'))}`)
 })
-step('Dan looks for a Fool table: one of its own, playing Fool', async note => {
+step('Dan looks for Fool on 100 cells: a table of its own', async note => {
   app('d').openGameMenu()
   await press('d', 'leave')
   await waitFor(() => app('d').screen === 'menu' && !room('d'), 4000, 'Dan at the menu, out of the room')
-  await quickMatch('d', 'fool')
+  await quickMatch('d', 'fool', 100)
   await waitFor(() => app('d').screen === 'lobby' && room('d')?.quick, 5000, 'Dan in a quick lobby')
-  ok(room('d').code === SITE.crazygames + 'F1' && room('d').mode === 'fool', 'Dan in ' + room('d').code)
-  await waitFor(() => app('d').lobby().mode === 'fool' && app('d').lobby().seats.some(s => s && s.n === 'Dan'), 3000, 'a Fool table with Dan at it')
-  note(`room ${room('d').code}, ${app('d').lobby().mode}`)
+  ok(room('d').code === SITE.crazygames + 'H1' && room('d').mode === 'fool' && room('d').size === 100, 'Dan in ' + room('d').code)
+  await waitFor(() => app('d').lobby().mode === 'fool' && app('d').lobby().size === 100 && app('d').lobby().seats.some(s => s && s.n === 'Dan'), 3000, 'a Fool table on 100 cells with Dan at it')
+  note(`room ${room('d').code}: ${app('d').lobby().mode}, ${app('d').lobby().size} cells`)
+})
+step('In the lobby Dan picks Champion: another table, where four bots fill the 100 cells', async note => {
+  await press('d', 'modechampion')
+  await waitFor(() => app('d').screen === 'lobby' && room('d')?.code === SITE.crazygames + '1' && app('d').quickLeft() != null, 15000, 'Dan at a Champion table')
+  ok(app('d').online.mode === 'champion' && app('d').online.size === 100 && app('d').lobby().size === 100, 'the table: ' + JSON.stringify(app('d').lobby()))
+  hurry('d')
+  await waitFor(() => app('d').screen === 'game' && table('d')?.ph !== 'over', 8000, 'Dan at the game')
+  const s = table('d')
+  ok(s.n === 100 && s.pl.length === 5 && s.pl.filter(p => p.b && p.f).length === 4, 'players: ' + names(s))
+  note(`room ${room('d').code}; ${names(s)}`)
 })
 
 const rows = document.getElementById('rows')
