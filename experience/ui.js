@@ -127,6 +127,7 @@ export class UI {
     this.resize()
     this.makeBanner()
     this.makeTrayFrame()
+    this.makeTip()
   }
 
   // ---------- canvas layer ----------
@@ -315,6 +316,167 @@ export class UI {
     return this.narrow ? (this.panelBottom || 0) + 50 * u : 72 * u
   }
 
+  // ---------- the First Match's tips: a paper bubble with a line, an arrow at what to click, a veil round it ----------
+  makeTip() {
+    const mesh = order => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false, opacity: 0 }))
+      m.renderOrder = order // over the windows and the dice tray
+      m.visible = false
+      this.scene.add(m)
+      return m
+    }
+    const bubble = mesh(62), arrow = mesh(63)
+    // the arrow, orange on a white edge, points down; the mesh turns it
+    const { c, g } = P.canvas(96, 120)
+    g.beginPath()
+    g.moveTo(48, 112); g.lineTo(90, 62); g.lineTo(64, 62); g.lineTo(64, 8); g.lineTo(32, 8); g.lineTo(32, 62); g.lineTo(6, 62); g.closePath()
+    g.lineJoin = 'round'; g.lineWidth = 10; g.strokeStyle = '#ffffff'; g.stroke()
+    g.fillStyle = '#e8743b'; g.fill()
+    arrow.material.map = P.texture(c)
+    this.tip = { bubble, arrow, key: null, cur: null, op: 0, w: 1, h: 1, since: 0, kick: -9, tex: null, skipAt: null, skip: null }
+  }
+  /** A click the tip did not let through: the bubble shakes. */
+  kickTip() {
+    if (this.time - this.tip.kick > 0.3) this.app.playSound('tick', 0.35)
+    this.tip.kick = this.time
+  }
+  /** The bubble's picture for a tip: its line, and Skip tutorial quietly under it. */
+  drawTipBubble(tip) {
+    const t = this.tip, u = Math.max(this.u, 0.92), k = 2 // (its smallest line stays about 12 px on a small screen)
+    const font = this.font(17 * u), small = this.font(13 * u, false)
+    const m = (this.tipMeasure ||= P.canvas(4, 4).g)
+    m.font = font
+    const lines = P.wrapText(m, tip.text, Math.min(320 * u, this.W - 40 * u) - 36 * u)
+    const tw = Math.max(...lines.map(l => m.measureText(l).width))
+    m.font = small
+    const sw = m.measureText(T.skipTutorial).width
+    const lh = 23 * u, w = Math.ceil(Math.max(tw + 40 * u, sw + 44 * u, 150 * u)), h = Math.ceil(16 * u + lines.length * lh + 34 * u)
+    const { c, g } = P.canvas(Math.round(w * k), Math.round(h * k))
+    g.scale(k, k)
+    const bw = w - 6 * u, bh = h - 6 * u
+    g.fillStyle = 'rgba(60,45,30,0.2)'; P.roundRect(g, 4 * u, 5 * u, bw, bh, 14 * u); g.fill()
+    g.fillStyle = '#fffdf8'; P.roundRect(g, 1.5 * u, 1.5 * u, bw, bh, 14 * u); g.fill()
+    g.strokeStyle = '#e8743b'; g.lineWidth = 3 * u; g.stroke()
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#2d3a6b'; g.font = font
+    lines.forEach((l, i) => g.fillText(l, 1.5 * u + bw / 2, 14 * u + lh * (i + 0.5)))
+    const sx = w - 20 * u, sy = 14 * u + lines.length * lh + 15 * u
+    g.font = small; g.fillStyle = '#7a7268'; g.textAlign = 'right'
+    g.fillText(T.skipTutorial, sx, sy)
+    g.fillRect(sx - sw, sy + 8 * u, sw, Math.max(1, u))
+    t.tex?.dispose()
+    t.tex = P.texture(c)
+    t.tex.generateMipmaps = false; t.tex.minFilter = THREE.LinearFilter
+    t.bubble.material.map = t.tex; t.bubble.material.needsUpdate = true
+    t.w = w; t.h = h
+    t.skipAt = { x: sx - sw - 12 * u, y: sy, w: sw + 24 * u } // in the bubble, around the line it stands on
+  }
+  /** What a tip points at, as a rectangle on the screen, or null (a line on its own, or nothing there now). */
+  tipRect(tip) {
+    const u = this.u
+    const ofCard = c => ({ x: c.tx - c.ts / 2, y: c.ty - c.ts * 0.7, w: c.ts, h: c.ts * 1.4 })
+    switch (tip.at) {
+      case 'hero': return this.heroRect || null
+      case 'tray': {
+        // with its label: under it, or over it on a phone
+        const r = this.trayRect, lab = 34 * u
+        return r ? { x: r.x - 8 * u, y: r.y - 8 * u - (this.narrow ? lab : 0), w: r.w + 16 * u, h: r.h + 16 * u + lab } : null
+      }
+      case 'card': { const c = this.cards.find(k => k.kind === 'hand' && k.id === tip.card); return c && c.tx != null ? ofCard(c) : null }
+      case 'hand': {
+        const hand = this.cards.filter(k => k.kind === 'hand' && k.tx != null).map(ofCard)
+        if (!hand.length) return null
+        const x0 = Math.min(...hand.map(r => r.x)), x1 = Math.max(...hand.map(r => r.x + r.w)), y0 = Math.min(...hand.map(r => r.y))
+        return { x: x0, y: y0, w: x1 - x0, h: this.H - y0 }
+      }
+      case 'offer': return this.offerRect || null
+      case 'cell': { const p = this.app.view.cellScreen(tip.cell); return p ? { x: p.x - 12 * u, y: p.y - 14 * u, w: 24 * u, h: 22 * u } : null }
+    }
+    return null
+  }
+  /**
+   * Where the bubble goes for a target rectangle r: above it, else under, left or right of it, with the arrow
+   * between ({ bx, by } its corner; d, the anchor ax, ay and the way vx, vy from the target to the bubble).
+   * Without a target, a line on its own stands over the hand.
+   */
+  placeTip(r, w, h) {
+    const u = this.u, W = this.W, H = this.H, M = 8 * u, L = 66 * Math.max(u, 0.8) // (room for the arrow)
+    const clamp = THREE.MathUtils.clamp
+    if (!r) {
+      // over the hand, and over a card lifted from it
+      const tops = this.cards.filter(c => c.kind === 'hand' && c.tx != null).map(c => c.ty - c.ts * 0.7)
+      const bottom = Math.min(this.narrow ? (this.trayTop ?? H - this.handHeight()) : H - this.handHeight(), ...tops) - 14 * u
+      return { bx: (W - w) / 2, by: clamp(bottom - h, M, H - h - M), d: null }
+    }
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2
+    const ways = [['up', cx, r.y, 0, -1], ['down', cx, r.y + r.h, 0, 1], ['left', r.x, cy, -1, 0], ['right', r.x + r.w, cy, 1, 0]]
+    let first = null
+    for (const [d, ax, ay, vx, vy] of ways) {
+      const bx = vx ? (vx < 0 ? ax - L - w : ax + L) : ax - w / 2
+      const by = vy ? (vy < 0 ? ay - L - h : ay + L) : ay - h / 2
+      const fits = (!vx || (bx >= M && bx + w <= W - M)) && (!vy || (by >= M && by + h <= H - M))
+      const p = { bx: clamp(bx, M, W - w - M), by: clamp(by, M, H - h - M), d, ax, ay, vx, vy }
+      first ||= p
+      if (fits) return p
+    }
+    return first
+  }
+  /** Every frame: the tip of the moment fades in or out, the bubble by what it points at, the arrow bobbing. */
+  updateTip(dt) {
+    const t = this.tip, u = this.u, H = this.H
+    const tip = this.app.tipNow?.() || null
+    const key = tip ? `${tip.key}|${tip.text}|${u}|${this.W}` : null
+    if (key !== t.key) {
+      if (tip) { this.drawTipBubble(tip); t.since = this.time }
+      t.key = key
+      this.dirty = true // the veil and Skip tutorial's place
+    }
+    if (tip) t.cur = tip
+    t.op += ((tip ? 1 : 0) - t.op) * (1 - Math.exp(-(tip ? 10 : 14) * dt))
+    t.skip = null
+    const show = t.op > 0.01 && t.cur
+    t.bubble.visible = !!show; t.arrow.visible = false
+    if (!show) { t.capBox = null; return }
+    const p = this.placeTip(this.tipRect(t.cur), t.w, t.h)
+    // a bubble that stands still on the screen (not one by a cell, which moves with the camera): the camera keeps the pieces clear of it (cover)
+    t.capBox = t.cur.at === 'cell' ? null : { x: p.bx, y: p.by, w: t.w, h: t.h }
+    const kick = Math.max(0, 1 - (this.time - t.kick) / 0.45)
+    const shake = Math.sin((this.time - t.kick) * 38) * 7 * u * kick
+    const pop = Math.min(1, (this.time - t.since) / 0.25), sc = 0.9 + 0.1 * (1 - Math.pow(1 - pop, 3))
+    t.bubble.position.set(p.bx + t.w / 2 + shake, H - (p.by + t.h / 2), 62)
+    t.bubble.scale.set(t.w * sc, t.h * sc, 1)
+    t.bubble.material.opacity = t.op
+    if (tip) { const hh = Math.max(40, 30 * u); t.skip = { x: p.bx + t.skipAt.x, y: p.by + t.skipAt.y - hh / 2, w: t.skipAt.w, h: hh } }
+    if (p.d) {
+      const au = Math.max(u, 0.8), aw = 34 * au, ah = 42 * au, gap = 6 * u + Math.abs(Math.sin(this.time * 5)) * 8 * u
+      // the point of the arrow by the target, the arrow towards the bubble
+      const x = p.ax + p.vx * (gap + ah / 2), y = p.ay + p.vy * (gap + ah / 2)
+      t.arrow.visible = true
+      t.arrow.position.set(x, H - y, 63)
+      t.arrow.scale.set(aw, ah, 1)
+      t.arrow.rotation.z = p.vy < 0 ? 0 : p.vy > 0 ? Math.PI : p.vx < 0 ? Math.PI / 2 : -Math.PI / 2
+      t.arrow.material.opacity = t.op
+    }
+  }
+  /** On a redraw, on the layer over the cards: the veil round what the tip asks for, and Skip tutorial's place to click. */
+  drawTip() {
+    this.veiled = false
+    const tip = this.app.tipNow?.()
+    if (!tip) return
+    const r = tip.veil ? this.tipRect(tip) : null
+    if (r) {
+      const g = this.g, u = this.u, pad = 6 * u
+      g.save()
+      g.fillStyle = 'rgba(30,26,22,0.46)'; g.fillRect(0, 0, this.W, this.H)
+      g.globalCompositeOperation = 'destination-out'
+      P.roundRect(g, r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2, 16 * u); g.fill()
+      g.restore()
+      this.veiled = true
+    }
+    // (it follows the bubble, which moves between redraws)
+    const tp = this.tip
+    this.hits.push({ key: 'tipskip', get x() { return tp.skip?.x ?? -1e5 }, get y() { return tp.skip?.y ?? -1e5 }, get w() { return tp.skip?.w ?? 0 }, get h() { return tp.skip?.h ?? 0 }, action: () => this.app.skipTutorial() })
+  }
+
   // ---------- drawing helpers ----------
   font(px, bold = true) { return `${bold ? 'bold ' : ''}${Math.round(px)}px ${P.FONT}` }
   text(t, x, y, { size = 16, color = P.INK, align = 'left', bold = true, max } = {}) {
@@ -352,6 +514,7 @@ export class UI {
     this.trayRect = null // the tray on screen
     this.trayDice = null // where the view draws the dice: the tray, unless it shows End Turn or values to choose
     this.trayMode = null // 'roll', 'end', 'choose', 'pick' (one of two dice) or 'show'
+    this.heroRect = null // the menu's big button, for a tip
     const app = this.app
     // the board stands in the middle, unless a title screen moves it aside
     app.view.aside.side = 0; app.view.aside.scale = 1
@@ -379,6 +542,7 @@ export class UI {
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     if (ov.used) g.clearRect(0, 0, W, H)
     if (app.screen === 'game') this.drawGameWindows()
+    this.drawTip()
     if (this.picker) this.drawPicker()
     if (app.invite) this.drawInvite()
     const st = this.p0.web?.status
@@ -392,7 +556,7 @@ export class UI {
       this.panel((W - w) / 2, ty, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
       this.text(t.text, W / 2, ty + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
-    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect
+    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect || this.veiled
     if (used || ov.used) ov.tex.needsUpdate = true
     ov.used = used
     this.g = this.base.g
@@ -450,9 +614,11 @@ export class UI {
     this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
     this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
     y += 152 * u
-    // one click into a game: players online (Project 0: the bots at once)
+    // one click into a game: players online (Project 0: the bots at once); the web build's first time, the First Match
     const mode = app.online.mode === 'fool' ? T.fool : T.champion
-    this.heroButton('quick', web ? T.quickMatch : T.quickGame, web ? T.quickMatchSub(mode, app.online.size) : T.quickGameSub, x, y, w, heroH, () => app.quickMatch())
+    if (app.firstDue()) this.heroButton('quick', T.firstMatch, T.firstMatchSub, x, y, w, heroH, () => app.startFirstMatch())
+    else this.heroButton('quick', web ? T.quickMatch : T.quickGame, web ? T.quickMatchSub(mode, app.online.size) : T.quickGameSub, x, y, w, heroH, () => app.quickMatch())
+    this.heroRect = { x, y, w, h: heroH }
     y += heroH + 14 * u
     const gap = 12 * u, tw = (w - gap * 2) / 3
     this.tile('solo', 'bot', T.soloPlay, T.soloSub, x, y, tw, tileH, '#7b5ce0', () => app.toScreen('solo'))
@@ -1062,6 +1228,11 @@ export class UI {
       }
     }
     this.button('helpback', T.back, x + 20 * u, y + ph - 56 * u, 130 * u, 40 * u, () => { app.screen = 'menu'; this.dirty = true })
+    // the web build: the First Match again, tips and all
+    if (this.helpPage === 0 && this.p0.web) {
+      const rw = Math.min(180 * u, pw - 390 * u)
+      if (rw > 90 * u) this.ghostButton('replay', T.replayTutorial, x + 160 * u + (pw - 370 * u - rw) / 2, y + ph - 54 * u, rw, 36 * u, () => app.startFirstMatch())
+    }
     this.button('helpnext', this.helpPage === 0 ? T.theCards + ' →' : '← ' + T.rulesShort, x + pw - 200 * u, y + ph - 56 * u, 180 * u, 40 * u, () => { this.helpPage = 1 - this.helpPage; this.dirty = true }, { primary: true })
   }
 
@@ -1430,7 +1601,16 @@ export class UI {
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
     if (s.ph === 'over' && !(app.view.busy || app.waiting)) this.drawResults(s, app.mySeat())
     if (curtain >= 0 || s.ph === 'over' || app.menuOpen) this.modal = true
-    if (app.menuOpen) {
+    if (app.menuOpen && app.confirmSkip) {
+      // leaving the First Match: its tips go for good
+      const mw = Math.min(W - 20 * u, 340 * u), mh = 168 * u
+      const mx = (W - mw) / 2, my = (H - mh) / 2, bw = (mw - 60 * u) / 2
+      this.panel(mx, my, mw, mh, { fill: 'rgba(255,253,248,0.97)' })
+      this.text(T.skipTitle, W / 2, my + 34 * u, { size: 20, align: 'center', max: mw - 30 * u })
+      this.text(T.skipText, W / 2, my + 66 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u })
+      this.button('keepplaying', T.keepPlaying, mx + 20 * u, my + mh - 64 * u, bw, 44 * u, () => { app.confirmSkip = false; app.menuOpen = false; this.dirty = true }, { primary: true, size: 16 })
+      this.button('skiptut', T.skip, mx + 40 * u + bw, my + mh - 64 * u, bw, 44 * u, () => { app.skipTutorial(); app.toMenu() }, { size: 16 })
+    } else if (app.menuOpen) {
       const web = !!this.p0.web
       const mw = Math.min(W - 20 * u, 320 * u)
       // the controls, which used to stand over the players' list, are told here
@@ -1445,7 +1625,7 @@ export class UI {
       // sound: the speaker mutes, the slider sets the volume
       this.soundButton('snd2', bx, my + 160 * u, 40 * u)
       this.volumeSlider('vol2', bx + 58 * u, my + 160 * u, bw - 68 * u, 40 * u)
-      this.button('leave', T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.toMenu(), { size: 15 })
+      this.button('leave', T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.leaveGame(), { size: 15 })
       if (!web) this.button('exitcity', T.exitCity, bx, my + 256 * u, bw, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
       keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * 15 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
     }
@@ -1542,6 +1722,10 @@ export class UI {
     for (const r of this.rowRect) if (r) out.push(r)
     if (this.statusRect) out.push(this.statusRect)
     if (this.logRect) out.push(this.logRect)
+    if (this.tip?.capBox) out.push(this.tip.capBox)
+    // a tip pointing at a cell: the card lifted for it stays clear of that cell too
+    const lifted = this.tip?.cur?.at === 'cell' && this.tip.op > 0.5 && this.cards.find(c => c.kind === 'hand' && c.i === this.selected && c.tx != null)
+    if (lifted) out.push({ x: lifted.tx - lifted.ts / 2, y: lifted.ty - lifted.ts * 0.7, w: lifted.ts, h: lifted.ts * 1.4 })
     return out
   }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
@@ -1586,7 +1770,8 @@ export class UI {
 
   drawResults(s, me) {
     const W = this.W, H = this.H, u = this.u, app = this.app
-    const pw = Math.min(W - 20 * u, 440 * u), ph = (150 + s.pl.length * 34 + 70) * u
+    const first = !!app.table?.cfg?.first // the First Match: what to play next
+    const pw = Math.min(W - 20 * u, 440 * u), ph = (150 + s.pl.length * 34 + 70 + (first ? 54 : 0)) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2 - 40 * u)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.97)' })
     const champ = s.mode === 'champion'
@@ -1607,6 +1792,15 @@ export class UI {
     let yy = y + 106 * u + s.pl.length * 34 * u + 6 * u
     if (app.reward) { this.text(app.reward, W / 2, yy, { size: 13, align: 'center', bold: false, color: '#2d3a6b', max: pw - 30 * u }); yy += 8 * u }
     const by = y + ph - 58 * u
+    if (first) {
+      // Play Again (Medium bots, nothing set up), or something new: Fool, the bigger board
+      const bw = (pw - 52 * u) / 3
+      this.button('rematch', T.playAgain, x + 20 * u, by - 54 * u, pw - 40 * u, 46 * u, () => app.playAgain(), { primary: true, size: 19 })
+      this.button('tryfool', T.tryFool, x + 20 * u, by, bw, 42 * u, () => app.playAgain('fool'), { size: 14 })
+      this.button('bigboard', T.biggerBoard, x + 26 * u + bw, by, bw, 42 * u, () => app.playAgain('big'), { size: 14 })
+      this.button('mainmenu', T.mainMenu, x + 32 * u + bw * 2, by, bw, 42 * u, () => app.toMenu(), { size: 14 })
+      return
+    }
     const canRematch = app.table?.kind === 'solo' || (app.table?.kind === 'shared' && this.p0.room.isHost)
     this.button('rematch', T.rematch, x + 20 * u, by, pw / 2 - 26 * u, 44 * u, () => app.rematch(), { primary: true, disabled: !canRematch, size: 17 })
     this.button('mainmenu', T.mainMenu, x + pw / 2 + 6 * u, by, pw / 2 - 26 * u, 44 * u, () => app.toMenu(), { size: 17 })
@@ -1865,6 +2059,8 @@ export class UI {
     const myTurn = s.cur === me && s.ph !== 'over'
     if (!myTurn) { this.selected = this.selected === c.i ? -1 : c.i; this.dirty = true; return }
     if (app.view.busy || app.waiting > 0) return
+    // the First Match's forced tips: only the card they ask for
+    if (app.tut && !app.tut.allowsCard(c)) { app.nudge(); return }
     if (s.ph === 'disc') {
       const fl = this.burnCard(c)
       this.lit = { card: c.id, at: this.time }
@@ -1876,7 +2072,7 @@ export class UI {
     const why = whyNot(s, me, c.id)
     if (why) { this.cancelTarget(); this.say(why); return }
     const def = CARD[c.id]
-    const list = targetsFor(s, me, c.id)
+    const all = targetsFor(s, me, c.id), list = app.tut ? app.tut.targets(c.id, all) : all
     if (def.tgt === 'self') { this.play(c.i, me); return }
     if (def.tgt === 'none' || def.tgt === 'board' || (def.tgt === 'leader' && list.length === 1)) { this.play(c.i, def.tgt === 'leader' ? list[0] : null, def.tgt === 'leader'); return }
     const kind = kindOf(def.tgt)
@@ -2009,6 +2205,8 @@ export class UI {
   /** A click: true when the UI used it. A long press on a card only shows it bigger. */
   click(x, y, long = false) {
     const h = this.hitAt(x, y)
+    // (while a tip asks for one thing, the rest waits)
+    if (h && !this.app.allowsHit(h.key)) { this.app.nudge(); return true }
     if (h) { this.menuSound(h); h.action(); this.dirty = true; return true }
     const c = this.cardAt(x, y)
     if (c && c.kind === 'offer') { this.choose('take', c.i); return true }
@@ -2055,6 +2253,7 @@ export class UI {
     this.layoutCards(dt)
     this.updateBanner(dt)
     if (this.dirty) this.draw()
+    this.updateTip(dt)
     this.app.view.trayPrompt = n && this.trayRect ? n : 0
     this.app.view.trayPick = this.trayMode === 'pick' ? (this.hover === 'die0' ? 0 : this.hover === 'die1' ? 1 : -1) : null
     this.updateTrayFrame(dt)

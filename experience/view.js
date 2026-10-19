@@ -432,7 +432,7 @@ export class View {
         this.tasks.push({ dur: 0, start: () => { tok(e.p).anim = null; this.layoutTokens() } })
         break
       }
-      case 'swamp': this.cardPopup(e.p, 'B1', 'swamp'); break
+      case 'swamp': this.tasks.push({ dur: 0, start: () => this.emit('swamp', e) }); this.cardPopup(e.p, 'B1', 'swamp'); break
       case 'shield': this.cardPopup(e.p, 'P3', 'shield'); break
       case 'skip': this.cardPopup(e.p, 'H3', 'skip'); break
       case 'frozen': this.cardPopup(e.p, 'H2', 'skip'); break
@@ -450,6 +450,7 @@ export class View {
             }
             if (e.para) this.cardPopupNow(t.group.position, 'P1')
             this.sfx(e.e, 0.5)
+            this.emit(e.e, e)
           },
           update: k => {
             const t = tok(e.p)
@@ -929,6 +930,15 @@ export class View {
       if (c && Math.floor((c - 1) / 10) === t) return { cell: c, point: p }
     }
     return null
+  }
+
+  /** The camera goes to cell c as it goes after a piece (a tip points there). */
+  focusCell(c) { this.manual = 0; this.follow(G.cellPos(c).clone()) }
+  /** Where cell c is on the screen now (CSS px), or null when it is behind the camera. */
+  cellScreen(c) {
+    const v = G.cellPos(c).clone().project(this.p0.camera)
+    if (v.z > 1) return null
+    return { x: (v.x + 1) / 2 * this.p0.width, y: (1 - v.y) / 2 * this.p0.height }
   }
 
   /** Points the arrow at a player: for a moment (secs) or until cleared (pointAt(null)). */

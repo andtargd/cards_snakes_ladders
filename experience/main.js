@@ -7,6 +7,7 @@ import * as R from './rules.js'
 import { View } from './view.js'
 import { UI } from './ui.js'
 import { T } from './strings.js'
+import { Tutorial, createFirstGame, FIRST } from './tutorial.js'
 
 const BOT_NAMES = ['Pip', 'Juniper', 'Mossy', 'Bramble', 'Clover', 'Fennel', 'Quill', 'Basil', 'Tansy', 'Wren', 'Sorrel', 'Nutmeg']
 const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
@@ -30,7 +31,8 @@ const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f
 /**
  * The menu's choices and the sound, as last left (kept in this browser, where it lets us): Solo Play
  * (a first game is short and easy to win: Champion on the 50-cell board against two Easy bots), Pass
- * & Play (the names typed for its players; '' is "Player n"), and the mode and board for online play.
+ * & Play (the names typed for its players; '' is "Player n"), the mode and board for online play, and
+ * whether the First Match is still due ('due' | 'done'; a browser that kept settings from before it played already).
  */
 function loadSettings() {
   const solo = { mode: 'champion', bots: 2, level: 1, size: 50 }
@@ -53,7 +55,8 @@ function loadSettings() {
   fitBots(solo, 1); fitBots(pass, pass.names.length)
   if (typeof saved?.sound?.on === 'boolean') sound.on = saved.sound.on
   if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
-  return { solo, pass, online, sound }
+  const first = !saved || saved.first === 'due' ? 'due' : 'done'
+  return { solo, pass, online, sound, first }
 }
 
 /** The game saved by the last LocalTable here, or null. */
@@ -69,14 +72,17 @@ function clearGame() { try { globalThis.localStorage?.removeItem(GAME_KEY) } cat
 
 // ---------- a game played in this browser: one player or several taking turns at it, and bots ----------
 class LocalTable {
-  /** `saved` (from loadGame) carries on with a game from before the page was reloaded. `names`: the players' (Pass & Play). */
-  constructor(app, { kind, mode, humans = 1, names = [], bots, level, size = 100 }, saved = null) {
+  /**
+   * `saved` (from loadGame) carries on with a game from before the page was reloaded. `names`: the players'
+   * (Pass & Play). `first`: the First Match, whose start is set up (tutorial.js) and whose bots play quicker.
+   */
+  constructor(app, { kind, mode, humans = 1, names = [], bots, level, size = 100, first = false }, saved = null) {
     this.app = app
     this.kind = kind
     this.humans = humans
     this.shown = -1 // with several players at one computer: whose hand was last shown
     const p0 = app.p0
-    this.cfg = { mode, humans, names, bots, level, size }
+    this.cfg = { mode, humans, names, bots, level, size, ...(first ? { first: true } : {}) }
     if (saved) {
       this.s = R.unpack(saved.s)
       // my seat: the session's id can be new after a reload
@@ -88,8 +94,8 @@ class LocalTable {
       const players = []
       for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: names[0] || p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: names[i] || T.playerN(i + 1), b: 0, id: null, c: i })
       for (let i = 0; i < bots; i++) players.push({ n: botNames[i], b: level, c: players.length })
-      this.s = R.createGame({ seed, mode, players, cells: size })
-      this.s.gid = seed
+      this.s = first ? createFirstGame(players) : R.createGame({ seed, mode, players, cells: size })
+      this.s.gid = seed // (the First Match's board comes from a few seeds: the game's id is its own)
     }
     this.wait = 1.4
     app.view.tasks = []
@@ -143,7 +149,7 @@ class LocalTable {
     if (!p.b) return
     this.wait -= dt * view.speed
     if (this.wait > 0) return
-    this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5)
+    this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5) * (this.cfg.first ? 0.6 : 1)
     const r = R.apply(s, s.cur, R.botAction(s, s.cur))
     if (!r.ok) { this.app.p0.log('bot error', r.err); R.apply(s, s.cur, { t: s.rolled ? 'end' : 'roll' }); return }
     this.after(r.ev)
@@ -373,6 +379,9 @@ class App {
     this.pass = saved.pass // Pass & Play: { mode, names, bots, level, size }
     this.online = saved.online // online play: { mode, size } for Quick Match and a new room
     this.sound = saved.sound // { on, vol }
+    this.first = saved.first // the First Match: 'due' until its forced tips are done or skipped
+    this.tut = null // the First Match's tips, while it is played (tutorial.js)
+    this.confirmSkip = false // the game menu asks whether leaving the First Match skips its tips
     this.speedIdx = 0
     this.waiting = 0
     this.turnLeft = null
@@ -399,6 +408,8 @@ class App {
     // the log has caught up with the game: keep it with the saved game
     v.on('settled', () => { if (this.table?.kind === 'solo') this.table.save() })
     v.on('sfx', (name, vol) => this.sfx(name, vol))
+    v.on('ladder', e => this.tut?.onLadder(e))
+    v.on('swamp', e => this.tut?.onSwamp(e))
     // the web build's online play: how an attempt goes, and a room's link that brought the player
     p0.web?.onChange?.(() => this.onWebStatus())
   }
@@ -414,7 +425,55 @@ class App {
     try { this.p0.sound.play(`sfx/${name}.mp3`, { volume: v }) } catch { /* sound is optional */ }
   }
   saveSettings() {
-    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound })) } catch { /* no storage here */ }
+    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first })) } catch { /* no storage here */ }
+  }
+
+  // ----- the First Match: the web build's first game, with tips (tutorial.js) -----
+  /**
+   * The menu offers the First Match in place of Quick Match: the web build only, until it is done or
+   * skipped, and not for a player a room's link brought or who is in an online room.
+   */
+  firstDue() { const web = this.p0.web; return !!web && this.first !== 'done' && !web.room && !web.invited }
+  /** The First Match's forced tips are done (or skipped): Quick Match is back, a reload carries on with the game as any other. */
+  finishFirst() {
+    if (this.first === 'done') return
+    this.first = 'done'
+    this.saveSettings(); this.ui.dirty = true
+  }
+  /** Champion on 50 cells against two Easy bots, the start set up; also How to Play's Replay tutorial. */
+  startFirstMatch() {
+    this.startLocal({ mode: 'champion', humans: 1, names: [], bots: FIRST.bots, level: FIRST.level, size: FIRST.size, first: true })
+  }
+  /** Skip tutorial: no more tips, and the First Match is not offered again. */
+  skipTutorial() {
+    this.tut?.stop()
+    this.confirmSkip = false
+    this.finishFirst()
+    this.ui.dirty = true
+  }
+  /** The tip on screen now: the menu's First Match while it is due, else the First Match's own. */
+  tipNow() {
+    if (this.screen === 'menu' && this.firstDue() && !this.p0.web?.status) return { key: 'start', text: T.tipStart, at: 'hero', veil: true }
+    return this.screen === 'game' && this.tut ? this.tut.now : null
+  }
+  /** A button may be clicked: while the First Match is due, the menu takes it and the sound only. */
+  allowsHit(key) {
+    if (key === 'tipskip') return true
+    if (this.screen === 'menu' && this.firstDue() && !this.p0.web?.status) return key === 'quick' || key === 'snd'
+    return this.screen === 'game' && this.tut ? this.tut.allowsHit(key) : true
+  }
+  /** A click the tip does not let through: the tip shakes. */
+  nudge() { this.ui.kickTip() }
+  /** The game menu's Main Menu: during the First Match it asks first whether to skip the tips. */
+  leaveGame() {
+    if (this.tut?.active) { this.confirmSkip = true; this.ui.dirty = true; return }
+    this.toMenu()
+  }
+  /** The First Match's results: a game as set (another against Medium bots, Fool, or the bigger board), kept for Solo Play. */
+  playAgain(kind = 'again') {
+    Object.assign(this.solo, { mode: kind === 'fool' ? 'fool' : 'champion', bots: 2, level: 2, size: kind === 'big' ? 70 : 50 })
+    this.menuOpen = false
+    this.startSolo()
   }
   /** A friendly random name (the web build's; Project 0 makes do with the bots'). */
   randomName() { return this.p0.web?.randomName?.() || BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)] }
@@ -484,8 +543,10 @@ class App {
     const g = loadGame()
     if (!g) return false
     const c = g.cfg || {}
+    // a First Match left before its forced tips were done starts over (from the menu); after them it carries on without tips
+    if (c.first && this.first !== 'done') { clearGame(); return false }
     try {
-      this.table = new LocalTable(this, { kind: 'solo', mode: g.s.mode, humans: c.humans | 0 || 1, names: Array.isArray(c.names) ? c.names.map(cleanLocalName) : [], bots: c.bots | 0, level: c.level | 0 || 2, size: g.s.n }, g)
+      this.table = new LocalTable(this, { kind: 'solo', mode: g.s.mode, humans: c.humans | 0 || 1, names: Array.isArray(c.names) ? c.names.map(cleanLocalName) : [], bots: c.bots | 0, level: c.level | 0 || 2, size: g.s.n, first: !!c.first }, g)
     } catch (e) { this.p0.log('resume', String(e)); clearGame(); return false }
     this.reward = null
     if (Number.isInteger(g.speed) && SPEEDS[g.speed]) this.speedIdx = g.speed
@@ -498,15 +559,17 @@ class App {
   startSolo() { const c = this.solo; this.startLocal({ mode: c.mode, humans: 1, names: [], bots: c.bots, level: c.level, size: c.size }) }
   /** Pass & Play: the players take turns at this computer, with the bots set on its screen. */
   startPass() { const c = this.pass; this.startLocal({ mode: c.mode, humans: c.names.length, names: c.names.map((n, i) => this.passName(i)), bots: c.bots, level: c.level, size: c.size }) }
-  /** A game at this computer: `setup` is { mode, humans, names, bots, level, size }. */
+  /** A game at this computer: `setup` is { mode, humans, names, bots, level, size, first? }. */
   startLocal(setup) {
     // the first game after one that ended waits for whatever the site shows between games
     if (this.finished) { this.finished = false; this.betweenGames(() => this.startLocal(setup)); return }
     this.saveSettings()
     this.reward = null
     this.ui.logLines = []
-    this.ui.selected = -1; this.ui.cancelTarget()
+    this.ui.selected = -1; this.ui.cancelTarget(); this.ui.hidden = null // (a card hidden as it flew from the last game's hand)
     this.table = new LocalTable(this, { kind: 'solo', ...setup })
+    this.tut = setup.first ? new Tutorial(this) : null
+    this.confirmSkip = false
     this.table.save()
     this.view.speed = SPEEDS[this.speedIdx][0]
     this.screen = 'game'
@@ -523,6 +586,8 @@ class App {
       else this.p0.room.sendTo(this.p0.room.host, { t: 'leaveSeat' })
     }
     this.menuOpen = false
+    this.confirmSkip = false
+    this.tut = null
     this.screen = 'menu'
     this.shared = null
     this.ui.cancelTarget(); this.ui.selected = -1
@@ -532,9 +597,11 @@ class App {
   rematch() {
     this.menuOpen = false
     if (this.table?.kind === 'shared') { if (this.p0.room.isHost) this.lobbyCmd({ t: 'start' }); return }
-    if (this.table?.kind === 'solo') this.startLocal(this.table.cfg); else this.startSolo()
+    // after the First Match, its Play Again: Medium bots, nothing set up
+    if (this.table?.cfg?.first) this.playAgain()
+    else if (this.table?.kind === 'solo') this.startLocal(this.table.cfg); else this.startSolo()
   }
-  openGameMenu() { this.menuOpen = !this.menuOpen; this.ui.dirty = true }
+  openGameMenu() { this.menuOpen = !this.menuOpen; this.confirmSkip = false; this.ui.dirty = true }
 
   // ----- the site the web build runs on (p0.web.hooks; Project 0 has none, so all of this is skipped there) -----
   hook(name, ...a) { try { return this.p0.web?.hooks?.[name]?.(...a) } catch { return undefined } }
@@ -558,7 +625,14 @@ class App {
     const done = () => { this.adBusy = false; this.ui.dirty = true; if (this.table === table && this.screen === screen) then() }
     ad.then(done, done)
   }
-  act(a) { return this.table && this.screen === 'game' ? this.table.act(a) : false }
+  act(a) {
+    if (!this.table || this.screen !== 'game') return false
+    // the First Match's forced tips let through only what they ask for
+    if (this.tut && !this.tut.allowsAct(a)) { this.nudge(); return false }
+    const ok = this.table.act(a)
+    if (ok) this.tut?.onAct(a)
+    return ok
+  }
 
   // ----- shared table lobby (kept in room.state 'lob', written by the host) -----
   lobby() {
@@ -629,9 +703,10 @@ class App {
   }
   joinShared(g) {
     if (this.table?.kind === 'solo') clearGame()
+    this.tut = null; this.confirmSkip = false
     this.reward = null
     this.ui.logLines = []
-    this.ui.selected = -1; this.ui.cancelTarget()
+    this.ui.selected = -1; this.ui.cancelTarget(); this.ui.hidden = null
     this.shared = new SharedTable(this, g)
     this.table = this.shared
     this.view.speed = SPEEDS[this.speedIdx][0]
@@ -891,6 +966,12 @@ class App {
     this.syncStatus()
     this.quickTick()
     this.table?.update(dt)
+    // the First Match's bots move quicker (the speed chosen still counts)
+    if (this.screen === 'game' && this.table?.cfg?.first) {
+      const v = this.view.state
+      this.view.speed = SPEEDS[this.speedIdx][0] * (v && v.ph !== 'over' && v.pl[v.cur]?.b ? 1.6 : 1)
+    }
+    this.tut?.update(dt)
     this.syncGameplay()
     const trayOn = this.view.trayVisible > 0
     if (trayOn !== this.trayWas) { this.trayWas = trayOn; this.ui.dirty = true }
@@ -916,6 +997,7 @@ export default async function start(p0) {
   let down = null
   p0.on('pointerdown', e => {
     if (app.adBusy) { down = null; return } // the site is showing something between games
+    app.tut?.onInput()
     // a slider follows the pointer until it lets go
     const h = app.ui.hitAt(e.x, e.y)
     if (h?.drag) { app.ui.drag = h; h.drag(e.x); down = null; return }
@@ -938,6 +1020,8 @@ export default async function start(p0) {
     if (d.moved) return
     if (app.menuOpen && app.ui.hitAt(e.x, e.y)) { app.ui.click(e.x, e.y); return }
     if (app.ui.click(e.x, e.y, p0.time - d.at > 0.45)) return
+    // a click beside what a tip with a veil asks for
+    if (app.tipNow()?.veil) { app.nudge(); return }
     if (app.screen !== 'game') return
     const hit = app.view.pick(e.x, e.y)
     if (!app.ui.boardClick(hit) && app.ui.selected >= 0 && !app.ui.target) { app.ui.selected = -1; app.ui.dirty = true }
@@ -945,6 +1029,7 @@ export default async function start(p0) {
   p0.on('wheel', e => { if (app.screen === 'game' && !app.adBusy) app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
   p0.on('keydown', e => {
     if (e.repeat || app.adBusy) return
+    app.tut?.onInput()
     // an online attempt on screen: Escape cancels it or puts its message away
     const st = app.p0.web?.status
     if (st) { if (e.code === 'Escape') { if (st.busy) app.p0.web.cancel(); else app.p0.web.dismiss() } return }
