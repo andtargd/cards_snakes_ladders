@@ -1,5 +1,5 @@
 // Player names in online rooms: other players see them, so they are kept clean. A friendly random
-// name stands in for an empty or rude one. The check runs on this side (the Play Online dialog) and
+// name stands in for an empty or rude one. The check runs on this side (the Online screen's name) and
 // again on the room's host for every name that comes in, since a client may send anything.
 // A site's own name for the player (hooks.getUser, an SDK) replaces the typed one altogether.
 

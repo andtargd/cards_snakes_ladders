@@ -19,51 +19,9 @@
   #label { font-weight: 400; font-size: 14px; color: #6b6259; }
   #loading.error #label { color: #c9473a; }
 
-  /* the Play Online dialog, in the look of the game's paper panels */
-  :root { --ol-paper: #fffdf8; --ol-ink: #2b2622; --ol-muted: #5b544c; --ol-line: rgba(43,38,34,.3); --ol-orange: #e8743b; --ol-navy: #2d3a6b; --ol-red: #d64545; --ol-off: #e4e0d8; }
-  .ol { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(30,26,22,.4); font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif; color: var(--ol-ink); -webkit-user-select: text; user-select: text; }
-  .ol[hidden] { display: none; }
-  .ol-card { position: relative; box-sizing: border-box; width: 100%; max-width: 400px; max-height: 100%; overflow-y: auto; padding: 22px 22px 18px; background: var(--ol-paper); border: 2.5px solid var(--ol-navy); border-radius: 18px; box-shadow: 0 6px 0 rgba(43,38,34,.15), 0 18px 40px rgba(30,26,22,.25); }
-  .ol h2 { margin: 0 0 14px; text-align: center; font-size: 24px; color: var(--ol-navy); }
-  .ol-x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--ol-muted); font-size: 18px; cursor: pointer; }
-  .ol-x:hover { background: rgba(43,38,34,.08); }
-  .ol-invite { margin: -6px 0 12px; text-align: center; font-weight: bold; color: var(--ol-orange); }
-  .ol-label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: bold; }
-  .ol-input { box-sizing: border-box; width: 100%; height: 44px; padding: 0 14px; border: 1.5px solid var(--ol-line); border-radius: 12px; background: #fff; color: var(--ol-ink); font: inherit; font-size: 16px; outline: none; }
-  .ol-input:focus { border-color: var(--ol-navy); box-shadow: 0 0 0 3px rgba(45,58,107,.18); }
-  .ol-name[hidden], .ol-as[hidden] { display: none; }
-  .ol-name-row { display: flex; gap: 8px; }
-  .ol-name-row .ol-input { flex: 1; min-width: 0; }
-  .ol-btn.ol-dice { flex: none; display: flex; align-items: center; justify-content: center; width: 46px; height: 44px; padding: 0; color: var(--ol-navy); }
-  .ol-dice svg { display: block; flex: none; width: 30px; height: 30px; transition: transform .15s; }
-  .ol-dice:hover:not(:disabled) svg { transform: rotate(-12deg); }
-  .ol-dice:disabled { color: #9a948a; }
-  .ol-name-note { min-height: 0; margin-top: 4px; font-size: 12px; color: var(--ol-muted); }
-  .ol-name-note:empty { display: none; }
-  .ol-as { margin: 0; text-align: center; font-weight: bold; }
-  .ol-choices { display: grid; gap: 10px; margin-top: 16px; }
-  .ol-choice { display: grid; gap: 4px; }
-  .ol-choice span { font-size: 12.5px; color: var(--ol-muted); text-align: center; }
-  .ol-btn { height: 46px; padding: 0 18px; border: 1.5px solid var(--ol-line); border-radius: 14px; background: #fff; color: var(--ol-ink); font: inherit; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 3px 0 rgba(43,38,34,.12); transition: transform .08s; }
-  .ol-btn:hover:not(:disabled) { transform: translateY(-2px); }
-  .ol-btn:focus-visible { outline: 3px solid rgba(45,58,107,.35); outline-offset: 2px; }
-  .ol-btn:disabled { background: var(--ol-off); color: #9a948a; border-color: transparent; cursor: default; box-shadow: none; }
-  .ol-orange:not(:disabled), .invited .ol-join .ol-btn:not(:disabled) { background: var(--ol-orange); border-color: rgba(0,0,0,.25); color: #fff; }
-  .ol-navy:not(:disabled) { background: var(--ol-navy); border-color: rgba(0,0,0,.25); color: #fff; }
-  .invited .ol-orange:not(:disabled) { background: #fff; color: var(--ol-ink); border-color: var(--ol-line); }
-  .ol-or { display: flex; align-items: center; gap: 10px; margin: 18px 0 12px; font-size: 13px; color: var(--ol-muted); }
-  .ol-or::before, .ol-or::after { content: ""; flex: 1; height: 1.5px; background: rgba(43,38,34,.15); }
-  .ol-join { display: flex; gap: 8px; }
-  .ol-code { flex: 1; min-width: 0; text-transform: uppercase; letter-spacing: .2em; font-weight: bold; text-align: center; }
-  .ol-code::placeholder { letter-spacing: .1em; font-weight: normal; }
-  .ol-status { min-height: 20px; margin-top: 12px; text-align: center; font-size: 14px; color: var(--ol-muted); }
-  .ol-status.err { color: var(--ol-red); }
-  .ol-detail { margin-top: 4px; text-align: center; font-size: 11px; color: #9a948a; }
-  .ol-detail:empty { display: none; }
-  .busy .ol-status::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -1px; border: 2px solid var(--ol-navy); border-right-color: transparent; border-radius: 50%; animation: ol-spin .8s linear infinite; }
-  @keyframes ol-spin { to { transform: rotate(360deg); } }
-  .ol-cancel { display: block; width: 100%; margin-top: 10px; }
-  .ol-cancel[hidden] { display: none; }
+  /* a text field the game draws on its canvas: while it is typed into, a real input lies on the box (web/textfield.js) */
+  .tf { position: fixed; z-index: 5; box-sizing: border-box; margin: 0; border: 0; border-radius: 10px; outline: none; background: transparent; caret-color: #2d3a6b; -webkit-user-select: text; user-select: text; -webkit-appearance: none; appearance: none; }
+  .tf::selection { background: rgba(45,58,107,.22); }
 </style>
 <script type="importmap">
 { "imports": {

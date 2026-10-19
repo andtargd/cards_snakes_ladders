@@ -1,6 +1,8 @@
-// The web build's Play Online dialog: a name, then Quick Match, a new room or a room's code.
+// The web build's online play behind the game's Online screen: the player's name, then Quick Match, a
+// new room or a room's code, and how each attempt goes (what it is doing, or what went wrong) for the
+// game to show. The game draws all of it; this only runs it (p0web.js hands it over as p0.web).
 import { cleanCode } from './net.js'
-import { cleanName, isClean, randomName, MAX_NAME } from './names.js'
+import { cleanName, isClean, randomName } from './names.js'
 
 const NAME_KEY = 'csl-name'
 const load = k => { try { return localStorage.getItem(k) } catch { return null } }
@@ -15,159 +17,86 @@ function messageFor(e) {
     case 'busy': return 'All quick tables are busy right now. Create a room instead.'
     case 'browser-incompatible': return 'This browser cannot open rooms (WebRTC is turned off). You can still join a friend\'s room with its code.'
     case 'lib': return 'Online play could not load. Check your connection (or an ad blocker) and try again.'
+    case 'code': return 'Type the room code your friend sent you.'
     default: return 'Could not reach the game server. Check your connection and try again.'
   }
 }
 /** What the attempt saw, small under the message: for telling someone what went wrong. */
 function detailFor(e) {
   const d = e?.detail, ways = d && (e.type === 'timeout' || e.type === 'unreachable') // what got through, where it matters
-  return [e?.type, ways && `direct ${d.rtc}`, ways && `relay servers ${d.brokers}`].filter(Boolean).join(' · ')
+  return [e?.type !== 'code' && e?.type, ways && `direct ${d.rtc}`, ways && `relay servers ${d.brokers}`].filter(Boolean).join(' · ')
 }
 
 /**
- * `links()`: whether rooms get links here (else Create a Room gives only a code). `siteName()`: the
- * site's own name for the player, or null; with one there is no name field.
+ * `siteName()`: the site's own name for the player, or null; with one there is no name to type.
+ * `changed()`: the status or the invitation changed (the game redraws).
  */
-export function onlineDialog({ net, me, links = () => true, siteName = () => null }) {
-  const el = document.createElement('div')
-  el.className = 'ol'
-  el.hidden = true
-  el.innerHTML = `
-  <div class="ol-card" role="dialog" aria-modal="true" aria-labelledby="ol-title">
-    <button class="ol-x" type="button" aria-label="Close">✕</button>
-    <h2 id="ol-title">Play Online</h2>
-    <p class="ol-invite" hidden></p>
-    <div class="ol-name">
-      <label class="ol-label" for="ol-name">Your name</label>
-      <div class="ol-name-row">
-        <input id="ol-name" class="ol-input" maxlength="${MAX_NAME}" autocomplete="nickname" spellcheck="false" placeholder="Your name">
-        <button class="ol-btn ol-dice" type="button" aria-label="Another random name" title="Another random name"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="2.5" width="19" height="19" rx="5" fill="#fff" stroke="currentColor" stroke-width="2"/><g fill="currentColor"><circle cx="8" cy="8" r="1.8"/><circle cx="16" cy="8" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="8" cy="16" r="1.8"/><circle cx="16" cy="16" r="1.8"/></g></svg></button>
-      </div>
-      <div class="ol-name-note" aria-live="polite"></div>
-    </div>
-    <p class="ol-as" hidden></p>
-    <div class="ol-choices">
-      <div class="ol-choice"><button class="ol-btn ol-orange" type="button" data-act="quick">Quick Match</button><span>Players looking for a game; bots take the empty seats</span></div>
-      <div class="ol-choice"><button class="ol-btn ol-navy" type="button" data-act="create">Create a Room</button><span class="ol-create-sub"></span></div>
-    </div>
-    <div class="ol-or"><span>or join with a code</span></div>
-    <form class="ol-join" autocomplete="off">
-      <input id="ol-code" class="ol-input ol-code" maxlength="5" spellcheck="false" autocapitalize="characters" placeholder="CODE" aria-label="Room code">
-      <button class="ol-btn" type="submit" data-act="join">Join</button>
-    </form>
-    <div class="ol-status" role="status" aria-live="polite"></div>
-    <div class="ol-detail"></div>
-    <button class="ol-btn ol-cancel" type="button" hidden>Cancel</button>
-  </div>`
-  document.body.appendChild(el)
-  const $ = s => el.querySelector(s)
-  const nameIn = $('#ol-name'), nameNote = $('.ol-name-note'), codeIn = $('#ol-code'), status = $('.ol-status'), detail = $('.ol-detail'), cancelBtn = $('.ol-cancel'), inviteEl = $('.ol-invite')
-  nameIn.value = load(NAME_KEY) || ''
-  let busy = false
+export function onlineControl({ net, me, siteName = () => null, changed = () => {} }) {
+  let status = null // null | { busy: text, kind } | { error: text, detail, kind }; kind: quick | create | join | resume
+  let invited = null // the code of the room a link brought the player to
+  const set = s => { status = s; changed() }
 
-  function setBusy(text) {
-    busy = !!text
-    el.classList.toggle('busy', busy)
-    for (const c of el.querySelectorAll('input, .ol-btn:not(.ol-cancel), .ol-x')) c.disabled = busy
-    status.textContent = text || ''
-    status.classList.remove('err')
-    detail.textContent = ''
-    cancelBtn.hidden = !busy
+  /** A name for the others to see: a rude one is swapped for a random one, and the word for that comes back. */
+  function setName(v) {
+    const n = cleanName(v)
+    let note = ''
+    if (n && !isClean(n)) { me.name = randomName(); note = 'That name is not allowed here, so you got a random one.' }
+    else me.name = n || randomName()
+    save(NAME_KEY, me.name)
+    changed()
+    return note
   }
-  /** The typed name, or a random one in place of an empty or rude one (said quietly under the field). */
-  function checkName() {
-    const n = cleanName(nameIn.value)
-    if (n && !isClean(n)) { nameIn.value = randomName(); nameNote.textContent = 'That name is not allowed here, so you got a random one.' }
-    else nameIn.value = n || randomName()
-    return nameIn.value
-  }
-  function applyName() {
+  /** Before going online: the site's name, or the one typed, or a random one (kept for next time). */
+  function ensureName() {
     if (siteName()) { me.name = siteName(); return }
-    const n = checkName()
-    me.name = n
-    save(NAME_KEY, n)
+    if (!me.name || !isClean(me.name)) setName(load(NAME_KEY) || me.name)
   }
-  async function go(text, fn) {
-    if (busy) return
-    applyName()
-    setBusy(text)
+  async function go(kind, text, fn) {
+    if (status?.busy) return false
+    ensureName()
+    set({ busy: text, kind })
     try {
       await fn()
-      setBusy(null)
-      close()
+      invited = null
+      set(null)
+      return true
     } catch (e) {
-      if (e?.type === 'cancelled') return
+      if (e?.type === 'cancelled') return false
       console.warn('[online]', e)
-      setBusy(null)
-      status.textContent = messageFor(e)
-      status.classList.add('err')
-      detail.textContent = detailFor(e)
+      set({ error: messageFor(e), detail: detailFor(e), kind })
+      return false
     }
   }
-  function join() {
-    const code = cleanCode(codeIn.value)
-    codeIn.value = code
-    if (code.length < 3) { status.textContent = 'Type the room code your friend sent you.'; status.classList.add('err'); detail.textContent = ''; codeIn.focus(); return }
-    go(`Joining room ${code}…`, () => net.join(code))
+  return {
+    get status() { return status },
+    get invited() { return invited },
+    /** A room's link brought the player: the Online screen shows its code to join. */
+    invite(code) { invited = cleanCode(code) || null; changed() },
+    quick: mode => go('quick', 'Looking for a table…', () => net.quickMatch(mode)),
+    create: () => go('create', 'Opening a room…', () => net.create()),
+    join(code) {
+      code = cleanCode(code)
+      if (code.length < 3) { set({ error: messageFor({ type: 'code' }), detail: '', kind: 'join' }); return Promise.resolve(false) }
+      return go('join', `Joining room ${code}…`, () => net.join(code))
+    },
+    /** Coming back to a room after a reload: shown like any other attempt. */
+    resume: (code, fn) => go('resume', `Coming back to room ${cleanCode(code)}…`, fn),
+    cancel() { if (!status?.busy) return; net.cancel(); set(null) },
+    /** Puts the message of an attempt that failed away. */
+    dismiss() { if (status && !status.busy) set(null) },
+    setName,
+    randomName,
   }
-
-  $('[data-act=quick]').onclick = () => go('Looking for a table…', () => net.quickMatch())
-  $('[data-act=create]').onclick = () => go('Opening a room…', () => net.create())
-  $('.ol-join').onsubmit = e => { e.preventDefault(); join() }
-  codeIn.oninput = () => { const v = cleanCode(codeIn.value); if (v !== codeIn.value) codeIn.value = v }
-  // a non-Latin keyboard layout (Russian, say): the key's place gives the Latin letter on it
-  codeIn.addEventListener('keydown', e => {
-    const m = /^Key([A-Z])$/.exec(e.code || '')
-    if (!m || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || /[A-Za-z0-9]/.test(e.key)) return
-    e.preventDefault()
-    const a = codeIn.selectionStart ?? codeIn.value.length, b = codeIn.selectionEnd ?? a
-    codeIn.value = cleanCode(codeIn.value.slice(0, a) + m[1] + codeIn.value.slice(b))
-    const at = Math.min(a + 1, codeIn.value.length)
-    try { codeIn.setSelectionRange(at, at) } catch { /* fine */ }
-  })
-  nameIn.addEventListener('change', checkName)
-  nameIn.addEventListener('input', () => { nameNote.textContent = '' })
-  $('.ol-dice').onclick = () => { nameIn.value = randomName(); nameNote.textContent = ''; nameIn.focus() }
-  cancelBtn.onclick = () => { net.cancel(); setBusy(null) }
-  $('.ol-x').onclick = () => close()
-  el.addEventListener('pointerdown', e => { if (e.target === el && !busy) close() })
-  el.addEventListener('keydown', e => { if (e.key === 'Escape' && !busy) close() })
-
-  /** Coming back to a room after a reload: the dialog shows how it goes, and the choices if it fails. */
-  function resume(code, fn) {
-    open({ code })
-    go(`Coming back to room ${cleanCode(code)}…`, fn)
-  }
-  function open({ code } = {}) {
-    setBusy(null)
-    $('.ol-create-sub').textContent = links() ? 'Get a code and a link to send to friends' : 'Get a room code to send to friends'
-    inviteEl.hidden = !code
-    el.classList.toggle('invited', !!code)
-    if (code) { codeIn.value = cleanCode(code); inviteEl.textContent = `You are invited to room ${codeIn.value}` }
-    const site = siteName()
-    $('.ol-name').hidden = !!site
-    $('.ol-as').hidden = !site
-    $('.ol-as').textContent = site ? `Playing as ${site}` : ''
-    if (!site) { nameNote.textContent = ''; checkName() } // an empty field gets a random name
-    el.hidden = false
-    requestAnimationFrame(() => (code ? $('[data-act=join]') : $('[data-act=quick]')).focus())
-  }
-  function close() {
-    if (busy) return
-    el.hidden = true
-    document.getElementById('c')?.focus()
-  }
-  return { open, close, resume, get isOpen() { return !el.hidden } }
 }
 
 /**
  * Send friends the way into the room: its link where there is one (the share sheet on phones, the
- * clipboard elsewhere), else just its code, which they type into Play Online.
+ * clipboard elsewhere), else just its code, which they type on the Online screen.
  * 'shared' | 'copied' | 'cancelled' | 'failed' | 'none'
  */
 export async function shareRoom(room) {
   if (!room) return 'none'
-  const text = room.link ? `Join my table in Cards, Snakes & Ladders: room ${room.code}` : `Join my table in Cards, Snakes & Ladders: Play Online, room code ${room.code}`
+  const text = room.link ? `Join my table in Cards, Snakes & Ladders: room ${room.code}` : `Join my table in Cards, Snakes & Ladders: Online, room code ${room.code}`
   if (navigator.share && matchMedia('(pointer: coarse)').matches) {
     try { await navigator.share(room.link ? { title: 'Cards, Snakes & Ladders', text, url: room.link } : { title: 'Cards, Snakes & Ladders', text }); return 'shared' } catch (e) { if (e?.name === 'AbortError') return 'cancelled' }
   }

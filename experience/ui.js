@@ -119,6 +119,11 @@ export class UI {
     this.rows = new Map() // the players panel: where each player's row stands now, sliding to its place
     this.rowRect = []
     this.promptN = 0 // dice waiting in the tray for my click
+    this.fields = new Set()
+    this.editing = null // the text field being typed into, and the input over it (p0.web.editText)
+    this.editHandle = null
+    this.joinCode = '' // the Online screen: the room code typed, and a word about the name
+    this.nameNote = ''
     this.resize()
     this.makeBanner()
     this.makeTrayFrame()
@@ -353,14 +358,20 @@ export class UI {
     // the title screens stand beside the board when the screen is wide; on a phone they fill it, in bigger type
     const u0 = this.u
     this.menuWide = W >= 720 && W / u0 >= 980
-    if (app.screen === 'menu' || app.screen === 'local') {
+    this.fields = new Set() // the text fields on screen
+    if (['menu', 'solo', 'pass', 'online', 'lobby'].includes(app.screen)) {
       if (!this.menuWide) this.u = Math.max(u0, Math.min(W / 440, H / 760, 1.2))
-      if (app.screen === 'menu') this.drawMenu(); else this.drawLocal()
+      if (app.screen === 'menu') this.drawMenu()
+      else if (app.screen === 'solo') this.drawSolo()
+      else if (app.screen === 'pass') this.drawPass()
+      else if (app.screen === 'online') this.drawOnline()
+      else this.drawLobby()
       this.u = u0
-    } else if (app.screen === 'lobby') this.drawLobby()
-    else if (app.screen === 'help') this.drawHelp()
+    } else if (app.screen === 'help') this.drawHelp()
     else if (app.screen === 'game') this.drawGame()
     if (app.screen !== 'lobby') this.picker = false
+    // a field being typed into that is not on screen any more keeps what was typed
+    if (this.editing && !this.fields.has(this.editing)) this.editHandle?.close(true)
     this.base.tex.needsUpdate = true
     // the windows, on the layer over the cards
     const ov = this.over
@@ -370,6 +381,8 @@ export class UI {
     if (app.screen === 'game') this.drawGameWindows()
     if (this.picker) this.drawPicker()
     if (app.invite) this.drawInvite()
+    const st = this.p0.web?.status
+    if (st) this.drawOnlineStatus(st)
     if (this.toast) {
       const t = this.toast
       g.font = this.font(16 * this.u)
@@ -401,17 +414,19 @@ export class UI {
   /**
    * The title screens stand in a column of paper on the left, the board rests on the right; on a narrow
    * screen the paper covers it all. `cw` is the content's width: the paper is as wide as it needs.
+   * `paint` false only measures.
    */
-  menuLayout(cw) {
+  menuLayout(cw, paint = true) {
     const W = this.W, H = this.H, u = this.u
     const wide = this.menuWide
     const fr = this.app.view.aside
     if (!wide) {
       const w = Math.min(cw, W - 32 * u)
-      this.g.fillStyle = 'rgba(243,238,229,0.9)'; this.g.fillRect(0, 0, W, H)
+      if (paint) { this.g.fillStyle = 'rgba(243,238,229,0.9)'; this.g.fillRect(0, 0, W, H) }
       return { wide, x: (W - w) / 2, w }
     }
     const zone = Math.min(W * 0.66, Math.max(W * 0.5, cw + 120 * u))
+    if (!paint) return { wide, x: (zone - cw) / 2, w: cw }
     fr.side = zone / (2 * W)
     fr.scale = THREE.MathUtils.clamp((W - zone) / W * 1.45, 0.45, 0.8)
     const g = this.g, gr = g.createLinearGradient(0, 0, zone * 1.15, 0)
@@ -422,21 +437,30 @@ export class UI {
     return { wide, x: (zone - cw) / 2, w: cw }
   }
 
+  /** The main menu: Quick Match on top, then Solo Play, Pass & Play and Online; How to Play under them. */
   drawMenu() {
     const H = this.H, u = this.u, app = this.app
     const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
-    const { x, w } = this.menuLayout(400 * u)
+    const { x, w } = this.menuLayout(440 * u)
     const table = this.p0.table || []
-    const ch = (room ? 508 : 468) * u, cx = x + w / 2
+    const heroH = 92 * u, tileH = 124 * u, cx = x + w / 2
+    const ch = 152 * u + heroH + 14 * u + tileH + 14 * u + (room ? 44 : web ? 0 : 22) * u + 40 * u
     let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
     this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
     this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
-    y += 156 * u
-    this.bigButton('local', T.playLocally, T.playLocallySub, x, y, w, 76 * u, () => { app.screen = 'local'; this.dirty = true }, '#e8743b')
-    y += 92 * u
-    const online = web && !room ? () => web.online() : () => app.openLobby()
-    this.bigButton('online', web ? T.playOnline : T.sharedTable, web ? T.playOnlineSub : T.sharedTableSub, x, y, w, 76 * u, online, '#2d3a6b')
-    y += 88 * u
+    y += 152 * u
+    // one click into a game: players online (Project 0: the bots at once)
+    const mode = app.online.mode === 'fool' ? T.fool : T.champion
+    this.heroButton('quick', web ? T.quickMatch : T.quickGame, web ? T.quickMatchSub(mode) : T.quickGameSub, x, y, w, heroH, () => app.quickMatch())
+    y += heroH + 14 * u
+    const gap = 12 * u, tw = (w - gap * 2) / 3
+    this.tile('solo', 'bot', T.soloPlay, T.soloSub, x, y, tw, tileH, '#7b5ce0', () => app.toScreen('solo'))
+    this.tile('pass', 'pair', T.passPlay, T.passSub, x + tw + gap, y, tw, tileH, '#d64545', () => app.toScreen('pass'))
+    if (web) {
+      const sub = room ? T.inRoom(room.code) : web.invited ? T.invitedShort(web.invited) : T.onlineSub
+      this.tile('online', 'globe', T.online, sub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', room ? () => app.openLobby() : () => app.toScreen('online'))
+    } else this.tile('online', 'group', T.sharedTable, T.sharedTableSub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', () => app.openLobby())
+    y += tileH + 14 * u
     if (room) {
       this.text(T.roomLine(room.code, app.sessionCount()), x + 4 * u, y + 16 * u, { size: 13.5, max: w * 0.4 - 8 * u })
       this.button('share', room.link ? T.shareLink : T.shareCode, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
@@ -447,9 +471,9 @@ export class UI {
       this.text(others > 0 ? T.othersHere(others) : T.aloneHere, cx, y + 2 * u, { size: 12, align: 'center', bold: false, color: '#7a7268', max: w })
       y += 22 * u
     }
-    this.ghostButton('help', T.howToPlay, cx - 80 * u, y + 6 * u, 160 * u, 36 * u, () => { app.screen = 'help'; this.helpPage = 0; this.dirty = true })
-    this.ghostButton('cards', T.theCards, cx - 80 * u, y + 44 * u, 160 * u, 36 * u, () => { app.screen = 'help'; this.helpPage = 1; this.dirty = true })
-    y += 96 * u
+    this.ghostButton('help', T.howToPlay, cx - 168 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 0 })
+    this.ghostButton('cards', T.theCards, cx + 8 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 1 })
+    y += 48 * u
     // the week's table, quietly under the buttons
     if (table.length && y + 40 * u < H) {
       this.text(T.weekTable, cx, y + 8 * u, { size: 13, align: 'center', color: '#5b544c' })
@@ -463,68 +487,362 @@ export class UI {
     this.soundControl()
   }
 
-  /** Play Locally: the mode, big; the table's settings beside it, quiet; and Play. */
-  drawLocal() {
-    const H = this.H, u = this.u, app = this.app, c = app.cfg
-    const save = fn => () => { fn(); app.saveSettings(); this.dirty = true }
-    const minTotal = () => (c.mode === 'fool' ? 3 : 2)
-    const fill = () => { const lack = minTotal() - c.humans - c.bots; if (lack > 0) c.bots += lack }
-    const sideW = 220 * u, gap = 26 * u
-    const L = this.menuLayout(640 * u)
-    const side = L.wide // the settings stand beside the modes, or under them
+  // ---------- the setup screens: Solo Play, Pass & Play, Online ----------
+  /**
+   * Where a setup screen's parts go: the mode cards and the big button on the left, the settings panel
+   * (`sideW` wide, `panelH` tall) beside them; on a narrow screen the panel goes under them and the
+   * cards give up height first. `under` is room under the big button for a line about it; `paint`
+   * false only measures.
+   */
+  setupLayout(sideW, panelH, under = 0, paint = true) {
+    const u = this.u, H = this.H
+    const L = this.menuLayout(660 * u, paint)
+    const side = L.wide, gap = 24 * u, headH = 76 * u, playH = 64 * u
     const mw = side ? L.w - sideW - gap : L.w
-    const cardW = (mw - 16 * u) / 2, cardH = Math.min(side ? 240 * u : 210 * u, cardW * 1.25)
-    const setH = 236 * u
-    const blockH = 44 * u + cardH + 18 * u + 66 * u + (side ? 0 : 20 * u + setH)
-    const x = L.x
-    let y = Math.max(14 * u, (H - blockH) / 2)
-    this.ghostButton('back', '← ' + T.back, x - 8 * u, y, 96 * u, 32 * u, () => { app.screen = 'menu'; this.dirty = true })
-    this.text(T.chooseMode, x + mw / 2, y + 16 * u, { size: 18, align: 'center', color: '#2d3a6b' })
-    y += 44 * u
-    const top = y
-    const pick = m => save(() => { if (c.mode !== m) app.playSound('select', 0.35); c.mode = m; fill() })
-    this.modeCard('champion', x, y, cardW, cardH, c.mode === 'champion', pick('champion'))
-    this.modeCard('fool', x + cardW + 16 * u, y, cardW, cardH, c.mode === 'fool', pick('fool'))
-    y += cardH + 18 * u
-    this.playButton(x, y, mw, 66 * u, () => app.startSolo())
-    y += 66 * u
-    // the settings: who plays, how well the bots play, the board's size
-    const sx = side ? x + mw + gap : x, sy = side ? top : y + 20 * u, sw = side ? sideW : mw
-    const sh = side ? y - top : setH
-    this.panel(sx, sy, sw, sh, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
-    const ix = sx + 16 * u, iw = sw - 32 * u
-    let yy = sy + 14 * u
-    const rowGap = Math.max(0, (sh - 24 * u - 4 * 52 * u) / 3)
-    const total = c.humans + c.bots
-    const label = (t, extra) => {
-      this.text(t, ix, yy + 8 * u, { size: 12.5, color: '#7a7268' })
-      if (extra) this.text(extra, ix + iw, yy + 8 * u, { size: 11, align: 'right', bold: false, color: '#9a948a', max: iw * 0.62 })
-    }
-    label(T.players, c.humans > 1 ? T.hotseatShort : '')
-    this.miniStepper('hum', ix, yy + 20 * u, iw, c.humans, save(() => { c.humans--; fill() }), save(() => { c.humans++; if (c.humans + c.bots > 6) c.bots-- }),
-      c.humans > 1, c.humans < 6 && (total < 6 || c.bots > 0))
-    yy += 52 * u + rowGap
-    label(T.bots)
-    this.miniStepper('bots', ix, yy + 20 * u, iw, c.bots, save(() => { c.bots-- }), save(() => { c.bots++ }), c.bots > 0 && total - 1 >= minTotal(), total < 6)
-    yy += 52 * u + rowGap
-    label(T.level)
-    this.segmented('lvl', ix, yy + 20 * u, iw, [1, 2, 3], T.levels, c.level, l => save(() => { c.level = l })(), !c.bots)
-    yy += 52 * u + rowGap
-    label(T.board)
-    this.segmented('size', ix, yy + 20 * u, iw, SIZES, SIZES.map(String), c.size, n => save(() => { c.size = n })())
+    const cardW = (mw - 14 * u) / 2
+    let cardH = Math.min(side ? 236 * u : 200 * u, cardW * 1.22)
+    if (!side) cardH = Math.max(96 * u, Math.min(cardH, H - 28 * u - headH - 16 * u - playH - under - 18 * u - panelH))
+    const leftH = cardH + 16 * u + playH + under
+    const blockH = headH + (side ? Math.max(leftH, panelH) : leftH + 18 * u + panelH)
+    const x = L.x, y = Math.max(14 * u, (H - blockH) / 2), top = y + headH
+    return { x, y, w: L.w, mw, cardW, cardH, top, playY: top + cardH + 16 * u, playH,
+      px: side ? x + mw + gap : x, py: side ? top : top + leftH + 18 * u, pw: side ? sideW : L.w, ph: panelH }
+  }
+  /** The top of a setup screen: a round Back, the title and a line under it. */
+  pageHead(x, y, w, title, sub, back) {
+    const u = this.u, b = 38 * u, tx = x + b + 14 * u
+    this.roundButton('back', x, y + 2 * u, b, back, () => this.arrow(x + b / 2, y + 2 * u + b / 2, -b * 0.42, P.INK))
+    this.text(title, tx, y + 18 * u, { size: 27, color: '#2d3a6b', max: w - b - 14 * u })
+    if (sub) this.text(sub, tx, y + 46 * u, { size: 13, bold: false, color: '#5b544c', max: w - b - 14 * u })
+  }
+  /** Champion and Fool side by side for `c.mode`; `set(fn)` runs fn and keeps the change. */
+  modeCards(c, S, set) {
+    const pick = m => set(() => { if (c.mode !== m) this.app.playSound('select', 0.35); c.mode = m })
+    this.modeCard('champion', S.x, S.top, S.cardW, S.cardH, c.mode === 'champion', pick('champion'))
+    this.modeCard('fool', S.x + S.cardW + 14 * this.u, S.top, S.cardW, S.cardH, c.mode === 'fool', pick('fool'))
+  }
+  /** The settings panel's paper. */
+  setupPanel(S) { this.panel(S.px, S.py, S.pw, S.ph, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 }) }
+  /** A setting's name in the panel, and a quiet word on the right. */
+  setLabel(t, x, y, w, extra) {
+    const u = this.u
+    this.text(t, x, y + 8 * u, { size: 12.5, color: '#7a7268' })
+    if (extra) this.text(extra, x + w, y + 8 * u, { size: 11, align: 'right', bold: false, color: '#9a948a', max: w * 0.62 })
+  }
+  /** The bots, how well they play and the board, `pitch` apart: the end of Solo Play's and Pass & Play's panels. */
+  tableSettings(c, ix, y, iw, humans, set, pitch = 56 * this.u) {
+    const u = this.u, total = humans + c.bots
+    this.setLabel(T.bots, ix, y, iw)
+    this.miniStepper('bots', ix, y + 20 * u, iw, c.bots, set(() => { c.bots-- }), set(() => { c.bots++ }), c.bots > 0 && total - 1 >= (c.mode === 'fool' ? 3 : 2), total < 6)
+    y += pitch
+    this.setLabel(T.level, ix, y, iw)
+    this.segmented('lvl', ix, y + 20 * u, iw, [1, 2, 3], T.levels, c.level, l => set(() => { c.level = l })(), !c.bots)
+    y += pitch
+    this.setLabel(T.board, ix, y, iw)
+    this.segmented('size', ix, y + 20 * u, iw, SIZES, SIZES.map(String), c.size, n => set(() => { c.size = n })())
+  }
+
+  /** Solo Play: me against the bots. */
+  drawSolo() {
+    const u = this.u, app = this.app, c = app.solo
+    const set = fn => () => { fn(); app.setupChanged(c) }
+    // beside the cards the rows take some of the room there is
+    const M = this.setupLayout(236 * u, 28 * u + 2 * 56 * u + 50 * u, 0, false)
+    const pitch = M.px !== M.x ? Math.max(56 * u, Math.min(80 * u, (M.playY + M.playH - M.top - 78 * u) / 2)) : 56 * u
+    const S = this.setupLayout(236 * u, 28 * u + 2 * pitch + 50 * u)
+    this.pageHead(S.x, S.y, S.w, T.soloPlay, T.soloHead, () => app.toScreen('menu'))
+    this.modeCards(c, S, set)
+    this.playButton(S.x, S.playY, S.mw, S.playH, () => app.startSolo())
+    this.setupPanel(S)
+    this.tableSettings(c, S.px + 16 * u, S.py + 14 * u, S.pw - 32 * u, 1, set, pitch)
     this.soundControl()
   }
 
-  /** A big button for the title screen: a label and a line under it, on a paper offset. */
-  bigButton(key, label, sub, x, y, w, h, action, color) {
+  /** Pass & Play: players at this computer by name, and bots if they like. */
+  drawPass() {
+    const u = this.u, app = this.app, c = app.pass, n = c.names.length
+    const set = fn => () => { fn(); app.setupChanged(c) }
+    const rowH = 34 * u, row = rowH + 6 * u
+    const S = this.setupLayout(272 * u, 14 * u + 22 * u + n * row + (n < 6 ? row : 0) + 10 * u + 3 * 56 * u - 6 * u + 14 * u)
+    this.pageHead(S.x, S.y, S.w, T.passPlay, T.passHead, () => app.toScreen('menu'))
+    this.modeCards(c, S, set)
+    this.playButton(S.x, S.playY, S.mw, S.playH, () => app.startPass())
+    this.setupPanel(S)
+    const ix = S.px + 16 * u, iw = S.pw - 32 * u
+    let y = S.py + 14 * u
+    this.setLabel(T.players, ix, y, iw, String(n))
+    y += 22 * u
+    for (let i = 0; i < n; i++) {
+      const g = this.g, b = rowH, fx = ix + 20 * u, fw = iw - 20 * u - (b + 4 * u) * (n > 2 ? 2 : 1)
+      g.fillStyle = P.PLAYER_COLORS[i]; g.beginPath(); g.arc(ix + 7 * u, y + rowH / 2, 7 * u, 0, Math.PI * 2); g.fill()
+      this.field('pn' + i, fx, y, fw, rowH, app.passName(i), v => app.setPassName(i, v), { size: 14 })
+      this.iconButton('pnr' + i, fx + fw + 4 * u, y, b, () => app.setPassName(i, app.randomName()), (cx, cy, s, col) => this.glyph('die', cx, cy, s, col))
+      if (n > 2) this.iconButton('pnx' + i, fx + fw + b + 8 * u, y, b, () => app.removePassPlayer(i), (cx, cy, s, col) => this.cross(cx, cy, s * 0.55, col))
+      y += row
+    }
+    if (n < 6) { this.dashedButton('addp', T.addPlayer, ix, y, iw, rowH, () => app.addPassPlayer()); y += row }
+    this.tableSettings(c, ix, y + 10 * u, iw, n, set)
+    this.soundControl()
+  }
+
+  /** Online (the web build): the mode, then Quick Match, a room of my own or a friend's room by its code. */
+  drawOnline() {
+    const u = this.u, app = this.app, web = this.p0.web, c = app.online
+    if (!web) { app.toScreen('menu'); return }
+    const set = fn => () => { fn(); app.saveSettings(); this.dirty = true }
+    const site = web.siteName, invited = web.invited
+    const panelH = 14 * u + (invited ? 26 * u : 0) + 20 * u + 40 * u + (this.nameNote ? 18 * u : 0) + 18 * u + 46 * u + 22 * u + 34 * u + 44 * u + 16 * u
+    const S = this.setupLayout(276 * u, panelH, 26 * u)
+    this.pageHead(S.x, S.y, S.w, T.online, T.onlineHead, () => app.toScreen('menu'))
+    this.modeCards(c, S, set)
+    this.playButton(S.x, S.playY, S.mw, S.playH, () => app.quickMatch(), { label: T.quickMatch, key: 'olquick', size: 28 })
+    this.text(T.quickTable, S.x + S.mw / 2, S.playY + S.playH + 18 * u, { size: 12, align: 'center', bold: false, color: '#7a7268', max: S.mw })
+    this.setupPanel(S)
+    const ix = S.px + 16 * u, iw = S.pw - 32 * u
+    let y = S.py + 14 * u
+    if (invited) { this.text(T.invitedRoom(invited), ix + iw / 2, y + 8 * u, { size: 13.5, align: 'center', color: '#e8743b', max: iw }); y += 26 * u }
+    // the name the others see: the site's own, or one typed here (a die for a random one)
+    this.setLabel(T.yourName, ix, y, iw)
+    y += 20 * u
+    if (site) this.text(T.playingAs(site), ix, y + 18 * u, { size: 15, max: iw })
+    else {
+      const b = 36 * u
+      this.field('olname', ix, y, iw - b - 6 * u, b, web.name, v => { this.nameNote = web.setName(v) || '' }, { size: 15 })
+      this.iconButton('olrandom', ix + iw - b, y, b, () => { this.nameNote = ''; web.setName(web.randomName()) }, (cx, cy, s, col) => this.glyph('die', cx, cy, s, col))
+    }
+    y += 40 * u
+    if (this.nameNote) { this.text(this.nameNote, ix, y + 6 * u, { size: 11, bold: false, color: '#5b544c', max: iw }); y += 18 * u }
+    y += 18 * u
+    // a room of my own: its code (and link) for friends
+    this.button('olcreate', T.createRoom, ix, y, iw, 46 * u, () => app.createRoom(), { primary: true, color: '#2d3a6b', size: 16 })
+    y += 46 * u
+    this.text(T.createSub(web.links), ix + iw / 2, y + 11 * u, { size: 11.5, align: 'center', bold: false, color: '#7a7268', max: iw })
+    y += 22 * u
+    // or a friend's room by its code
+    const g = this.g
+    g.font = this.font(12 * u, false)
+    const ow = g.measureText(T.orJoin).width + 16 * u
+    g.fillStyle = 'rgba(43,38,34,0.15)'
+    g.fillRect(ix, y + 17 * u, (iw - ow) / 2, 1.5 * u); g.fillRect(ix + (iw + ow) / 2, y + 17 * u, (iw - ow) / 2, 1.5 * u)
+    this.text(T.orJoin, ix + iw / 2, y + 17 * u, { size: 12, align: 'center', bold: false, color: '#7a7268' })
+    y += 34 * u
+    const jw = 92 * u, join = () => app.joinRoom(this.joinCode)
+    this.field('olcode', ix, y, iw - jw - 8 * u, 44 * u, this.joinCode, (v, how) => { this.joinCode = v; if (how === 'enter' && v.length >= 3) join() }, { size: 18, max: 5, align: 'center', code: true, hint: T.codeHint })
+    this.button('oljoin', T.join, ix + iw - jw, y, jw, 44 * u, join, { primary: !!invited || this.joinCode.length >= 3, size: 16 })
+    this.soundControl()
+  }
+
+  /** The web build's online attempt, over everything: what it is doing (with Cancel), or what went wrong. */
+  drawOnlineStatus(st) {
+    const W = this.W, H = this.H, u = this.u, g = this.g, web = this.p0.web
+    this.modal = true
+    this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
+    g.fillStyle = 'rgba(30,26,22,0.35)'; g.fillRect(0, 0, W, H)
+    const pw = Math.min(W - 20 * u, 420 * u)
+    g.font = this.font(15 * u, false)
+    const lines = st.busy ? [] : P.wrapText(g, st.error || '', pw - 48 * u).slice(0, 5)
+    const ph = st.busy ? 156 * u : (98 + lines.length * 21 + (st.detail ? 22 : 0)) * u
+    const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
+    this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.99)', stroke: st.busy ? '#2d3a6b' : '#d64545', lw: 2.5 })
+    if (st.busy) {
+      // a turning arc while it works
+      const cx = W / 2, cy = y + 38 * u, r = 13 * u, a = this.time * 5
+      g.lineWidth = 3.5 * u; g.lineCap = 'round'
+      g.strokeStyle = 'rgba(45,58,107,0.15)'; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke()
+      g.strokeStyle = '#2d3a6b'; g.beginPath(); g.arc(cx, cy, r, a, a + Math.PI * 1.4); g.stroke()
+      this.text(st.busy, W / 2, y + 76 * u, { size: 16, align: 'center', max: pw - 30 * u })
+      this.button('olcancel', T.cancel, W / 2 - 70 * u, y + ph - 58 * u, 140 * u, 42 * u, () => web.cancel(), { size: 15 })
+      return
+    }
+    let yy = y + 32 * u
+    for (const l of lines) { this.text(l, W / 2, yy, { size: 15, align: 'center', bold: false, max: pw - 30 * u }); yy += 21 * u }
+    if (st.detail) this.text(st.detail, W / 2, yy + 6 * u, { size: 11, align: 'center', bold: false, color: '#9a948a', max: pw - 30 * u })
+    const by = y + ph - 58 * u
+    // Quick Match found no one to play: the bots are always there
+    if (st.kind === 'quick') {
+      const bw = (pw - 52 * u) / 2
+      this.button('olbots', T.playBots, x + 20 * u, by, bw, 42 * u, () => { web.dismiss(); this.app.startSolo() }, { primary: true, size: 15 })
+      this.button('olok', T.ok, x + 32 * u + bw, by, bw, 42 * u, () => web.dismiss(), { size: 15 })
+    } else this.button('olok', T.ok, W / 2 - 70 * u, by, 140 * u, 42 * u, () => web.dismiss(), { primary: true, color: '#2d3a6b', size: 15 })
+  }
+
+  // ---------- buttons and fields of the menus ----------
+  /** The orange-into-gold plate of Play and Quick Match, on its paper offset; returns where its top is now (it lifts under the pointer). */
+  goldPlate(key, x, y, w, h, shine = true) {
+    const g = this.g, u = this.u, hov = this.hover === key, lift = hov ? 3 * u : 0, r = 18 * u
+    g.fillStyle = 'rgba(150,70,10,0.3)'; P.roundRect(g, x, y + 6 * u, w, h, r); g.fill()
+    y -= lift
+    g.save()
+    g.shadowColor = 'rgba(255,170,40,0.7)'; g.shadowBlur = (hov ? 26 : 16) * u
+    const gr = g.createLinearGradient(0, y, 0, y + h)
+    gr.addColorStop(0, '#ffd166'); gr.addColorStop(0.5, '#f7a03c'); gr.addColorStop(1, '#e8743b')
+    g.fillStyle = gr; P.roundRect(g, x, y, w, h, r); g.fill()
+    g.restore()
+    const rim = g.createLinearGradient(x, y, x + w, y + h)
+    rim.addColorStop(0, '#fff0b3'); rim.addColorStop(0.5, '#c58a0a'); rim.addColorStop(1, '#ffe08a')
+    g.strokeStyle = rim; g.lineWidth = 3 * u; P.roundRect(g, x, y, w, h, r); g.stroke()
+    if (shine) { g.strokeStyle = 'rgba(255,255,255,0.45)'; g.lineWidth = 1.5 * u; P.roundRect(g, x + 5 * u, y + 4 * u, w - 10 * u, h * 0.45, r - 5 * u); g.stroke() }
+    return y
+  }
+  /** White letters with a warm shadow, for the gold plate. */
+  plateText(t, x, y, size, opts = {}) {
+    const g = this.g, u = this.u
+    g.save()
+    g.shadowColor = 'rgba(120,50,0,0.45)'; g.shadowOffsetY = 2 * u; g.shadowBlur = 3 * u
+    this.text(t, x, y, { size, color: '#ffffff', ...opts })
+    g.restore()
+  }
+  /** The menu's Quick Match: the gold plate with a bolt in a ring, its name and a line under it. */
+  heroButton(key, title, sub, x, y, w, h, action) {
+    const u = this.u, g = this.g, y0 = y
+    y = this.goldPlate(key, x, y, w, h, false)
+    const ir = h * 0.3, icx = x + 20 * u + ir, icy = y + h / 2
+    g.fillStyle = 'rgba(255,255,255,0.3)'; g.beginPath(); g.arc(icx, icy, ir, 0, Math.PI * 2); g.fill()
+    this.glyph('bolt', icx, icy, ir * 1.25, '#ffffff')
+    const tx = icx + ir + 16 * u, tw = x + w - tx - 40 * u
+    this.plateText(title, tx, y + h * 0.4, 28, { max: tw })
+    this.plateText(sub, tx, y + h * 0.71, 13, { bold: false, max: tw })
+    this.arrow(x + w - 26 * u, y + h / 2, 18 * u, '#ffffff')
+    this.hits.push({ key, x, y, w, h: h + (y0 - y), action, go: true })
+  }
+  /** A tile of the main menu: an icon in a ring, its name and a line or two under it, on a paper offset. */
+  tile(key, icon, title, sub, x, y, w, h, color, action) {
     const g = this.g, u = this.u, hov = this.hover === key, lift = hov ? 3 * u : 0, r = 16 * u
     g.fillStyle = 'rgba(43,38,34,0.16)'; P.roundRect(g, x, y + 5 * u, w, h, r); g.fill()
-    g.fillStyle = color; P.roundRect(g, x, y - lift, w, h, r); g.fill()
-    g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1.5 * u; g.stroke()
-    this.text(label, x + w / 2, y - lift + h * 0.4, { size: 23, align: 'center', color: '#ffffff', max: w - 24 * u })
-    this.text(sub, x + w / 2, y - lift + h * 0.72, { size: 12.5, align: 'center', bold: false, color: 'rgba(255,255,255,0.82)', max: w - 24 * u })
-    this.hits.push({ key, x, y: y - lift, w, h: h + lift, action, go: true })
+    y -= lift
+    g.fillStyle = color; P.roundRect(g, x, y, w, h, r); g.fill()
+    // a lighter round in the corner, as the light catches the paper
+    g.save()
+    P.roundRect(g, x, y, w, h, r); g.clip()
+    g.fillStyle = 'rgba(255,255,255,0.09)'; g.beginPath(); g.arc(x + w * 0.92, y + h * 0.08, h * 0.6, 0, Math.PI * 2); g.fill()
+    g.restore()
+    g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1.5 * u; P.roundRect(g, x, y, w, h, r); g.stroke()
+    const pad = 14 * u, ir = 19 * u
+    g.fillStyle = 'rgba(255,255,255,0.22)'; g.beginPath(); g.arc(x + pad + ir, y + pad + ir, ir, 0, Math.PI * 2); g.fill()
+    this.glyph(icon, x + pad + ir, y + pad + ir, ir * 1.2, '#ffffff', color)
+    this.text(title, x + pad, y + h * 0.6, { size: 19, color: '#ffffff', max: w - pad * 2 })
+    g.font = this.font(11.5 * u, false)
+    P.wrapText(g, sub, w - pad * 2).slice(0, 2).forEach((l, i) => this.text(l, x + pad, y + h * 0.6 + (21 + i * 15) * u, { size: 11.5, bold: false, color: 'rgba(255,255,255,0.86)', max: w - pad * 2 }))
+    this.hits.push({ key, x, y, w, h: h + lift, action, go: true })
   }
+  /** A round white button with a drawn mark (`mark(cx, cy)`), as Back. */
+  roundButton(key, x, y, s, action, mark) {
+    const g = this.g, u = this.u, hov = this.hover === key, lift = hov ? 2 * u : 0
+    g.fillStyle = 'rgba(60,45,30,0.12)'; g.beginPath(); g.arc(x + s / 2 + 1 * u, y + s / 2 + 3 * u, s / 2, 0, Math.PI * 2); g.fill()
+    g.fillStyle = '#ffffff'; g.beginPath(); g.arc(x + s / 2, y + s / 2 - lift, s / 2, 0, Math.PI * 2); g.fill()
+    g.strokeStyle = hov ? 'rgba(43,38,34,0.45)' : 'rgba(43,38,34,0.25)'; g.lineWidth = 1.5 * u; g.stroke()
+    g.save(); g.translate(0, -lift); mark(); g.restore()
+    this.hits.push({ key, x, y: y - lift, w: s, h: s + lift, action })
+  }
+  /** A small square white button with a drawn mark: `mark(cx, cy, size, color)`. */
+  iconButton(key, x, y, s, action, mark) {
+    const hov = this.hover === key
+    this.button(key, '', x, y, s, s, action)
+    mark(x + s / 2, y + s / 2 - (hov ? 2 * this.u : 0), s * 0.5, hov ? P.INK : '#5b544c')
+  }
+  /** A quiet button with a dashed edge, for adding one more of something. */
+  dashedButton(key, label, x, y, w, h, action) {
+    const g = this.g, u = this.u, hov = this.hover === key
+    g.save()
+    g.fillStyle = hov ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.35)'; P.roundRect(g, x, y, w, h, 10 * u); g.fill()
+    g.setLineDash([5 * u, 4 * u]); g.strokeStyle = hov ? '#2d3a6b' : 'rgba(45,58,107,0.45)'; g.lineWidth = 1.5 * u; g.stroke()
+    g.restore()
+    this.text(label, x + w / 2, y + h / 2 + 1, { size: 13.5, align: 'center', color: '#2d3a6b', max: w - 10 * u })
+    this.hits.push({ key, x, y, w, h, action })
+  }
+  /**
+   * A text field: a white box with its text (and a pencil). A click puts a real input over it (the web
+   * build's p0.web.editText: a phone's keyboard, paste, any layout), and `done(value, how)` gets what was
+   * typed, how being 'enter' or 'blur'. Without one (Project 0) it only shows the text.
+   */
+  field(key, x, y, w, h, value, done, { size = 15, max = 14, align = 'left', code = false, hint = '' } = {}) {
+    const g = this.g, u = this.u, can = !!this.p0.web?.editText, on = this.editing === key, hov = this.hover === key && can
+    this.fields.add(key)
+    g.fillStyle = '#ffffff'; P.roundRect(g, x, y, w, h, 10 * u); g.fill()
+    g.strokeStyle = on ? '#2d3a6b' : hov ? 'rgba(43,38,34,0.45)' : 'rgba(43,38,34,0.25)'; g.lineWidth = (on ? 2 : 1.5) * u; g.stroke()
+    const pad = 12 * u
+    if (on) {
+      g.strokeStyle = 'rgba(45,58,107,0.18)'; g.lineWidth = 3 * u; P.roundRect(g, x - 3 * u, y - 3 * u, w + 6 * u, h + 6 * u, 12 * u); g.stroke()
+      this.editHandle?.move(x, y, w, h)
+      return
+    }
+    const pen = can && !code ? 20 * u : 0
+    this.text(value || hint, align === 'center' ? x + w / 2 : x + pad, y + h / 2 + 1, { size, align, bold: !!value, color: value ? P.INK : '#b5afa5', max: w - pad * 2 - pen })
+    if (pen) this.glyph('pencil', x + w - pad - 5 * u, y + h / 2, 13 * u, hov ? P.INK : '#9a948a')
+    if (can) this.hits.push({ key, x, y, w, h, action: () => this.startEdit(key, { x, y, w, h }, value, done, { size, max, align, code, pad }) })
+  }
+  startEdit(key, r, value, done, o) {
+    this.editHandle?.close(true)
+    this.editing = key
+    this.editHandle = this.p0.web.editText({
+      ...r, value, max: o.max, size: Math.round(o.size * this.u), pad: o.pad, align: o.align, code: o.code, font: P.FONT, color: P.INK,
+      onDone: (v, how) => {
+        if (this.editing === key) { this.editing = null; this.editHandle = null }
+        if (v != null) done(v, how)
+        this.dirty = true
+      },
+    })
+    this.dirty = true
+  }
+
+  // ---------- the menus' line icons ----------
+  /** A drawn icon `s` across: bolt, bot, pair, group, globe, pencil, die. `bg` keeps one figure in front of another. */
+  glyph(kind, cx, cy, s, color, bg = null) {
+    const g = this.g
+    g.save()
+    g.strokeStyle = color; g.fillStyle = color; g.lineWidth = Math.max(1, s * 0.085); g.lineCap = 'round'; g.lineJoin = 'round'
+    const pt = (a, b) => [cx + a * s, cy + b * s]
+    const shape = pts => { g.beginPath(); pts.forEach(([a, b], i) => (i ? g.lineTo(...pt(a, b)) : g.moveTo(...pt(a, b)))); g.closePath() }
+    const person = (dx, dy, k) => {
+      // head and shoulders, filled with the background so a figure in front hides the one behind
+      for (const draw of [() => g.arc(...pt(dx, dy - 0.17 * k), 0.15 * k * s, 0, Math.PI * 2), () => { g.arc(...pt(dx, dy + 0.36 * k), 0.27 * k * s, Math.PI, 0); g.closePath() }]) {
+        g.beginPath(); draw()
+        if (bg) { g.fillStyle = bg; g.fill() }
+        g.stroke()
+      }
+    }
+    if (kind === 'bolt') { shape([[0.1, -0.5], [-0.28, 0.06], [-0.02, 0.06], [-0.1, 0.5], [0.28, -0.08], [0.02, -0.08]]); g.fill() }
+    else if (kind === 'bot') {
+      g.beginPath(); g.moveTo(...pt(0, -0.26)); g.lineTo(...pt(0, -0.4)); g.stroke()
+      g.beginPath(); g.arc(...pt(0, -0.44), 0.06 * s, 0, Math.PI * 2); g.fill()
+      P.roundRect(g, cx - 0.38 * s, cy - 0.26 * s, 0.76 * s, 0.6 * s, 0.15 * s); g.stroke()
+      for (const d of [-1, 1]) { g.beginPath(); g.arc(...pt(d * 0.16, 0.01), 0.07 * s, 0, Math.PI * 2); g.fill() }
+      g.beginPath(); g.moveTo(...pt(-0.12, 0.18)); g.lineTo(...pt(0.12, 0.18)); g.stroke()
+    } else if (kind === 'pair') { person(0.17, -0.05, 0.85); person(-0.13, 0.04, 1) }
+    else if (kind === 'group') { person(-0.26, -0.03, 0.78); person(0.26, -0.03, 0.78); person(0, 0.05, 0.95) }
+    else if (kind === 'globe') {
+      g.beginPath(); g.arc(cx, cy, 0.42 * s, 0, Math.PI * 2); g.stroke()
+      g.beginPath(); g.ellipse(cx, cy, 0.18 * s, 0.42 * s, 0, 0, Math.PI * 2); g.stroke()
+      g.beginPath(); g.moveTo(...pt(-0.42, 0)); g.lineTo(...pt(0.42, 0)); g.moveTo(...pt(-0.36, -0.21)); g.lineTo(...pt(0.36, -0.21)); g.moveTo(...pt(-0.36, 0.21)); g.lineTo(...pt(0.36, 0.21)); g.stroke()
+    } else if (kind === 'pencil') {
+      g.translate(cx, cy); g.rotate(-Math.PI / 4)
+      g.strokeRect(-0.42 * s, -0.11 * s, 0.6 * s, 0.22 * s)
+      g.beginPath(); g.moveTo(0.18 * s, -0.11 * s); g.lineTo(0.44 * s, 0); g.lineTo(0.18 * s, 0.11 * s); g.closePath(); g.stroke()
+    } else if (kind === 'die') {
+      P.roundRect(g, cx - 0.4 * s, cy - 0.4 * s, 0.8 * s, 0.8 * s, 0.17 * s); g.stroke()
+      for (const [a, b] of [[-0.18, -0.18], [0, 0], [0.18, 0.18]]) { g.beginPath(); g.arc(...pt(a, b), 0.075 * s, 0, Math.PI * 2); g.fill() }
+    }
+    g.restore()
+  }
+  /** An arrow pointing right (`s` long), or left with a negative s. */
+  arrow(cx, cy, s, color) {
+    const g = this.g
+    g.save()
+    g.strokeStyle = color; g.lineWidth = Math.max(1.5, Math.abs(s) * 0.13); g.lineCap = 'round'; g.lineJoin = 'round'
+    g.beginPath(); g.moveTo(cx - s / 2, cy); g.lineTo(cx + s / 2, cy)
+    g.moveTo(cx + s / 2 - s * 0.38, cy - Math.abs(s) * 0.36); g.lineTo(cx + s / 2, cy); g.lineTo(cx + s / 2 - s * 0.38, cy + Math.abs(s) * 0.36)
+    g.stroke()
+    g.restore()
+  }
+  /** ✕, `s` across. */
+  cross(cx, cy, s, color) {
+    const g = this.g
+    g.save()
+    g.strokeStyle = color; g.lineWidth = Math.max(1.5, s * 0.16); g.lineCap = 'round'
+    g.beginPath(); g.moveTo(cx - s / 2, cy - s / 2); g.lineTo(cx + s / 2, cy + s / 2); g.moveTo(cx + s / 2, cy - s / 2); g.lineTo(cx - s / 2, cy + s / 2); g.stroke()
+    g.restore()
+  }
+
   /** A quiet button: no fill until the pointer is on it. */
   ghostButton(key, label, x, y, w, h, action) {
     const g = this.g, hov = this.hover === key
@@ -532,32 +850,49 @@ export class UI {
     this.text(label, x + w / 2, y + h / 2 + 1, { size: 15, align: 'center', color: hov ? P.INK : '#5b544c', max: w - 8 })
     this.hits.push({ key, x, y, w, h, action })
   }
-  /** Champion in gold, Fool in gloom: a big card to pick the mode by. */
+  /**
+   * Champion in gold, Fool in gloom: a big card to pick the mode by. A low one (a table's lobby) lies
+   * on its side, the picture beside the words; with no `action` it only shows the mode.
+   */
   modeCard(mode, x, y, w, h, selected, action) {
-    const g = this.g, u = this.u, key = 'mode' + mode, hov = this.hover === key
-    const champ = mode === 'champion'
-    const lift = selected ? 4 * u : hov ? 2 * u : 0
+    const g = this.g, u = this.u, key = 'mode' + mode, hov = this.hover === key && !!action
+    const champ = mode === 'champion', low = h < 150 * u
+    const lift = selected ? (low ? 2 : 4) * u : hov ? 2 * u : 0
     y -= lift
-    const r = 18 * u
+    const r = (low ? 14 : 18) * u
     g.save()
-    if (!selected) g.globalAlpha = hov ? 0.9 : 0.72
+    if (!selected) g.globalAlpha = hov ? 0.9 : action ? 0.72 : 0.42
     // the frame's glow, then the card
     g.save()
     g.shadowColor = champ ? 'rgba(255,186,40,0.75)' : 'rgba(34,18,48,0.6)'
-    g.shadowBlur = (selected ? 22 : 0) * u
-    g.shadowOffsetY = (selected ? 4 : 0) * u
+    g.shadowBlur = (selected ? (low ? 14 : 22) : 0) * u
+    g.shadowOffsetY = (selected ? (low ? 2 : 4) : 0) * u
     g.fillStyle = champ ? (selected ? '#fffaf0' : '#fffdf8') : (selected ? '#f1ecf5' : '#fffdf8')
     P.roundRect(g, x, y, w, h, r); g.fill()
     g.restore()
     const gr = g.createLinearGradient(x, y, x + w, y + h)
     if (champ) { gr.addColorStop(0, '#ffe08a'); gr.addColorStop(0.4, '#d29a12'); gr.addColorStop(0.65, '#fff0b3'); gr.addColorStop(1, '#b8800a') }
     else { gr.addColorStop(0, '#5a4470'); gr.addColorStop(0.45, '#241830'); gr.addColorStop(0.7, '#6e5a82'); gr.addColorStop(1, '#1c1226') }
-    g.strokeStyle = gr; g.lineWidth = (selected ? 5 : 2.5) * u
+    g.strokeStyle = gr; g.lineWidth = (selected ? (low ? 3.5 : 5) : 2.5) * u
     P.roundRect(g, x, y, w, h, r); g.stroke()
-    if (selected) {
+    if (selected && !low) {
       // a thin inner line, as on the gold cards
       g.strokeStyle = champ ? 'rgba(210,154,18,0.45)' : 'rgba(60,40,80,0.35)'; g.lineWidth = 1.2 * u
       P.roundRect(g, x + 8 * u, y + 8 * u, w - 16 * u, h - 16 * u, r - 6 * u); g.stroke()
+    }
+    if (low) {
+      const s = h * 0.62, tx = x + h * 0.55 + s * 0.62 + 10 * u
+      if (champ) this.crown(x + h * 0.55, y + h * 0.52, s)
+      else this.jesterCap(x + h * 0.55, y + h * 0.5, s)
+      // the line under the name goes on two when it is long
+      const tw = x + w - tx - 10 * u
+      g.font = this.font(11 * u, false)
+      const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, tw).slice(0, 2), two = lines.length > 1
+      this.text(champ ? T.champion : T.fool, tx, y + h * (two ? 0.3 : 0.38), { size: Math.min(19, h / u / 3.4), color: champ ? '#9a6b00' : '#3a2a4c', max: tw })
+      lines.forEach((l, i) => this.text(l, tx, y + h * (two ? 0.58 + i * 0.22 : 0.68), { size: 11, bold: false, color: '#5b544c', max: tw }))
+      g.restore()
+      if (action) this.hits.push({ key, x, y, w, h: h + lift, action })
+      return
     }
     const s = Math.min(w * 0.42, h * 0.36)
     if (champ) this.crown(x + w / 2, y + h * 0.31, s)
@@ -567,7 +902,7 @@ export class UI {
     const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u).slice(0, 2)
     lines.forEach((l, i) => this.text(l, x + w / 2, y + h * 0.79 + (i - (lines.length - 1) / 2) * 17 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c' }))
     g.restore()
-    this.hits.push({ key, x, y, w, h: h + lift, action })
+    if (action) this.hits.push({ key, x, y, w, h: h + lift, action })
   }
   crown(cx, cy, s) {
     const g = this.g
@@ -611,26 +946,17 @@ export class UI {
     }
     for (const a of [-0.3, 0, 0.3]) { g.fillStyle = '#8a7a99'; g.beginPath(); g.arc(cx + a * s, cy + 0.24 * s, s * 0.035, 0, Math.PI * 2); g.fill() }
   }
-  /** The big Play: orange into gold, on its paper offset, with a warm glow. */
-  playButton(x, y, w, h, action) {
-    const g = this.g, u = this.u, hov = this.hover === 'play', lift = hov ? 3 * u : 0, r = 18 * u
-    g.fillStyle = 'rgba(150,70,10,0.3)'; P.roundRect(g, x, y + 6 * u, w, h, r); g.fill()
-    y -= lift
-    g.save()
-    g.shadowColor = 'rgba(255,170,40,0.7)'; g.shadowBlur = (hov ? 26 : 16) * u
-    const gr = g.createLinearGradient(0, y, 0, y + h)
-    gr.addColorStop(0, '#ffd166'); gr.addColorStop(0.5, '#f7a03c'); gr.addColorStop(1, '#e8743b')
-    g.fillStyle = gr; P.roundRect(g, x, y, w, h, r); g.fill()
-    g.restore()
-    const rim = g.createLinearGradient(x, y, x + w, y + h)
-    rim.addColorStop(0, '#fff0b3'); rim.addColorStop(0.5, '#c58a0a'); rim.addColorStop(1, '#ffe08a')
-    g.strokeStyle = rim; g.lineWidth = 3 * u; P.roundRect(g, x, y, w, h, r); g.stroke()
-    g.strokeStyle = 'rgba(255,255,255,0.45)'; g.lineWidth = 1.5 * u; P.roundRect(g, x + 5 * u, y + 4 * u, w - 10 * u, h * 0.45, r - 5 * u); g.stroke()
-    g.save()
-    g.shadowColor = 'rgba(120,50,0,0.45)'; g.shadowOffsetY = 2 * u; g.shadowBlur = 3 * u
-    this.text(T.play, x + w / 2, y + h / 2 + 2 * u, { size: 32, align: 'center', color: '#ffffff' })
-    g.restore()
-    this.hits.push({ key: 'play', x, y, w, h: h + lift, action, go: true })
+  /** The big Play (or Start Game, Quick Match): orange into gold, on its paper offset, with a warm glow; grey while it cannot go. */
+  playButton(x, y, w, h, action, { label = T.play, key = 'play', size = 32, disabled = false } = {}) {
+    const g = this.g, u = this.u
+    if (disabled) {
+      g.fillStyle = '#e4e0d8'; P.roundRect(g, x, y, w, h, 18 * u); g.fill()
+      this.text(label, x + w / 2, y + h / 2 + 2 * u, { size: size * 0.85, align: 'center', color: '#9a948a', max: w - 20 * u })
+      return
+    }
+    const y1 = this.goldPlate(key, x, y, w, h)
+    this.plateText(label, x + w / 2, y1 + h / 2 + 2 * u, size, { align: 'center', max: w - 20 * u })
+    this.hits.push({ key, x, y: y1, w, h: h + (y - y1), action, go: true })
   }
   /** − value + in a small row, `w` wide. */
   miniStepper(key, x, y, w, value, dec, inc, canDec, canInc) {
@@ -639,18 +965,18 @@ export class UI {
     this.text(String(value), x + w / 2, y + b / 2 + 1, { size: 17, align: 'center' })
     this.button(key + '+', '+', x + w - b, y, b, b, inc, { disabled: !canInc, size: 16 })
   }
-  /** A row of quiet choices: the chosen one in white with a navy line. */
+  /** A row of quiet choices: the chosen one in white with a navy line (only shown, faintly, while it cannot change). */
   segmented(key, x, y, w, values, labels, current, pick, disabled = false) {
     const g = this.g, u = this.u, h = 30 * u, n = values.length, sw = w / n
     g.fillStyle = 'rgba(43,38,34,0.06)'; P.roundRect(g, x, y, w, h, 9 * u); g.fill()
     values.forEach((v, i) => {
       const k = key + v, on = v === current, hov = this.hover === k && !disabled
       const bx = x + i * sw
-      if (on && !disabled) {
-        g.fillStyle = '#ffffff'; P.roundRect(g, bx + 2 * u, y + 2 * u, sw - 4 * u, h - 4 * u, 7 * u); g.fill()
-        g.strokeStyle = 'rgba(45,58,107,0.55)'; g.lineWidth = 1.3 * u; g.stroke()
+      if (on) {
+        g.fillStyle = disabled ? 'rgba(255,255,255,0.55)' : '#ffffff'; P.roundRect(g, bx + 2 * u, y + 2 * u, sw - 4 * u, h - 4 * u, 7 * u); g.fill()
+        if (!disabled) { g.strokeStyle = 'rgba(45,58,107,0.55)'; g.lineWidth = 1.3 * u; g.stroke() }
       } else if (hov) { g.fillStyle = 'rgba(255,255,255,0.6)'; P.roundRect(g, bx + 2 * u, y + 2 * u, sw - 4 * u, h - 4 * u, 7 * u); g.fill() }
-      this.text(labels[i], bx + sw / 2, y + h / 2 + 1, { size: 12.5, align: 'center', bold: on, color: disabled ? '#b5afa5' : on ? '#2d3a6b' : '#7a7268', max: sw - 6 * u })
+      this.text(labels[i], bx + sw / 2, y + h / 2 + 1, { size: 12.5, align: 'center', bold: on, color: disabled ? (on ? '#8a847a' : '#b5afa5') : on ? '#2d3a6b' : '#7a7268', max: sw - 6 * u })
       if (!disabled) this.hits.push({ key: k, x: bx, y, w: sw, h, action: () => pick(v) })
     })
   }
@@ -704,13 +1030,6 @@ export class UI {
     })
   }
 
-  /** "Board" and a button per size (50, 70, 100 cells). */
-  sizeButtons(key, x, y, w, current, pick, enabled) {
-    const u = this.u, lw = 70 * u, gap = 6 * u, bw = (w - lw - gap * (SIZES.length - 1)) / SIZES.length
-    this.text(T.board, x, y + 18 * u, { size: 15 })
-    SIZES.forEach((n, i) => this.button(key + n, String(n), x + lw + i * (bw + gap), y, bw, 36 * u, () => pick(n), { selected: current === n, disabled: !enabled && current !== n, size: 15 }))
-  }
-
   drawHelp() {
     const W = this.W, H = this.H, u = this.u, app = this.app
     const pw = Math.min(W - 20 * u, 780 * u), ph = Math.min(H - 20 * u, 600 * u)
@@ -733,64 +1052,108 @@ export class UI {
     this.button('helpnext', this.helpPage === 0 ? T.theCards + ' →' : '← ' + T.rulesShort, x + pw - 200 * u, y + ph - 56 * u, 180 * u, 40 * u, () => { this.helpPage = 1 - this.helpPage; this.dirty = true }, { primary: true })
   }
 
+  /**
+   * A table's lobby: an online room, a Quick Match table or Project 0's Shared Table. The mode and the
+   * seats on the left with Start under them; the table's settings (board, bots) beside them. The host
+   * sets the table up; a Quick Match table plays as it was found, and its bots sit there as players.
+   */
   drawLobby() {
-    const W = this.W, H = this.H, u = this.u, app = this.app
-    const lob = app.lobby()
-    const isHost = this.p0.room.isHost
-    const pw = Math.min(W - 20 * u, 520 * u), ph = Math.min(H - 20 * u, 634 * u)
-    const x = (W - pw) / 2, y = (H - ph) / 2
-    this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.95)' })
-    // Quick Match: the table waits a little for players, then bots take the empty seats (main.js quickTick)
+    const H = this.H, u = this.u, app = this.app, me = this.p0.me.id
+    const lob = app.lobby(), isHost = this.p0.room.isHost, room = this.p0.web?.room
     const quick = app.quick(), left = quick ? app.quickLeft() : null
-    this.text(quick ? T.quickMatch : T.sharedTable, W / 2, y + 30 * u, { size: 22, align: 'center' })
-    const room = this.p0.web?.room, hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
-    this.text(room ? `${T.roomCode(room.code)} · ${hostLine}` : hostLine, W / 2, y + 56 * u, { size: 13, align: 'center', bold: false, color: '#5b544c' })
-    const bx = x + 24 * u, bw = pw - 48 * u
-    let yy = y + 76 * u
-    const modes = [['champion', 'Champion'], ['fool', 'Fool']]
-    modes.forEach(([m, label], i) => this.button('lmode' + m, label, bx + i * (bw / 2 + 4 * u), yy, bw / 2 - 4 * u, 36 * u, () => app.lobbyCmd({ t: 'mode', mode: m }), { selected: lob.mode === m, disabled: !isHost && lob.mode !== m, size: 15 }))
-    yy += 44 * u
-    this.sizeButtons('lsize', bx, yy, bw, lob.size || 100, n => app.lobbyCmd({ t: 'size', size: n }), isHost)
-    yy += 48 * u
-    const seats = lob.seats
-    for (let i = 0; i < 6; i++) {
-      const s = seats[i]
-      const ry = yy + i * 44 * u
-      this.panel(bx, ry, bw, 38 * u, { fill: s ? '#ffffff' : 'rgba(255,255,255,0.5)', r: 10 })
-      this.g.fillStyle = P.PLAYER_COLORS[i]
-      this.g.beginPath(); this.g.arc(bx + 20 * u, ry + 19 * u, 9 * u, 0, Math.PI * 2); this.g.fill()
-      if (!s) { this.text(quick ? T.waitingSeat : T.emptySeat, bx + 40 * u, ry + 19 * u, { size: 14, bold: false, color: '#9a948a' }); continue }
-      const label = s.b ? `${s.n} · ${['', 'Easy', 'Medium', 'Hard'][s.b]} bot` : s.n + (s.id === this.p0.me.id ? ` (${T.you})` : '')
-      this.text(label, bx + 40 * u, ry + 19 * u, { size: 14.5, max: bw - 170 * u })
-      if (isHost && s.b) {
-        this.button('lvl' + i, ['', 'Easy', 'Medium', 'Hard'][s.b], bx + bw - 150 * u, ry + 4 * u, 80 * u, 30 * u, () => app.lobbyCmd({ t: 'botlvl', seat: i }), { size: 13 })
-        this.button('rm' + i, '✕', bx + bw - 62 * u, ry + 4 * u, 52 * u, 30 * u, () => app.lobbyCmd({ t: 'remove', seat: i }), { size: 13 })
-      }
+    const setUp = isHost && !quick
+    const seats = lob.seats, n = seats.filter(Boolean).length, humans = seats.filter(s => s && !s.b).length
+    const bots = seats.map((s, i) => (s?.b && !s.q ? i : -1)).filter(i => i >= 0)
+    const L = this.menuLayout(660 * u)
+    const side = L.wide, gap = 24 * u, sideW = 230 * u
+    const mw = side ? L.w - sideW - gap : L.w
+    const cols = mw >= 400 * u ? 2 : 1, rowH = 42 * u, rowGap = 8 * u
+    const seatsH = Math.ceil(6 / cols) * (rowH + rowGap)
+    const modeH = 64 * u, headH = 76 * u
+    const leftH = modeH + 16 * u + 32 * u + seatsH + 6 * u + 58 * u + 36 * u
+    const pitch = 66 * u, panelH = 28 * u + (quick ? 0 : 2 * pitch) + 50 * u
+    const blockH = headH + (side ? Math.max(leftH, panelH) : leftH + 12 * u + panelH)
+    const x = L.x
+    let y = Math.max(14 * u, (H - blockH) / 2)
+    // the table's name, its room and host; on the right the way to bring friends
+    const hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
+    const bw = Math.min(150 * u, L.w * 0.32)
+    this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : room ? T.onlineRoom : T.sharedTable, room ? T.roomHead(room.code, hostLine) : hostLine, () => app.leaveLobby())
+    if (room && !quick) this.button('share', room.link ? T.shareLink : T.shareCode, x + L.w - bw, y + 4 * u, bw, 38 * u, () => this.shareRoom(), { primary: true, color: '#2d3a6b', size: 14 })
+    else if (!room) {
+      const others = app.notSeated().length
+      this.button('invite', T.invite + (others ? ` (${others})` : ''), x + L.w - bw, y + 4 * u, bw, 38 * u, () => { this.picker = true; this.dirty = true }, { size: 14, primary: others > 0, color: '#2d3a6b' })
     }
-    yy += 6 * 44 * u + 6 * u
-    const mine = seats.findIndex(s => s && s.id === this.p0.me.id)
-    const full = seats.filter(Boolean).length >= 6
-    if (mine < 0) this.button('sit', T.takeSeat, bx, yy, bw / 3 - 4 * u, 40 * u, () => app.lobbyCmd({ t: 'sit' }), { disabled: full, size: 15 })
-    else this.button('stand', T.leaveSeat, bx, yy, bw / 3 - 4 * u, 40 * u, () => app.lobbyCmd({ t: 'stand' }), { size: 15 })
-    this.button('addbot', T.addBot, bx + bw / 3, yy, bw / 3 - 4 * u, 40 * u, () => app.lobbyCmd({ t: 'bot' }), { disabled: !isHost || full, size: 15 })
-    const others = app.notSeated().length
-    this.button('invite', T.invite + (others ? ` (${others})` : ''), bx + bw * 2 / 3 + 4 * u, yy, bw / 3 - 4 * u, 40 * u, () => { this.picker = true; this.dirty = true }, { size: 15, primary: others > 0, color: '#2d3a6b' })
-    yy += 52 * u
-    const n = seats.filter(Boolean).length
-    const humans = seats.filter(s => s && !s.b).length
-    const can = isHost && n >= 2 && humans >= 1 && (lob.mode !== 'fool' || n >= 3)
-    this.button('lback', T.back, bx, yy, 120 * u, 44 * u, () => app.leaveLobby(), { size: 15 })
-    // at a Quick Match table Start Now seats the bots at once
-    if (isHost && quick) this.button('lstart', T.startNow, bx + 130 * u, yy, bw - 130 * u, 44 * u, () => app.quickStart(), { primary: true, disabled: !humans, size: 18 })
-    else if (isHost) this.button('lstart', T.startGame, bx + 130 * u, yy, bw - 130 * u, 44 * u, () => app.lobbyCmd({ t: 'start' }), { primary: true, disabled: !can, size: 18 })
-    else this.text(left != null ? T.quickStartsIn(Math.ceil(left)) : T.waitingHost, bx + 130 * u + (bw - 130 * u) / 2, yy + 22 * u, { size: left != null ? 16 : 14, align: 'center', bold: left != null, color: left != null ? '#2d3a6b' : '#5b544c' })
+    y += headH
+    const top = y
+    // the mode: the host picks it; a quick table plays the one it was found for
+    const cw = (mw - 14 * u) / 2
+    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('select', 0.35); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
+    this.modeCard('champion', x, y, cw, modeH, lob.mode === 'champion', pick('champion'))
+    this.modeCard('fool', x + cw + 14 * u, y, cw, modeH, lob.mode === 'fool', pick('fool'))
+    y += modeH + 16 * u
+    // the seats, and (at the Shared Table, where watching is fine) taking one or getting up
+    this.text(T.seatsN(n), x, y + 13 * u, { size: 15, color: '#2d3a6b' })
+    if (!room) {
+      const mine = seats.some(s => s && s.id === me), sw = 128 * u
+      if (!mine) this.button('sit', T.takeSeat, x + mw - sw, y, sw, 28 * u, () => app.lobbyCmd({ t: 'sit' }), { disabled: n >= 6, size: 13 })
+      else this.button('stand', T.leaveSeat, x + mw - sw, y, sw, 28 * u, () => app.lobbyCmd({ t: 'stand' }), { size: 13 })
+    }
+    y += 32 * u
+    const sw = (mw - (cols - 1) * 12 * u) / cols
+    for (let i = 0; i < 6; i++) this.seatRow(i, seats[i], x + (i % cols) * (sw + 12 * u), y + Math.floor(i / cols) * (rowH + rowGap), sw, rowH, quick, setUp)
+    y += seatsH + 6 * u
+    // Start (the host), or the countdown of a quick table, or waiting for the host
+    const can = n >= 2 && humans >= 1 && (lob.mode !== 'fool' || n >= 3)
+    if (isHost && quick) this.playButton(x, y, mw, 54 * u, () => app.quickStart(), { label: T.startNow, key: 'lstart', size: 24, disabled: !humans })
+    else if (isHost) this.playButton(x, y, mw, 54 * u, () => app.lobbyCmd({ t: 'start' }), { label: T.startGame, key: 'lstart', size: 24, disabled: !can })
+    else this.text(left != null ? T.quickStartsIn(Math.ceil(left)) : T.waitingHost, x + mw / 2, y + 27 * u, { size: left != null ? 18 : 15, align: 'center', bold: left != null, color: left != null ? '#2d3a6b' : '#5b544c', max: mw })
+    y += 58 * u
     if (left != null) {
-      if (isHost) this.text(T.quickWaiting(Math.ceil(left)), W / 2, yy + 62 * u, { size: 15, align: 'center', color: '#2d3a6b', max: bw })
+      if (isHost) this.text(T.quickWaiting(Math.ceil(left)), x + mw / 2, y + 8 * u, { size: 14, align: 'center', color: '#2d3a6b', max: mw })
       // the time left as a bar that empties
-      const g = this.g, by = yy + (isHost ? 78 : 58) * u, bh = 6 * u, f = Math.min(1, Math.ceil(left) / Math.ceil(app.quickWait.len))
-      g.fillStyle = 'rgba(43,38,34,0.12)'; P.roundRect(g, bx, by, bw, bh, bh / 2); g.fill()
-      if (f > 0) { g.fillStyle = '#e8743b'; P.roundRect(g, bx, by, Math.max(bh, bw * f), bh, bh / 2); g.fill() }
-    } else if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, W / 2, yy + 58 * u, { size: 12, align: 'center', bold: false, color: '#d64545' })
+      const g = this.g, by = y + (isHost ? 22 : 4) * u, bh = 6 * u, f = Math.min(1, Math.ceil(left) / Math.ceil(app.quickWait.len))
+      g.fillStyle = 'rgba(43,38,34,0.12)'; P.roundRect(g, x, by, mw, bh, bh / 2); g.fill()
+      if (f > 0) { g.fillStyle = '#e8743b'; P.roundRect(g, x, by, Math.max(bh, mw * f), bh, bh / 2); g.fill() }
+    } else if (isHost && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
+    // the table: its board, and the bots (not at a quick table, where they sit as players)
+    const px = side ? x + mw + gap : x, py = side ? top : top + leftH + 12 * u, pw = side ? sideW : L.w
+    this.panel(px, py, pw, panelH, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
+    const ix = px + 16 * u, iw = pw - 32 * u
+    let yy = py + 14 * u
+    this.setLabel(T.board, ix, yy, iw)
+    this.segmented('lsize', ix, yy + 20 * u, iw, SIZES, SIZES.map(String), lob.size || 100, s => app.lobbyCmd({ t: 'size', size: s }), !setUp)
+    if (quick) { this.soundControl(); return }
+    yy += pitch
+    this.setLabel(T.bots, ix, yy, iw)
+    this.miniStepper('lbots', ix, yy + 20 * u, iw, bots.length, () => app.lobbyCmd({ t: 'remove', seat: bots[bots.length - 1] }), () => app.lobbyCmd({ t: 'bot' }), setUp && bots.length > 0, setUp && n < 6)
+    yy += pitch
+    this.setLabel(T.level, ix, yy, iw)
+    const level = lob.level || seats[bots[0]]?.b || 2
+    this.segmented('llvl', ix, yy + 20 * u, iw, [1, 2, 3], T.levels, level, b => app.lobbyCmd({ t: 'level', b }), !setUp || !bots.length)
+    this.soundControl()
+  }
+  /** A seat at the table: its colour, who sits there (a bot says so, except a quick table's) and, for the host, ✕ for a bot. */
+  seatRow(i, s, x, y, w, h, quick, setUp) {
+    const g = this.g, u = this.u, mine = s && s.id === this.p0.me.id
+    this.panel(x, y, w, h, { fill: s ? '#ffffff' : 'rgba(255,255,255,0.4)', stroke: mine ? 'rgba(232,116,59,0.8)' : 'rgba(43,38,34,0.16)', r: 12, lw: mine ? 2 : 1.5 })
+    const cx = x + 20 * u, cy = y + h / 2
+    g.beginPath(); g.arc(cx, cy, 8 * u, 0, Math.PI * 2)
+    if (s) { g.fillStyle = P.PLAYER_COLORS[i]; g.fill() } else { g.strokeStyle = P.PLAYER_COLORS[i]; g.lineWidth = 2 * u; g.setLineDash([3 * u, 3 * u]); g.stroke(); g.setLineDash([]) }
+    if (!s) { this.text(quick ? T.waitingSeat : T.openSeat, x + 38 * u, cy, { size: 13.5, bold: false, color: '#9a948a', max: w - 48 * u }); return }
+    const bot = s.b && !s.q, host = !s.b && s.id === this.p0.room.host
+    const tag = bot ? T.botTag(T.levels[s.b - 1] || '') : host ? T.hostTag : ''
+    const rm = setUp && bot ? 30 * u : 0
+    let right = x + w - 8 * u - (rm ? rm + 4 * u : 0)
+    if (tag) {
+      g.font = this.font(10.5 * u)
+      const tw = g.measureText(tag).width + 14 * u
+      g.fillStyle = bot ? 'rgba(45,58,107,0.1)' : 'rgba(42,168,118,0.14)'; P.roundRect(g, right - tw, cy - 10 * u, tw, 20 * u, 10 * u); g.fill()
+      this.text(tag, right - tw / 2, cy + 1, { size: 10.5, align: 'center', color: bot ? '#2d3a6b' : '#1f7a55' })
+      right -= tw + 6 * u
+    }
+    this.text(s.n + (mine ? ` (${T.you})` : ''), x + 38 * u, cy + 1, { size: 14.5, max: right - x - 38 * u })
+    if (rm) this.iconButton('rm' + i, x + w - 8 * u - rm, cy - rm / 2, rm, () => this.app.lobbyCmd({ t: 'remove', seat: i }), (mx, my, sz, col) => this.cross(mx, my, sz * 0.55, col))
   }
 
   /** The Shared Table's invite list: everyone in the lot who is not sitting here, and the city's invitation. */
@@ -900,7 +1263,8 @@ export class UI {
         this.text(p.n + (i === me && !hot ? ' ★' : ''), nx, cy + rowH * 0.33, { size: 12.5, max: colW - rowH - 34 * u })
         this.text(sub, nx, cy + rowH * 0.72, { size: 10.5, bold: false, color: '#5b544c', max: colW - rowH - 34 * u })
       } else {
-        this.text(p.n + (i === me && !hot ? ` (${T.you})` : '') + (p.b ? ' · bot' : ''), nx, cy + 16 * u, { size: 14.5, max: colW - rowH - 50 * u })
+        // (a Quick Match table's bots, keeping their seats for players, sit there as players do)
+        this.text(p.n + (i === me && !hot ? ` (${T.you})` : '') + (p.b && !p.f ? ' · bot' : ''), nx, cy + 16 * u, { size: 14.5, max: colW - rowH - 50 * u })
         this.text(sub, nx, cy + 34 * u, { size: 12, bold: false, color: '#5b544c' })
       }
       // cards in hand and effects
@@ -1674,6 +2038,8 @@ export class UI {
     // redraw whenever any of that changes, not only when an event says so
     const trayKey = this.trayKey()
     if (trayKey !== this.trayKeyWas) { this.trayKeyWas = trayKey; this.dirty = true }
+    // an online attempt under way: its arc turns
+    if (this.p0.web?.status?.busy) { const k = Math.floor(this.time * 20); if (k !== this.spinTick) { this.spinTick = k; this.dirty = true } }
     this.slideRows(dt)
     this.checkTarget()
     this.sendUnpeek()

@@ -10,9 +10,10 @@
 // whose data channel does not open in a few seconds says hello there too. The relay answers the
 // first hello it gets and the player stays on that way.
 //
-// Quick Match uses a few well-known rooms (QM1, QM2, ...; each site has a prefix of its own): join the
-// first one that is open, or open a free one and wait; someone waiting alone in a higher one moves to
-// a lower one. A quick room whose game is on is open while a bot there keeps a seat for a player.
+// Quick Match uses a few well-known rooms (QM1, QM2, ...; each site has a prefix of its own, and Fool
+// tables an F after it: QMF1, ...): join the first one that is open, or open a free one and wait;
+// someone waiting alone in a higher one moves to a lower one. A quick room whose game is on is open
+// while a bot there keeps a seat for a player.
 import { Brokers, topic } from './mq.js'
 import { every } from './clock.js'
 import { safeName } from './names.js'
@@ -41,6 +42,8 @@ const rid = n => Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123
 const LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X' }
 export const cleanCode = s => String(s || '').toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, c => LOOKALIKE[c]).replace(/[^A-Z0-9]/g, '').slice(0, 5)
 const randomCode = () => Array.from({ length: 5 }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('')
+/** A quick room's code in parts: its prefix (the site's, with an F for Fool tables) and its number. */
+const quickParts = code => { const m = /^(.*?)(\d+)$/.exec(code || ''); return m ? { Q: m[1], k: +m[2] } : { Q: '', k: 0 } }
 
 const LOAD_MS = 15000 // PeerJS is loaded only when the player goes online
 const OPEN_MS = 20000 // the signalling server gives a peer its id
@@ -132,7 +135,8 @@ export class Net {
   get online() { return this.mode !== 'off' }
   /** How this tab reaches the room: 'relay' (it holds it), 'rtc', 'mq:<broker>', or null. */
   get via() { return this.mode === 'relay' ? 'relay' : this.up ? (this.up.kind === 'mq' ? 'mq:' + this.up.broker.name : 'rtc') : null }
-  info(fresh) { return { code: this.code, quick: this.quick, fresh: !!fresh } } // the link is the site's to give (p0web.js)
+  /** The room, for the game: `mode` is the one a quick room plays (the link is the site's to give, p0web.js). */
+  info(fresh) { return { code: this.code, quick: this.quick, mode: this.quick ? (quickParts(this.code).Q === this.QUICK + 'F' ? 'fool' : 'champion') : null, fresh: !!fresh } }
   /** `q`: the site's quick rooms, so a quick room of another site turns the player away (an old page sends none: GitHub Pages' QM). */
   hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back, q: this.QUICK } }
 
@@ -172,10 +176,11 @@ export class Net {
       } catch (e) { probe?.destroy(); throw e }
     })
   }
-  quickMatch() {
+  /** `mode`: Champion and Fool players look for tables of their own. */
+  quickMatch(mode = 'champion') {
     return this.run(async gen => {
       const alive = () => { if (gen !== this.gen) throw fail('cancelled') }
-      const Q = this.QUICK
+      const Q = this.QUICK + (mode === 'fool' ? 'F' : '')
       this.mq.keep(true)
       const probe = await this.openPeer()
       try {
@@ -546,7 +551,7 @@ export class Net {
   }
   /** Waiting alone in a quick room: move to a lower one if someone waits there. */
   async tryMerge() {
-    const Q = this.QUICK, k = +this.code.slice(Q.length)
+    const { Q, k } = quickParts(this.code)
     if (this.merging || !(k > 1) || this.roster.size !== 1 || this.s.state.lob?.status === 'playing') return
     this.merging = true
     const gen = this.gen

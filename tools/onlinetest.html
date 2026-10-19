@@ -19,7 +19,7 @@
 </head>
 <body>
 <h1>Online game: stage tests</h1>
-<p>Three players, each a whole game in an iframe (<code>index.html?sid=…</code>), through the real Play Online dialog,
+<p>Three players, each a whole game in an iframe (<code>index.html?sid=…</code>), through the game's real Online screen,
   lobby and Shared Table, over the real signalling server and brokers. Bob has no direct path (brokers only).
   Results in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
 <div id="frames"></div>
@@ -94,11 +94,14 @@ async function agree(keys, ms = 8000) {
 // typing a code: a phone's Russian keyboard gives Cyrillic look-alikes, a desktop one the letters on the same keys
 const LOOK = { A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н', P: 'Р', C: 'С', T: 'Т', X: 'Х', Y: 'У' }
 const RU_KEYS = { A: 'ф', B: 'и', C: 'с', D: 'в', E: 'у', F: 'а', G: 'п', H: 'р', J: 'о', K: 'л', M: 'ь', N: 'т', P: 'з', R: 'к', S: 'ы', T: 'е', U: 'г', V: 'м', W: 'ц', X: 'ч', Y: 'н', Z: 'я' }
-function dialog(k, name) {
-  const d = doc(k)
-  d.getElementById('ol-name').value = name
-  return d
-}
+const hit = (k, key) => app(k).ui.hits.find(h => h.key === key)
+/** Presses a button on screen `k` once it is drawn (the screen draws on its next frame). */
+async function press(k, key) { await waitFor(() => hit(k, key), 3000, `${key} on screen ${k}`); hit(k, key).action() }
+/** The Online screen on `k`, under the name typed there. */
+function online(k, name) { app(k).p0.web.setName(name); app(k).toScreen('online') }
+/** The Online screen's room code field on `k`: a click puts a real input over it. */
+async function codeField(k) { await press(k, 'olcode'); return doc(k).querySelector('input.tf') }
+const enter = input => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
 
 let code = null
 const steps = []
@@ -109,11 +112,10 @@ step('Three players load the game', async note => {
   ok(app('a').screen === 'menu' && app('b').screen === 'menu', 'not at the menu')
   note('menu on all three')
 })
-step('Ann creates a room from Play Online', async note => {
-  W('a').__csl.p0.web.online()
-  const d = dialog('a', 'Ann')
-  d.querySelector('[data-act=create]').click()
-  const ms = await waitFor(() => app('a').p0.web.room?.code && d.querySelector('.ol').hidden, 15000, 'a room and the dialog closed')
+step('Ann creates a room on the Online screen', async note => {
+  online('a', 'Ann')
+  await press('a', 'olcreate')
+  const ms = await waitFor(() => app('a').p0.web.room?.code && !app('a').p0.web.status, 15000, 'a room, and nothing more about it on screen')
   code = app('a').p0.web.room.code
   await waitFor(() => app('a').screen === 'lobby' && app('a').lobby().seats[0]?.n === 'Ann', 3000, 'Ann seated in the lobby')
   note(`room ${code} in ${ms} ms, link ${app('a').p0.web.room.link}`)
@@ -121,8 +123,8 @@ step('Ann creates a room from Play Online', async note => {
 })
 step('Bob types the code on a Russian keyboard and joins with no direct path', async note => {
   net('b').rtcOff = true
-  W('b').__csl.p0.web.online()
-  const d = dialog('b', 'Bob'), input = d.getElementById('ol-code')
+  online('b', 'Bob')
+  const input = await codeField('b')
   // a desktop layout: keydown with the key's place
   input.value = ''
   for (const ch of code) {
@@ -135,7 +137,8 @@ step('Bob types the code on a Russian keyboard and joins with no direct path', a
   input.dispatchEvent(new Event('input'))
   ok(input.value === code, `phone typed ${input.value}`)
   input.value = code
-  d.querySelector('.ol-join').requestSubmit()
+  enter(input)
+  ok(app('b').ui.joinCode === code && !doc('b').querySelector('input.tf'), 'Enter in the code field: ' + app('b').ui.joinCode)
   const ms = await waitFor(() => app('b').screen === 'lobby' && app('a').lobby().seats.some(s => s?.n === 'Bob'), 25000, 'Bob seated')
   ok(net('b').via?.startsWith('mq:'), 'Bob came by ' + net('b').via)
   note(`joined in ${ms} ms by ${net('b').via}`)
@@ -143,10 +146,9 @@ step('Bob types the code on a Russian keyboard and joins with no direct path', a
 })
 step('Cid opens the room\'s link and joins', async note => {
   await open('c', 'Cid', '&room=' + code)
-  const d = doc('c')
-  ok(!d.querySelector('.ol').hidden && d.getElementById('ol-code').value === code, 'the link did not open the dialog with the code')
-  dialog('c', 'Cid')
-  d.querySelector('.ol-join').requestSubmit()
+  await waitFor(() => app('c').screen === 'online' && app('c').ui.joinCode === code && app('c').p0.web.invited === code, 3000, 'the link opening the Online screen with the code')
+  app('c').p0.web.setName('Cid')
+  await press('c', 'oljoin')
   const ms = await waitFor(() => app('c').screen === 'lobby' && ['Ann', 'Bob', 'Cid'].every(n => app('a').lobby().seats.some(s => s?.n === n)), 20000, 'Cid seated')
   note(`joined in ${ms} ms by ${net('c').via}`)
   return ms
@@ -229,10 +231,10 @@ step('The host closes the game: Bob takes the table over and it goes on', async 
 })
 step('Cid comes back with the code: Continue Playing gives him his seat back', async note => {
   const cid = table('b').pl.findIndex(p => p.id === app('c').p0.me.id)
-  W('c').__csl.p0.web.online()
-  const d = dialog('c', 'Cid')
-  d.getElementById('ol-code').value = code
-  d.querySelector('.ol-join').requestSubmit()
+  online('c', 'Cid')
+  const input = await codeField('c')
+  input.value = code
+  enter(input)
   await waitFor(() => app('c').screen === 'game' && table('c')?.gid === table('b').gid, 20000, 'Cid at the table')
   ok(seatOf('c') < 0 && table('b').pl[cid].b > 0, 'the seat went back to Cid before he asked for it')
   await takeBack('c', cid, 'Cid')
@@ -246,10 +248,10 @@ step('Cid closes the page and opens the link in a new one: a new id, his seat ba
   F.c.remove()
   await waitFor(() => table('b').pl[cid].b > 0 && !app('b').p0.players.has(oldId), 30000, 'a bot in Cid\'s seat')
   await open('d', 'Cid', '&room=' + code) // another page: a new player id, the same name
-  const d = doc('d')
-  ok(!d.querySelector('.ol').hidden && app('d').p0.me.id !== oldId, 'the link did not open the dialog, or the id is the same')
-  dialog('d', 'Cid')
-  d.querySelector('.ol-join').requestSubmit()
+  await waitFor(() => app('d').screen === 'online' && app('d').ui.joinCode === code, 3000, 'the link opening the Online screen with the code')
+  ok(app('d').p0.me.id !== oldId, 'the id is the same')
+  app('d').p0.web.setName('Cid')
+  await press('d', 'oljoin')
   await waitFor(() => app('d').screen === 'game' && table('d')?.gid === table('b').gid, 20000, 'Cid at the table again')
   await takeBack('d', cid, 'Cid')
   await waitFor(() => seatOf('d') === cid && table('b').pl[cid].b === 0 && table('b').pl[cid].id === app('d').p0.me.id, 8000, 'Cid in his seat under the new id')

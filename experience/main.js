@@ -14,26 +14,51 @@ const BOT_DELAY = 1.1
 const TURN_SECONDS = 45
 const INVITE_SECONDS = 45
 const ABSENT_SECONDS = 20 // a seated player missing from the session this long gets a bot in their seat
-// Quick Match (the web build's quick rooms): bots take the empty seats when no one else comes for a while
+// Quick Match (the web build's quick rooms): when no one else comes, bots sit down one by one under
+// names like the players' own, and the game starts when the table is full or the time is up
 const QUICK_WAIT = 25 // seconds from the first player sitting down
 const QUICK_MORE = 10 // someone sat down: at least this long to look round
 const QUICK_TABLE = 4 // players at the table the bots fill it up to
+const QUICK_JOIN = [2, 5] // seconds before the first bot sits down
+const QUICK_NEXT = [3, 7] // and between the next ones
+const QUICK_FULL = 5 // a full table starts this soon
+const between = ([a, b]) => a + Math.random() * (b - a)
 const SETTINGS_KEY = 'csl-settings'
 const GAME_KEY = 'csl-game' // the game being played in this browser, so a reload carries on with it
+const MAX_NAME = 14
 
-/** The menu's choices and the sound, as last left (kept in this browser, where it lets us). */
+/** Players at a table the rules allow: Fool needs three. */
+const least = mode => (mode === 'fool' ? 3 : 2)
+/** Bots for `humans` players at a table the rules allow (at most 6 in all). */
+function fitBots(c, humans) { c.bots = Math.min(6 - humans, Math.max(c.bots, least(c.mode) - humans, 0)) }
+const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME)
+
+/**
+ * The menu's choices and the sound, as last left (kept in this browser, where it lets us): Solo Play
+ * (a first game is short and easy to win: Champion on the 50-cell board against two Easy bots), Pass
+ * & Play (the names typed for its players; '' is "Player n"), and the mode for online play.
+ */
 function loadSettings() {
-  const cfg = { mode: 'champion', humans: 1, bots: 3, level: 2, size: 100 }, sound = { on: true, vol: 0.8 }
+  const solo = { mode: 'champion', bots: 2, level: 1, size: 50 }
+  const pass = { mode: 'champion', names: ['', ''], bots: 0, level: 2, size: 50 }
+  const online = { mode: 'champion' }, sound = { on: true, vol: 0.8 }
   let saved = null
   try { saved = JSON.parse(globalThis.localStorage?.getItem(SETTINGS_KEY) || 'null') } catch { /* no storage here */ }
-  const c = saved?.cfg, int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
-  if (c && ['champion', 'fool'].includes(c.mode) && int(c.humans, 1, 6) && int(c.bots, 0, 5) && int(c.level, 1, 3) && R.SIZES.includes(c.size)) {
-    const total = c.humans + c.bots
-    if (total >= (c.mode === 'fool' ? 3 : 2) && total <= 6) Object.assign(cfg, { mode: c.mode, humans: c.humans, bots: c.bots, level: c.level, size: c.size })
+  const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
+  const ok = c => c && ['champion', 'fool'].includes(c.mode) && int(c.bots, 0, 5) && int(c.level, 1, 3) && R.SIZES.includes(c.size)
+  const take = (to, c) => Object.assign(to, { mode: c.mode, bots: c.bots, level: c.level, size: c.size })
+  // settings from before Solo Play and Pass & Play: one table for both
+  const old = saved?.cfg
+  if (ok(old) && int(old.humans, 1, 6)) {
+    if (old.humans > 1) { take(pass, old); pass.names = Array(old.humans).fill('') } else take(solo, old)
   }
+  if (ok(saved?.solo)) take(solo, saved.solo)
+  if (ok(saved?.pass) && Array.isArray(saved.pass.names) && int(saved.pass.names.length, 2, 6)) { take(pass, saved.pass); pass.names = saved.pass.names.map(cleanLocalName) }
+  if (['champion', 'fool'].includes(saved?.online?.mode)) online.mode = saved.online.mode
+  fitBots(solo, 1); fitBots(pass, pass.names.length)
   if (typeof saved?.sound?.on === 'boolean') sound.on = saved.sound.on
   if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
-  return { cfg, sound }
+  return { solo, pass, online, sound }
 }
 
 /** The game saved by the last LocalTable here, or null. */
@@ -49,14 +74,14 @@ function clearGame() { try { globalThis.localStorage?.removeItem(GAME_KEY) } cat
 
 // ---------- a game played in this browser: one player or several taking turns at it, and bots ----------
 class LocalTable {
-  /** `saved` (from loadGame) carries on with a game from before the page was reloaded. */
-  constructor(app, { kind, mode, humans = 1, bots, level, size = 100 }, saved = null) {
+  /** `saved` (from loadGame) carries on with a game from before the page was reloaded. `names`: the players' (Pass & Play). */
+  constructor(app, { kind, mode, humans = 1, names = [], bots, level, size = 100 }, saved = null) {
     this.app = app
     this.kind = kind
     this.humans = humans
     this.shown = -1 // with several players at one computer: whose hand was last shown
     const p0 = app.p0
-    this.cfg = { mode, humans, bots, level, size }
+    this.cfg = { mode, humans, names, bots, level, size }
     if (saved) {
       this.s = R.unpack(saved.s)
       // my seat: the session's id can be new after a reload
@@ -64,10 +89,10 @@ class LocalTable {
       if (mine) mine.id = p0.me.id
     } else {
       const seed = (Math.random() * 2 ** 31) >>> 0
-      const names = shuffle([...BOT_NAMES], seed)
+      const botNames = shuffle([...BOT_NAMES], seed)
       const players = []
-      for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: T.playerN(i + 1), b: 0, id: null, c: i })
-      for (let i = 0; i < bots; i++) players.push({ n: names[i], b: level, c: players.length })
+      for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: names[0] || p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: names[i] || T.playerN(i + 1), b: 0, id: null, c: i })
+      for (let i = 0; i < bots; i++) players.push({ n: botNames[i], b: level, c: players.length })
       this.s = R.createGame({ seed, mode, players, cells: size })
       this.s.gid = seed
     }
@@ -273,7 +298,8 @@ class SharedTable {
     // the turn clock, as everyone sees it
     if (s.turnNo !== this.turnSeen) { this.turnSeen = s.turnNo; this.turnStart = 0 }
     if (!view.busy) this.turnStart += dt
-    const human = !s.pl[s.cur].b && s.ph !== 'over'
+    // (a Quick Match bot plays as a player would: on the clock, and taking a moment to think)
+    const human = (!s.pl[s.cur].b || s.pl[s.cur].f) && s.ph !== 'over'
     this.app.turnLeft = human ? Math.max(0, TURN_SECONDS - this.turnStart) : null
     if (!this.p0.room.isHost || s.ph === 'over') return
     this.checkAbsent(dt)
@@ -282,7 +308,7 @@ class SharedTable {
     if (p.b) {
       this.wait -= dt * view.speed
       if (this.wait > 0) return
-      this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5)
+      this.wait = BOT_DELAY * (p.f ? 1 + Math.random() * 1.4 : 0.75 + Math.random() * 0.5)
       const r = R.apply(s, s.cur, R.botAction(s, s.cur))
       if (r.ok) this.publish(r.ev)
       return
@@ -348,9 +374,11 @@ function shuffle(a, seed) {
 class App {
   constructor(p0) {
     this.p0 = p0
-    this.screen = 'menu'
+    this.screen = 'menu' // menu | solo | pass | online | lobby | help | game
     const saved = loadSettings()
-    this.cfg = saved.cfg
+    this.solo = saved.solo // Solo Play: { mode, bots, level, size }
+    this.pass = saved.pass // Pass & Play: { mode, names, bots, level, size }
+    this.online = saved.online // online play: { mode }
     this.sound = saved.sound // { on, vol }
     this.speedIdx = 0
     this.waiting = 0
@@ -378,6 +406,8 @@ class App {
     // the log has caught up with the game: keep it with the saved game
     v.on('settled', () => { if (this.table?.kind === 'solo') this.table.save() })
     v.on('sfx', (name, vol) => this.sfx(name, vol))
+    // the web build's online play: how an attempt goes, and a room's link that brought the player
+    p0.web?.onChange?.(() => this.onWebStatus())
   }
   sfx(name, volume = 0.5) {
     const now = this.p0.time
@@ -391,7 +421,41 @@ class App {
     try { this.p0.sound.play(`sfx/${name}.mp3`, { volume: v }) } catch { /* sound is optional */ }
   }
   saveSettings() {
-    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ cfg: this.cfg, sound: this.sound })) } catch { /* no storage here */ }
+    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound })) } catch { /* no storage here */ }
+  }
+  /** A friendly random name (the web build's; Project 0 makes do with the bots'). */
+  randomName() { return this.p0.web?.randomName?.() || BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)] }
+  /** Pass & Play's player `i` as the game will call them. */
+  passName(i) { return this.pass.names[i] || (i === 0 && this.p0.me.name) || T.playerN(i + 1) }
+  setPassName(i, name) {
+    if (i < 0 || i >= this.pass.names.length) return
+    this.pass.names[i] = cleanLocalName(name)
+    this.saveSettings(); this.ui.dirty = true
+  }
+  /** Pass & Play: one more player (a bot gives way when the table is full), or player `i` leaves it. */
+  addPassPlayer() {
+    const c = this.pass
+    if (c.names.length >= 6) return
+    c.names.push('')
+    fitBots(c, c.names.length)
+    this.saveSettings(); this.ui.dirty = true
+  }
+  removePassPlayer(i) {
+    const c = this.pass
+    if (c.names.length <= 2 || i < 0 || i >= c.names.length) return
+    c.names.splice(i, 1)
+    fitBots(c, c.names.length)
+    this.saveSettings(); this.ui.dirty = true
+  }
+  /** A setup screen changed `c` (Solo Play's or Pass & Play's): keep a table the rules allow, and keep it. */
+  setupChanged(c) {
+    fitBots(c, c === this.pass ? c.names.length : 1)
+    this.saveSettings(); this.ui.dirty = true
+  }
+  /** A screen of the menus (the setup screens, How to Play): Back goes to the main one. */
+  toScreen(name) {
+    this.screen = name
+    this.ui.dirty = true
   }
   toggleSound() {
     const snd = this.sound
@@ -428,7 +492,7 @@ class App {
     if (!g) return false
     const c = g.cfg || {}
     try {
-      this.table = new LocalTable(this, { kind: 'solo', mode: g.s.mode, humans: c.humans | 0 || 1, bots: c.bots | 0, level: c.level | 0 || 2, size: g.s.n }, g)
+      this.table = new LocalTable(this, { kind: 'solo', mode: g.s.mode, humans: c.humans | 0 || 1, names: Array.isArray(c.names) ? c.names.map(cleanLocalName) : [], bots: c.bots | 0, level: c.level | 0 || 2, size: g.s.n }, g)
     } catch (e) { this.p0.log('resume', String(e)); clearGame(); return false }
     this.reward = null
     if (Number.isInteger(g.speed) && SPEEDS[g.speed]) this.speedIdx = g.speed
@@ -437,15 +501,19 @@ class App {
     this.ui.dirty = true
     return true
   }
-  startSolo() {
+  /** Solo Play: me against the bots, as set on its screen. */
+  startSolo() { const c = this.solo; this.startLocal({ mode: c.mode, humans: 1, names: [], bots: c.bots, level: c.level, size: c.size }) }
+  /** Pass & Play: the players take turns at this computer, with the bots set on its screen. */
+  startPass() { const c = this.pass; this.startLocal({ mode: c.mode, humans: c.names.length, names: c.names.map((n, i) => this.passName(i)), bots: c.bots, level: c.level, size: c.size }) }
+  /** A game at this computer: `setup` is { mode, humans, names, bots, level, size }. */
+  startLocal(setup) {
     // the first game after one that ended waits for whatever the site shows between games
-    if (this.finished) { this.finished = false; this.betweenGames(() => this.startSolo()); return }
+    if (this.finished) { this.finished = false; this.betweenGames(() => this.startLocal(setup)); return }
     this.saveSettings()
     this.reward = null
     this.ui.logLines = []
     this.ui.selected = -1; this.ui.cancelTarget()
-    const c = this.cfg
-    this.table = new LocalTable(this, { kind: 'solo', mode: c.mode, humans: c.humans, bots: c.bots, level: c.level, size: c.size })
+    this.table = new LocalTable(this, { kind: 'solo', ...setup })
     this.table.save()
     this.view.speed = SPEEDS[this.speedIdx][0]
     this.screen = 'game'
@@ -471,7 +539,7 @@ class App {
   rematch() {
     this.menuOpen = false
     if (this.table?.kind === 'shared') { if (this.p0.room.isHost) this.lobbyCmd({ t: 'start' }); return }
-    this.startSolo()
+    if (this.table?.kind === 'solo') this.startLocal(this.table.cfg); else this.startSolo()
   }
   openGameMenu() { this.menuOpen = !this.menuOpen; this.ui.dirty = true }
 
@@ -502,7 +570,10 @@ class App {
   // ----- shared table lobby (kept in room.state 'lob', written by the host) -----
   lobby() {
     const l = this.p0.room.state.lob
-    return l ? JSON.parse(JSON.stringify(l)) : { seats: [null, null, null, null, null, null], mode: 'champion', size: 100, status: 'lobby', gid: 0 }
+    if (l) return JSON.parse(JSON.stringify(l))
+    // a new table: a quick room plays its own mode, a room I opened the one chosen on the Online screen
+    const web = this.p0.web, mode = web?.room?.mode || (web ? this.online.mode : 'champion')
+    return { seats: [null, null, null, null, null, null], mode, size: 100, level: 2, status: 'lobby', gid: 0 }
   }
   /** Host: seats of players who left the session (during a game, say) are free again. */
   pruneSeats(lob) {
@@ -533,15 +604,22 @@ class App {
     const free = lob.seats.findIndex(s => !s)
     if (cmd.t === 'sit' && seated < 0 && free >= 0) {
       lob.seats[free] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
-      if (this.quick() && lob.status === 'lobby') lob.wait = countdown(Math.max(this.quickLeft() ?? QUICK_WAIT, QUICK_MORE))
+      if (this.quick() && lob.status === 'lobby') {
+        // a player came to a Quick Match table the bots have filled: one of them gets up again
+        const bots = lob.seats.map((s, i) => (s?.q ? i : -1)).filter(i => i >= 0)
+        if (lob.seats.filter(Boolean).length > QUICK_TABLE && bots.length) lob.seats[bots[bots.length - 1]] = null
+        lob.wait = countdown(Math.max(this.quickLeft() ?? QUICK_WAIT, QUICK_MORE))
+      }
     } else if (cmd.t === 'stand' && seated >= 0) lob.seats[seated] = null
     else if (!host) return
-    else if (cmd.t === 'mode') lob.mode = cmd.mode
+    else if (cmd.t === 'mode' && ['champion', 'fool'].includes(cmd.mode)) lob.mode = cmd.mode
     else if (cmd.t === 'size' && R.SIZES.includes(cmd.size)) lob.size = cmd.size
     else if (cmd.t === 'bot' && free >= 0) {
       const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
-      lob.seats[free] = { id: null, n: BOT_NAMES.find(n => !used.has(n)) || 'Bot', b: 2 }
+      lob.seats[free] = { id: null, n: BOT_NAMES.find(n => !used.has(n)) || 'Bot', b: lob.level || 2 }
     } else if (cmd.t === 'botlvl' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat].b = (lob.seats[cmd.seat].b % 3) + 1
+    // how well every bot at the table plays, and the ones added after
+    else if (cmd.t === 'level' && [1, 2, 3].includes(cmd.b)) { lob.level = cmd.b; for (const s of lob.seats) if (s?.b) s.b = cmd.b }
     else if (cmd.t === 'remove' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat] = null
     else if (cmd.t === 'start') { this.startShared(lob); return }
     this.p0.room.set('lob', lob)
@@ -694,6 +772,24 @@ class App {
     else return
     this.p0.room.set('lob', lob)
   }
+  // ----- the web build's online play (Project 0 has none: there the Shared Table stands in for it) -----
+  /** Quick Match: players looking for a game of the chosen mode sit down at one table (Project 0: a game against bots at once). */
+  quickMatch() {
+    const web = this.p0.web
+    if (!web) { this.startSolo(); return }
+    web.quickMatch(this.online.mode)
+  }
+  createRoom() { this.p0.web?.createRoom() }
+  joinRoom(code) { this.p0.web?.joinRoom(code) }
+  /** An online attempt changed (it is under way, failed or done), or a room's link brought the player: to the Online screen with its code. */
+  onWebStatus() {
+    const web = this.p0.web
+    if (web?.invited && this.ui.joinCode !== web.invited) {
+      this.ui.joinCode = web.invited
+      if (this.screen === 'menu') this.screen = 'online'
+    }
+    this.ui.dirty = true
+  }
   /** The web build joined an online room (sit down at its table) or left it. */
   onWebRoom(room, reason) {
     this.status.clear(); this.statusSent = null; this.invite = null
@@ -736,17 +832,39 @@ class App {
   quick() { return !!this.p0.web?.room?.quick }
   /** Seconds before bots take the empty seats of the Quick Match table, or null when it does not wait. */
   quickLeft() { return this.quickWait ? Math.max(0, this.quickWait.at - this.p0.time) : null }
-  /** Host of a Quick Match table in its lobby: the countdown runs while someone sits there, and at its end the game starts. */
+  /**
+   * Host of a Quick Match table in its lobby: the countdown runs while someone sits there; bots sit
+   * down one by one meanwhile, a full table starts soon, and at the countdown's end the game starts.
+   */
   quickTick() {
-    if (!this.quick() || !this.p0.room.isHost || this.screen !== 'lobby') return
+    if (!this.quick() || !this.p0.room.isHost || this.screen !== 'lobby') { this.quickBotAt = null; return }
     const l = this.p0.room.state.lob
-    if (l && l.status !== 'lobby') return
+    if (l && l.status !== 'lobby') { this.quickBotAt = null; return }
     const humans = !!l?.seats?.some(s => s && !s.b)
     if (humans !== !!l?.wait) {
       const lob = this.lobby()
       if (humans) lob.wait = countdown(QUICK_WAIT); else delete lob.wait
       this.p0.room.set('lob', lob)
     } else if (humans && this.quickLeft() === 0) this.quickStart()
+    else if (humans) {
+      this.quickBotAt ??= this.p0.time + between(QUICK_JOIN)
+      if (this.p0.time >= this.quickBotAt) this.quickBot()
+    } else this.quickBotAt = null
+  }
+  /** A bot takes a seat at the Quick Match table, as a player who found it would; a full table starts soon. */
+  quickBot() {
+    this.quickBotAt = this.p0.time + between(QUICK_NEXT)
+    const lob = this.lobby(), n = lob.seats.filter(Boolean).length, free = lob.seats.findIndex(s => !s)
+    if (n >= QUICK_TABLE || free < 0) return
+    lob.seats[free] = { id: null, n: this.quickName(lob), b: 2, q: 1 }
+    if (n + 1 >= QUICK_TABLE) lob.wait = countdown(Math.min(this.quickLeft() ?? QUICK_FULL, QUICK_FULL))
+    this.p0.room.set('lob', lob)
+  }
+  /** A name for a Quick Match bot like the players' own (the web build's random names), not one at the table already. */
+  quickName(lob) {
+    const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
+    for (let i = 0; i < 20; i++) { const n = this.p0.web?.randomName?.(); if (n && !used.has(n)) return n }
+    return BOT_NAMES.find(x => !used.has(x)) || 'Bot'
   }
   /** Host: bots take the empty seats of the Quick Match table (up to QUICK_TABLE players) and the game starts. */
   quickStart() {
@@ -754,12 +872,8 @@ class App {
     if (!this.quick() || !this.p0.room.isHost || lob.status !== 'lobby') return
     this.pruneSeats(lob)
     if (!lob.seats.some(s => s && !s.b)) return
-    const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
     for (let i = 0; i < lob.seats.length && lob.seats.filter(Boolean).length < QUICK_TABLE; i++) {
-      if (lob.seats[i]) continue
-      const n = BOT_NAMES.find(x => !used.has(x)) || 'Bot'
-      used.add(n)
-      lob.seats[i] = { id: null, n, b: 2 }
+      if (!lob.seats[i]) lob.seats[i] = { id: null, n: this.quickName(lob), b: 2, q: 1 }
     }
     this.startShared(lob)
   }
@@ -869,8 +983,12 @@ export default async function start(p0) {
   p0.on('wheel', e => { if (app.screen === 'game' && !app.adBusy) app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
   p0.on('keydown', e => {
     if (e.repeat || app.adBusy) return
-    if (app.screen === 'local' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
-    if ((app.screen === 'local' || app.screen === 'help') && e.code === 'Escape') { app.screen = 'menu'; app.ui.dirty = true; return }
+    // an online attempt on screen: Escape cancels it or puts its message away
+    const st = app.p0.web?.status
+    if (st) { if (e.code === 'Escape') { if (st.busy) app.p0.web.cancel(); else app.p0.web.dismiss() } return }
+    if (app.screen === 'solo' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
+    if (app.screen === 'pass' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startPass(); return }
+    if (['solo', 'pass', 'online', 'help'].includes(app.screen) && e.code === 'Escape') { app.toScreen('menu'); return }
     if (app.screen !== 'game') return
     const s = app.view.state, me = app.mySeat()
     if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }

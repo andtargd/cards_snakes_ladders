@@ -5,7 +5,8 @@
 import * as THREE from 'three'
 import { Net, cleanCode } from './net.js'
 import { safeName } from './names.js'
-import { onlineDialog, shareRoom } from './online.js'
+import { onlineControl, shareRoom } from './online.js'
+import { editText } from './textfield.js'
 import { platform, hooks, mute, roomLink, roomLinks } from './platform.js'
 import { every } from './clock.js'
 
@@ -134,13 +135,29 @@ const room = {
 }
 // the site's own name for the player (hooks.getUser), if it has one: then there is no name to type
 let siteName = null
-const dialog = onlineDialog({ net, me, links: roomLinks, siteName: () => siteName })
+const watchers = new Set()
+const online = onlineControl({ net, me, siteName: () => siteName, changed: () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } } })
 const web = {
   platform, // the site this runs on (web/platform.js)
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
-  room: null, // { code, quick, link } while in an online room; link is null where only the code is shared
-  online() { dialog.open() },
+  room: null, // { code, quick, mode, link } while in an online room; link is null where only the code is shared
+  get links() { return roomLinks() }, // whether rooms get links here (else only codes)
+  // the game's Online screen: how an attempt goes (null | { busy } | { error, detail, kind }), and a room's link that brought the player
+  get status() { return online.status },
+  get invited() { return online.invited },
+  onChange(fn) { watchers.add(fn) },
+  quickMatch(mode) { return online.quick(mode) },
+  createRoom() { return online.create() },
+  joinRoom(code) { return online.join(code) },
+  cancel() { online.cancel() },
+  dismiss() { online.dismiss() },
+  // the name the others see: the site's own, else the one typed here
+  get name() { return siteName || me.name },
+  get siteName() { return siteName },
+  setName: v => online.setName(v),
+  randomName: () => online.randomName(),
+  editText, // a real input over a box the game draws (web/textfield.js)
   share() { return shareRoom(web.room) },
   leave() { net.leave() },
 }
@@ -220,8 +237,8 @@ canvas.addEventListener('pointermove', e => ptr('pointermove', e))
 canvas.addEventListener('wheel', e => { e.preventDefault(); emit('wheel', { k: 'wheel', dx: e.deltaX, dy: e.deltaY }) }, { passive: false })
 canvas.addEventListener('contextmenu', e => e.preventDefault())
 const keyOf = e => ({ k: 'key', code: e.code, key: e.key.length <= 16 ? e.key : '', repeat: e.repeat, shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey })
-// keys typed into the online dialog are not the game's
-const typing = e => dialog.isOpen || /^(INPUT|TEXTAREA|BUTTON)$/.test(e.target?.tagName || '')
+// keys typed into a text field are not the game's
+const typing = e => /^(INPUT|TEXTAREA|BUTTON)$/.test(e.target?.tagName || '')
 addEventListener('keydown', e => { if (typing(e)) return; if (e.code === 'Tab' || e.code === 'Space') e.preventDefault(); input.keys.add(e.code); emit('keydown', keyOf(e)) })
 addEventListener('keyup', e => { input.keys.delete(e.code); if (!typing(e)) emit('keyup', keyOf(e)) })
 addEventListener('blur', () => input.keys.clear())
@@ -237,13 +254,13 @@ async function boot() {
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
-  // the room this tab was in before a reload: back to it; a room's link (or the site's invite): ask for a name and join
+  // the room this tab was in before a reload: back to it; a room's link (or the site's invite): its code on the Online screen
   const code = cleanCode(q.get('room') || hooks.inviteRoom())
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
   if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
-    dialog.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
-  } else if (code.length >= 3) dialog.open({ code })
+    online.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
+  } else if (code.length >= 3) online.invite(code)
   // animation frames stop in a hidden tab, and in some windows that still count as visible (an
   // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an
   // online table it hosts, going
