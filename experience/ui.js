@@ -444,7 +444,8 @@ export class UI {
     const { x, w } = this.menuLayout(440 * u)
     const table = this.p0.table || []
     const heroH = 92 * u, tileH = 124 * u, cx = x + w / 2
-    const ch = 152 * u + heroH + 14 * u + tileH + 14 * u + (room ? 44 : web ? 0 : 22) * u + 40 * u
+    // (the web build's line about its online room is always room taken: the menu does not move when it comes or goes)
+    const ch = 152 * u + heroH + 14 * u + tileH + 14 * u + (web ? 0 : 22) * u + 48 * u + (web ? 36 : 0) * u
     let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
     this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
     this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
@@ -461,12 +462,7 @@ export class UI {
       this.tile('online', 'globe', T.online, sub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', room ? () => app.openLobby() : () => app.toScreen('online'))
     } else this.tile('online', 'group', T.sharedTable, T.sharedTableSub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', () => app.openLobby())
     y += tileH + 14 * u
-    if (room) {
-      this.text(T.roomLine(room.code, app.sessionCount()), x + 4 * u, y + 16 * u, { size: 13.5, max: w * 0.4 - 8 * u })
-      this.button('share', room.link ? T.shareLink : T.shareCode, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
-      this.button('leaveroom', T.leaveRoom, x + w * 0.7 + 4 * u, y, w * 0.3 - 4 * u, 32 * u, () => web.leave(), { size: 13 })
-      y += 44 * u
-    } else if (!web) {
+    if (!web) {
       const others = app.sessionCount() - 1
       this.text(others > 0 ? T.othersHere(others) : T.aloneHere, cx, y + 2 * u, { size: 12, align: 'center', bold: false, color: '#7a7268', max: w })
       y += 22 * u
@@ -474,6 +470,13 @@ export class UI {
     this.ghostButton('help', T.howToPlay, cx - 168 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 0 })
     this.ghostButton('cards', T.theCards, cx + 8 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 1 })
     y += 48 * u
+    // the online room this tab is in, at the bottom: its code, sending it to friends, leaving it
+    if (room) {
+      this.text(T.roomLine(room.code, app.sessionCount()), x + 4 * u, y + 16 * u, { size: 13.5, max: w * 0.4 - 8 * u })
+      this.button('share', room.link ? T.shareLink : T.shareCode, x + w * 0.4, y, w * 0.3 - 4 * u, 32 * u, () => this.shareRoom(), { size: 13 })
+      this.button('leaveroom', T.leaveRoom, x + w * 0.7 + 4 * u, y, w * 0.3 - 4 * u, 32 * u, () => web.leave(), { size: 13 })
+    }
+    if (web) y += 36 * u
     // the week's table, quietly under the buttons
     if (table.length && y + 40 * u < H) {
       this.text(T.weekTable, cx, y + 8 * u, { size: 13, align: 'center', color: '#5b544c' })
@@ -1065,12 +1068,13 @@ export class UI {
   /**
    * A table's lobby: an online room, a Quick Match table or Project 0's Shared Table. The mode and the
    * seats on the left with Start under them; the table's settings (board, bots) beside them. The host
-   * sets the table up; a Quick Match table plays as it was found, and its bots sit there as players.
+   * sets the table up. A Quick Match table plays as it was found and is here only for a moment: its
+   * game starts at once.
    */
   drawLobby() {
     const H = this.H, u = this.u, app = this.app, me = this.p0.me.id
     const lob = app.lobby(), isHost = this.p0.room.isHost, room = this.p0.web?.room
-    const quick = app.quick(), left = quick ? app.quickLeft() : null
+    const quick = app.quick()
     const setUp = isHost && !quick
     const seats = lob.seats, n = seats.filter(Boolean).length, humans = seats.filter(s => s && !s.b).length
     const bots = seats.map((s, i) => (s?.b && !s.q ? i : -1)).filter(i => i >= 0)
@@ -1081,7 +1085,7 @@ export class UI {
     const seatsH = Math.ceil(6 / cols) * (rowH + rowGap)
     const modeH = 64 * u, headH = 76 * u
     const leftH = modeH + 16 * u + 32 * u + seatsH + 6 * u + 58 * u + 36 * u
-    const pitch = 66 * u, panelH = 28 * u + (quick ? 44 * u : 2 * pitch) + 50 * u
+    const pitch = 66 * u, panelH = 28 * u + (quick ? 0 : 2 * pitch) + 50 * u
     const blockH = headH + (side ? Math.max(leftH, panelH) : leftH + 12 * u + panelH)
     const x = L.x
     let y = Math.max(14 * u, (H - blockH) / 2)
@@ -1096,10 +1100,9 @@ export class UI {
     }
     y += headH
     const top = y
-    // the mode: the host picks it; at a quick table another mode (or board) is another table, looked for at once
+    // the mode: the host picks it; a quick table plays the one it was found for
     const cw = (mw - 14 * u) / 2
-    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('select', 0.35); app.lobbyCmd({ t: 'mode', mode: m }) }
-      : quick ? () => { if (lob.mode !== m) app.switchQuick({ mode: m, size: lob.size || 100 }) } : null)
+    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('select', 0.35); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
     this.modeCard('champion', x, y, cw, modeH, lob.mode === 'champion', pick('champion'))
     this.modeCard('fool', x + cw + 14 * u, y, cw, modeH, lob.mode === 'fool', pick('fool'))
     y += modeH + 16 * u
@@ -1114,19 +1117,13 @@ export class UI {
     const sw = (mw - (cols - 1) * 12 * u) / cols
     for (let i = 0; i < 6; i++) this.seatRow(i, seats[i], x + (i % cols) * (sw + 12 * u), y + Math.floor(i / cols) * (rowH + rowGap), sw, rowH, quick, setUp)
     y += seatsH + 6 * u
-    // Start (the host), or the countdown of a quick table, or waiting for the host
+    // Start (the host), or a quick table's game on its way, or waiting for the host
     const can = n >= 2 && humans >= 1 && (lob.mode !== 'fool' || n >= 3)
-    if (isHost && quick) this.playButton(x, y, mw, 54 * u, () => app.quickStart(), { label: T.startNow, key: 'lstart', size: 24, disabled: !humans })
+    if (quick) this.text(T.quickStarting, x + mw / 2, y + 27 * u, { size: 18, align: 'center', color: '#2d3a6b', max: mw })
     else if (isHost) this.playButton(x, y, mw, 54 * u, () => app.lobbyCmd({ t: 'start' }), { label: T.startGame, key: 'lstart', size: 24, disabled: !can })
-    else this.text(left != null ? T.quickStartsIn(Math.ceil(left)) : T.waitingHost, x + mw / 2, y + 27 * u, { size: left != null ? 18 : 15, align: 'center', bold: left != null, color: left != null ? '#2d3a6b' : '#5b544c', max: mw })
+    else this.text(T.waitingHost, x + mw / 2, y + 27 * u, { size: 15, align: 'center', color: '#5b544c', max: mw })
     y += 58 * u
-    if (left != null) {
-      if (isHost) this.text(T.quickWaiting(Math.ceil(left)), x + mw / 2, y + 8 * u, { size: 14, align: 'center', color: '#2d3a6b', max: mw })
-      // the time left as a bar that empties
-      const g = this.g, by = y + (isHost ? 22 : 4) * u, bh = 6 * u, f = Math.min(1, Math.ceil(left) / Math.ceil(app.quickWait.len))
-      g.fillStyle = 'rgba(43,38,34,0.12)'; P.roundRect(g, x, by, mw, bh, bh / 2); g.fill()
-      if (f > 0) { g.fillStyle = '#e8743b'; P.roundRect(g, x, by, Math.max(bh, mw * f), bh, bh / 2); g.fill() }
-    } else if (isHost && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
+    if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
     // the table: its board, and the bots (not at a quick table, where they sit as players)
     const px = side ? x + mw + gap : x, py = side ? top : top + leftH + 12 * u, pw = side ? sideW : L.w
     this.panel(px, py, pw, panelH, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
@@ -1134,14 +1131,8 @@ export class UI {
     let yy = py + 14 * u
     this.setLabel(T.board, ix, yy, iw)
     const size = lob.size || 100
-    this.segmented('lsize', ix, yy + 20 * u, iw, SIZES, SIZES.map(String), size, s => (quick ? s !== size && app.switchQuick({ mode: lob.mode, size: s }) : app.lobbyCmd({ t: 'size', size: s })), !setUp && !quick)
-    if (quick) {
-      const g = this.g
-      g.font = this.font(11.5 * u, false)
-      P.wrapText(g, T.quickSwitch, iw).slice(0, 3).forEach((l, i) => this.text(l, ix, yy + 66 * u + i * 15 * u, { size: 11.5, bold: false, color: '#7a7268', max: iw }))
-      this.soundControl()
-      return
-    }
+    this.segmented('lsize', ix, yy + 20 * u, iw, SIZES, SIZES.map(String), size, s => app.lobbyCmd({ t: 'size', size: s }), !setUp)
+    if (quick) { this.soundControl(); return }
     yy += pitch
     this.setLabel(T.bots, ix, yy, iw)
     this.miniStepper('lbots', ix, yy + 20 * u, iw, bots.length, () => app.lobbyCmd({ t: 'remove', seat: bots[bots.length - 1] }), () => app.lobbyCmd({ t: 'bot' }), setUp && bots.length > 0, setUp && n < 6)

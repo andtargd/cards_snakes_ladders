@@ -10,7 +10,7 @@ export const T = {
   quickGame: 'Quick Game', // Project 0: no online play, a game against bots at once
   quickGameSub: 'One click: you against the bots',
   soloPlay: 'Solo Play',
-  soloSub: 'You against bots. Works offline.',
+  soloSub: 'You against bots. No waiting.',
   soloHead: 'Pick a mode, the bots and a board.',
   passPlay: 'Pass & Play',
   passSub: 'Take turns on one screen, 2 to 6',
@@ -97,11 +97,8 @@ export const T = {
   botTag: level => `Bot · ${level}`,
   // Quick Match: players looking for a game (bots sit down with them as players would)
   quickMatch: 'Quick Match',
-  startNow: 'Start Now',
   waitingSeat: 'Waiting for a player…',
-  quickWaiting: n => `Looking for players · the game starts in ${n} s`,
-  quickSwitch: 'Another mode or board: you look for another table.',
-  quickStartsIn: n => (n > 0 ? `The game starts in ${n} s` : 'The game is starting…'),
+  quickStarting: 'The game is starting…',
   takesSeat: (name, old) => `${old} left: ${name} takes the seat`,
   quickSeated: 'You join a game under way: play on!',
   status: { menu: 'in the menu', solo: 'playing vs bots', lobby: 'at the table', shared: 'playing at the table' },
