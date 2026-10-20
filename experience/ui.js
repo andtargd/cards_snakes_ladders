@@ -67,6 +67,13 @@ void main() {
 }`
 
 const BURN_SECS = 0.8
+// text never gets smaller than this (CSS px) on a small screen, nor smaller than it is drawn at full size
+const MIN_TEXT = 12
+// on a touch screen a button takes a tap this close to it (CSS px across), however small it is drawn
+const TOUCH_HIT = 40
+// a card this wide (CSS px) shows its text 12.5 px tall (paper.js draws it 16.5 / 256 of the card's width):
+// a card held up to read is at least this big
+const CARD_READ = 12.5 * 256 / 16.5
 
 // the gold frame round the dice tray when it is my roll: a shine runs round it and rings go out, asking for a click
 const FRAME_VS = 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }'
@@ -132,12 +139,19 @@ export class UI {
 
   // ---------- canvas layer ----------
   resize() {
-    const W = this.p0.width, H = this.p0.height
+    // the screen's safe area (a phone's notch, rounded corners and home bar: p0.web.safe): the screen layer
+    // is laid out inside it, W x H from (ox, oy); the board and the paper behind the menus fill the whole screen
+    const FW = this.p0.width, FH = this.p0.height, sa = this.p0.web?.safe
+    const ins = [sa?.left, sa?.top, sa?.right, sa?.bottom].map(v => Math.max(0, Math.round(v || 0)))
+    this.FW = FW; this.FH = FH; this.ox = ins[0]; this.oy = ins[1]; this.safeKey = ins.join()
+    const W = Math.max(2, FW - ins[0] - ins[2]), H = Math.max(2, FH - ins[1] - ins[3])
     this.W = W; this.H = H
     this.dpr = Math.min(this.p0.pixelRatio || 1, 2)
-    this.u = THREE.MathUtils.clamp(Math.min(W / 1100, H / 680), 0.58, 1.6)
-    this.narrow = W < 720
-    this.cam.left = 0; this.cam.right = W; this.cam.top = H; this.cam.bottom = 0
+    // a phone held upright (a small screen on its side keeps the wide layout, only smaller)
+    this.narrow = W < 720 && H > W
+    // and it gets the menus' bigger unit: the board is under the panels there, not beside them
+    this.u = this.narrow ? THREE.MathUtils.clamp(Math.min(W / 440, H / 760), 0.58, 1.2) : THREE.MathUtils.clamp(Math.min(W / 1100, H / 680), 0.58, 1.6)
+    this.cam.left = -this.ox; this.cam.right = FW - this.ox; this.cam.top = H + this.oy; this.cam.bottom = H + this.oy - FH
     this.cam.updateProjectionMatrix()
     // the screen goes under the cards; the windows over it (menu, results, invitations) go over them
     this.base = this.makeLayer(this.base, 0)
@@ -146,15 +160,15 @@ export class UI {
     this.dirty = true
   }
   makeLayer(old, order) {
-    const W = this.W, H = this.H
+    const FW = this.FW, FH = this.FH
     if (old) { this.scene.remove(old.mesh); old.tex.dispose(); old.mesh.geometry.dispose(); old.mesh.material.dispose() }
-    const { c, g } = P.canvas(Math.max(2, Math.round(W * this.dpr)), Math.max(2, Math.round(H * this.dpr)))
+    const { c, g } = P.canvas(Math.max(2, Math.round(FW * this.dpr)), Math.max(2, Math.round(FH * this.dpr)))
     const tex = new THREE.CanvasTexture(c)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.generateMipmaps = false
     tex.minFilter = THREE.LinearFilter
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
-    mesh.position.set(W / 2, H / 2, order)
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(FW, FH), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }))
+    mesh.position.set(FW / 2 - this.ox, this.H + this.oy - FH / 2, order)
     mesh.renderOrder = order
     this.scene.add(mesh)
     return { c, g, tex, mesh, used: true }
@@ -184,10 +198,13 @@ export class UI {
   }
   dropCard(mesh) { this.scene.remove(mesh); mesh.material.dispose() }
 
-  /** Draws the layers under the dice tray (top = false) or over it (the windows and what stands on them). */
-  render(renderer, top) {
+  /**
+   * Draws what stands at render orders lo to hi: the screen under the dice tray (0-10), the cards over it
+   * (10-50: a card held up to read covers the tray), then the windows and what stands on them (50 up).
+   */
+  render(renderer, lo, hi = Infinity) {
     const shown = []
-    for (const o of this.scene.children) if (o.visible && (o.renderOrder >= 50) !== top) { o.visible = false; shown.push(o) }
+    for (const o of this.scene.children) if (o.visible && (o.renderOrder < lo || o.renderOrder >= hi)) { o.visible = false; shown.push(o) }
     renderer.render(this.scene, this.cam)
     for (const o of shown) o.visible = true
   }
@@ -300,7 +317,7 @@ export class UI {
     const want = text ? 1 : 0
     b.op += (want - b.op) * (1 - Math.exp(-(want ? 12 : 5) * dt))
     b.pop = Math.min(1, b.pop + dt * 4)
-    const k = this.u * 32 / 64 // the 64 px letters show about 32 px tall
+    const k = Math.max(this.u * 32 / 64, MIN_TEXT / 28) // the 64 px letters show about 32 px tall (the 28 px line under them no smaller than MIN_TEXT)
     const sc = 1024 * k * (0.9 + 0.1 * (1 - Math.pow(1 - b.pop, 3))) * (this.target || discard ? 1 + 0.012 * Math.sin(this.time * 3) : 1)
     b.mesh.scale.set(sc, sc, 1)
     // at the top, under the status and beside the players, so the board and its pieces stay clear to click
@@ -313,7 +330,7 @@ export class UI {
   /** Where the messages at the top of the game screen start (CSS px from the top): under the status. */
   bannerTop() {
     const u = this.u
-    return this.narrow ? (this.panelBottom || 0) + 50 * u : 72 * u
+    return this.narrow ? (this.panelBottom || 0) + 6 * u : 72 * u
   }
 
   // ---------- the First Match's tips: a paper bubble with a line, an arrow at what to click, a veil round it ----------
@@ -389,8 +406,8 @@ export class UI {
         return { x: x0, y: y0, w: x1 - x0, h: this.H - y0 }
       }
       case 'offer': return this.offerRect || null
-      case 'cell': { const p = this.app.view.cellScreen(tip.cell); return p ? { x: p.x - 12 * u, y: p.y - 14 * u, w: 24 * u, h: 22 * u } : null }
-      case 'el': { const p = this.app.view.elScreen(tip.el, tip.along); return p ? { x: p.x - 12 * u, y: p.y - 12 * u, w: 24 * u, h: 24 * u } : null }
+      case 'cell': { const p = this.app.view.cellScreen(tip.cell); return p ? { x: p.x - this.ox - 12 * u, y: p.y - this.oy - 14 * u, w: 24 * u, h: 22 * u } : null }
+      case 'el': { const p = this.app.view.elScreen(tip.el, tip.along); return p ? { x: p.x - this.ox - 12 * u, y: p.y - this.oy - 12 * u, w: 24 * u, h: 24 * u } : null }
     }
     return null
   }
@@ -403,7 +420,8 @@ export class UI {
     const u = this.u, W = this.W, H = this.H, M = 8 * u, L = 66 * Math.max(u, 0.8) // (room for the arrow)
     const clamp = THREE.MathUtils.clamp
     // the bubble keeps clear of my piece (the camera does not move for it: it would jump as tips come and go)
-    const avoid = this.app.screen === 'game' ? this.app.view.pieceBox(this.app.mySeat()) : null
+    const pb = this.app.screen === 'game' ? this.app.view.pieceBox(this.app.mySeat()) : null
+    const avoid = pb && { ...pb, x: pb.x - this.ox, y: pb.y - this.oy }
     const free = (bx, by) => !avoid || bx >= avoid.x + avoid.w || bx + w <= avoid.x || by >= avoid.y + avoid.h || by + h <= avoid.y
     const aside = (bx, by) => {
       if (free(bx, by)) return bx
@@ -477,7 +495,7 @@ export class UI {
     if (r) {
       const g = this.g, u = this.u, pad = 6 * u
       g.save()
-      g.fillStyle = 'rgba(30,26,22,0.46)'; g.fillRect(0, 0, this.W, this.H)
+      this.fillScreen('rgba(30,26,22,0.46)')
       g.globalCompositeOperation = 'destination-out'
       P.roundRect(g, r.x - pad, r.y - pad, r.w + pad * 2, r.h + pad * 2, 16 * u); g.fill()
       g.restore()
@@ -489,7 +507,14 @@ export class UI {
   }
 
   // ---------- drawing helpers ----------
-  font(px, bold = true) { return `${bold ? 'bold ' : ''}${Math.round(px)}px ${P.FONT}` }
+  /** A font `px` big (a size times the unit), but on a small screen no smaller than MIN_TEXT or its full size. */
+  font(px, bold = true) { return `${bold ? 'bold ' : ''}${this.textPx(px)}px ${P.FONT}` }
+  textPx(px) { return Math.round(Math.max(px, Math.min(px / this.u, MIN_TEXT))) }
+  /** The line height for text of a size: `pitch` units, or more where the text is kept bigger than the unit. */
+  lineH(size, pitch) { return Math.max(pitch * this.u, this.textPx(size * this.u) * 1.3) }
+  /** The whole screen in the layer's units: under the notch and the home bar as well (they are outside W x H). */
+  fillScreen(style) { this.g.fillStyle = style; this.g.fillRect(-this.ox, -this.oy, this.FW, this.FH) }
+  blockScreen() { this.hits.push({ key: 'block', x: -this.ox, y: -this.oy, w: this.FW, h: this.FH, action: () => {} }) }
   text(t, x, y, { size = 16, color = P.INK, align = 'left', bold = true, max } = {}) {
     const g = this.g
     g.font = this.font(size * this.u, bold)
@@ -518,12 +543,12 @@ export class UI {
   draw() {
     const W = this.W, H = this.H
     let g = this.g = this.base.g
-    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
-    g.clearRect(0, 0, W, H)
+    g.setTransform(this.dpr, 0, 0, this.dpr, this.ox * this.dpr, this.oy * this.dpr)
+    g.clearRect(-this.ox, -this.oy, this.FW, this.FH)
     this.hits = []
     this.modal = false // a window is open over the cards: they take no clicks
     this.trayRect = null // the tray on screen
-    this.trayDice = null // where the view draws the dice: the tray, unless it shows End Turn or values to choose
+    this.trayDice = null // where the view draws the dice (screen px): the tray, unless it shows End Turn or values to choose
     this.trayMode = null // 'roll', 'end', 'choose', 'pick' (one of two dice) or 'show'
     this.heroRect = null // the menu's big button, for a tip
     const app = this.app
@@ -550,8 +575,8 @@ export class UI {
     // the windows, on the layer over the cards
     const ov = this.over
     g = this.g = ov.g
-    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
-    if (ov.used) g.clearRect(0, 0, W, H)
+    g.setTransform(this.dpr, 0, 0, this.dpr, this.ox * this.dpr, this.oy * this.dpr)
+    if (ov.used) g.clearRect(-this.ox, -this.oy, this.FW, this.FH)
     if (app.screen === 'game') this.drawGameWindows()
     this.drawTip()
     if (this.picker) this.drawPicker()
@@ -597,28 +622,39 @@ export class UI {
     const fr = this.app.view.aside
     if (!wide) {
       const w = Math.min(cw, W - 32 * u)
-      if (paint) { this.g.fillStyle = 'rgba(243,238,229,0.9)'; this.g.fillRect(0, 0, W, H) }
+      if (paint) this.fillScreen('rgba(243,238,229,0.9)')
       return { wide, x: (W - w) / 2, w }
     }
     const zone = Math.min(W * 0.66, Math.max(W * 0.5, cw + 120 * u))
     if (!paint) return { wide, x: (zone - cw) / 2, w: cw }
-    fr.side = zone / (2 * W)
+    fr.side = (zone + this.ox) / (2 * this.FW)
     fr.scale = THREE.MathUtils.clamp((W - zone) / W * 1.45, 0.45, 0.8)
-    const g = this.g, gr = g.createLinearGradient(0, 0, zone * 1.15, 0)
+    const g = this.g, gr = g.createLinearGradient(0, 0, zone * 1.15, 0), x0 = -this.ox, y0 = -this.oy
     gr.addColorStop(0, 'rgba(243,238,229,1)'); gr.addColorStop(0.8, 'rgba(243,238,229,0.97)'); gr.addColorStop(1, 'rgba(243,238,229,0.3)')
-    g.fillStyle = gr; g.fillRect(0, 0, zone * 1.15, H)
+    g.fillStyle = gr; g.fillRect(x0, y0, zone * 1.15 - x0, this.FH)
     // a light veil keeps the board quiet behind the buttons
-    g.fillStyle = 'rgba(243,238,229,0.3)'; g.fillRect(zone * 1.15, 0, W - zone * 1.15, H)
+    g.fillStyle = 'rgba(243,238,229,0.3)'; g.fillRect(zone * 1.15, y0, this.FW + x0 - zone * 1.15, this.FH)
     return { wide, x: (zone - cw) / 2, w: cw }
   }
+
+  /**
+   * A title screen's width for one `w` units wide: on a small screen beside the board it takes more of the
+   * width (up to 60%), as its text is kept bigger there than the unit.
+   */
+  menuW(w) { return Math.max(w * this.u, Math.min(this.W * 0.6, w * 0.8)) }
 
   /** The main menu: Quick Match on top, then Solo Play, Pass & Play and Online; How to Play under them. */
   drawMenu() {
     const H = this.H, u = this.u, app = this.app
     const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
-    const { x, w } = this.menuLayout(440 * u)
+    const { x, w } = this.menuLayout(this.menuW(440))
     const table = this.p0.table || []
-    const heroH = 92 * u, tileH = 124 * u, cx = x + w / 2
+    const heroH = 92 * u, cx = x + w / 2
+    // the tiles: their lines, kept big on a small screen, may need a third line, and the tiles grow for it
+    const gap = 12 * u, tw = (w - gap * 2) / 3
+    const onlineSub = web ? (room ? T.inRoom(room.code) : web.invited ? T.invitedShort(web.invited) : T.onlineSub) : T.sharedTableSub
+    const subLines = Math.max(...[T.soloSub, T.passSub, onlineSub].map(t => this.wrap(t, 11.5, tw - 28 * u, false).length))
+    const lh = this.lineH(11.5, 15), tileH = Math.max(124 * u, 124 * u * 0.6 + this.tileGap() + (Math.min(3, subLines) - 1) * lh + 0.5 * lh + 4 * u)
     // (the web build's line about its online room is always room taken: the menu does not move when it comes or goes)
     const ch = 152 * u + heroH + 14 * u + tileH + 14 * u + (web ? 0 : 22) * u + 48 * u + (web ? 36 : 0) * u
     let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
@@ -631,13 +667,10 @@ export class UI {
     else this.heroButton('quick', web ? T.quickMatch : T.quickGame, web ? T.quickMatchSub(mode, app.online.size) : T.quickGameSub, x, y, w, heroH, () => app.quickMatch())
     this.heroRect = { x, y, w, h: heroH }
     y += heroH + 14 * u
-    const gap = 12 * u, tw = (w - gap * 2) / 3
     this.tile('solo', 'bot', T.soloPlay, T.soloSub, x, y, tw, tileH, '#7b5ce0', () => app.toScreen('solo'))
     this.tile('pass', 'pair', T.passPlay, T.passSub, x + tw + gap, y, tw, tileH, '#d64545', () => app.toScreen('pass'))
-    if (web) {
-      const sub = room ? T.inRoom(room.code) : web.invited ? T.invitedShort(web.invited) : T.onlineSub
-      this.tile('online', 'globe', T.online, sub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', room ? () => app.openLobby() : () => app.toScreen('online'))
-    } else this.tile('online', 'group', T.sharedTable, T.sharedTableSub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', () => app.openLobby())
+    if (web) this.tile('online', 'globe', T.online, onlineSub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', room ? () => app.openLobby() : () => app.toScreen('online'))
+    else this.tile('online', 'group', T.sharedTable, onlineSub, x + (tw + gap) * 2, y, tw, tileH, '#2d3a6b', () => app.openLobby())
     y += tileH + 14 * u
     if (!web) {
       const others = app.sessionCount() - 1
@@ -677,7 +710,7 @@ export class UI {
    */
   setupLayout(sideW, panelH, { mid = 0, under = 0, paint = true } = {}) {
     const u = this.u, H = this.H
-    const L = this.menuLayout(660 * u, paint)
+    const L = this.menuLayout(this.menuW(660), paint)
     const side = L.wide, gap = 24 * u, headH = 76 * u, playH = 64 * u
     const mw = side ? L.w - sideW - gap : L.w
     const cardW = (mw - 14 * u) / 2
@@ -708,7 +741,7 @@ export class UI {
   setLabel(t, x, y, w, extra) {
     const u = this.u
     this.text(t, x, y + 8 * u, { size: 12.5, color: '#7a7268' })
-    if (extra) this.text(extra, x + w, y + 8 * u, { size: 11, align: 'right', bold: false, color: '#9a948a', max: w * 0.62 })
+    if (extra) this.text(extra, x + w, y + 8 * u, { size: 11.5, align: 'right', bold: false, color: '#9a948a', max: w * 0.62 })
   }
   /** The bots, how well they play and the board, `pitch` apart: the end of Solo Play's and Pass & Play's panels. */
   tableSettings(c, ix, y, iw, humans, set, pitch = 56 * this.u) {
@@ -777,7 +810,9 @@ export class UI {
     const site = web.siteName, invited = web.invited
     // (laid out with room for the invitation and a word about the name, so they do not move the screen)
     const panelH = (inv, note) => 14 * u + (inv ? 26 * u : 0) + 20 * u + 40 * u + (note ? 18 * u : 0) + 18 * u + 46 * u + 22 * u + 34 * u + 44 * u + 16 * u
-    const S = this.setupLayout(276 * u, panelH(true, true), { mid: 46 * u, under: 26 * u })
+    // (the line under Quick Match goes on two where its text is kept big for a small screen)
+    const note = this.wrap(T.quickTable(app.quickSeats(c.size)), 12, this.setupLayout(276 * u, panelH(true, true), { paint: false }).mw, false).slice(0, 2)
+    const S = this.setupLayout(276 * u, panelH(true, true), { mid: 46 * u, under: 12 * u + note.length * this.lineH(12, 14) })
     S.ph = panelH(invited, this.nameNote)
     this.pageHead(S.x, S.y, S.w, T.online, T.onlineHead, () => app.toScreen('menu'))
     this.modeCards(c, S, set)
@@ -786,7 +821,7 @@ export class UI {
     this.text(T.board, S.x + 2 * u, S.midY + 16 * u, { size: 14, color: '#7a7268' })
     this.segmented('olsize', S.x + lw, S.midY + 1 * u, S.mw - lw, SIZES, SIZES.map(String), c.size, n => set(() => { c.size = n })())
     this.playButton(S.x, S.playY, S.mw, S.playH, () => app.quickMatch(), { label: T.quickMatch, key: 'olquick', size: 28 })
-    this.text(T.quickTable(app.quickSeats(c.size)), S.x + S.mw / 2, S.playY + S.playH + 18 * u, { size: 12, align: 'center', bold: false, color: '#7a7268', max: S.mw })
+    note.forEach((l, i) => this.text(l, S.x + S.mw / 2, S.playY + S.playH + 18 * u + i * this.lineH(12, 14), { size: 12, align: 'center', bold: false, color: '#7a7268', max: S.mw }))
     this.setupPanel(S)
     const ix = S.px + 16 * u, iw = S.pw - 32 * u
     let y = S.py + 14 * u
@@ -801,7 +836,7 @@ export class UI {
       this.iconButton('olrandom', ix + iw - b, y, b, () => { this.nameNote = ''; web.setName(web.randomName()) }, (cx, cy, s, col) => this.glyph('die', cx, cy, s, col))
     }
     y += 40 * u
-    if (this.nameNote) { this.text(this.nameNote, ix, y + 6 * u, { size: 11, bold: false, color: '#5b544c', max: iw }); y += 18 * u }
+    if (this.nameNote) { this.text(this.nameNote, ix, y + 6 * u, { size: 11.5, bold: false, color: '#5b544c', max: iw }); y += 18 * u }
     y += 18 * u
     // a room of my own: its code (and link) for friends
     this.button('olcreate', T.createRoom, ix, y, iw, 46 * u, () => app.createRoom(), { primary: true, color: '#2d3a6b', size: 16 })
@@ -826,12 +861,12 @@ export class UI {
   drawOnlineStatus(st) {
     const W = this.W, H = this.H, u = this.u, g = this.g, web = this.p0.web
     this.modal = true
-    this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
-    g.fillStyle = 'rgba(30,26,22,0.35)'; g.fillRect(0, 0, W, H)
+    this.blockScreen()
+    this.fillScreen('rgba(30,26,22,0.35)')
     const pw = Math.min(W - 20 * u, 420 * u)
     g.font = this.font(15 * u, false)
     const lines = st.busy ? [] : P.wrapText(g, st.error || '', pw - 48 * u).slice(0, 5)
-    const ph = st.busy ? 156 * u : (98 + lines.length * 21 + (st.detail ? 22 : 0)) * u
+    const ph = st.busy ? 156 * u : 98 * u + lines.length * this.lineH(15, 21) + (st.detail ? 22 : 0) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.99)', stroke: st.busy ? '#2d3a6b' : '#d64545', lw: 2.5 })
     if (st.busy) {
@@ -845,8 +880,8 @@ export class UI {
       return
     }
     let yy = y + 32 * u
-    for (const l of lines) { this.text(l, W / 2, yy, { size: 15, align: 'center', bold: false, max: pw - 30 * u }); yy += 21 * u }
-    if (st.detail) this.text(st.detail, W / 2, yy + 6 * u, { size: 11, align: 'center', bold: false, color: '#9a948a', max: pw - 30 * u })
+    for (const l of lines) { this.text(l, W / 2, yy, { size: 15, align: 'center', bold: false, max: pw - 30 * u }); yy += this.lineH(15, 21) }
+    if (st.detail) this.text(st.detail, W / 2, yy + 6 * u, { size: 11.5, align: 'center', bold: false, color: '#9a948a', max: pw - 30 * u })
     const by = y + ph - 58 * u
     // Quick Match found no one to play: the bots are always there
     if (st.kind === 'quick') {
@@ -910,11 +945,15 @@ export class UI {
     const pad = 14 * u, ir = 19 * u
     g.fillStyle = 'rgba(255,255,255,0.22)'; g.beginPath(); g.arc(x + pad + ir, y + pad + ir, ir, 0, Math.PI * 2); g.fill()
     this.glyph(icon, x + pad + ir, y + pad + ir, ir * 1.2, '#ffffff', color)
-    this.text(title, x + pad, y + h * 0.6, { size: 19, color: '#ffffff', max: w - pad * 2 })
+    this.text(title, x + pad, y + 124 * u * 0.6, { size: 19, color: '#ffffff', max: w - pad * 2 })
     g.font = this.font(11.5 * u, false)
-    P.wrapText(g, sub, w - pad * 2).slice(0, 2).forEach((l, i) => this.text(l, x + pad, y + h * 0.6 + (21 + i * 15) * u, { size: 11.5, bold: false, color: 'rgba(255,255,255,0.86)', max: w - pad * 2 }))
+    // (the title stands where it does on a tile of two lines; a third goes under them)
+    const ty = y + 124 * u * 0.6
+    P.wrapText(g, sub, w - pad * 2).slice(0, 3).forEach((l, i) => this.text(l, x + pad, ty + this.tileGap() + i * this.lineH(11.5, 15), { size: 11.5, bold: false, color: 'rgba(255,255,255,0.86)', max: w - pad * 2 }))
     this.hits.push({ key, x, y, w, h: h + lift, action, go: true })
   }
+  /** From a tile's title down to its first line: more where their text is kept bigger than the unit. */
+  tileGap() { return Math.max(21 * this.u, this.textPx(19 * this.u) / 2 + this.lineH(11.5, 15) * 0.6) }
   /** A round white button with a drawn mark (`mark(cx, cy)`), as Back. */
   roundButton(key, x, y, s, action, mark) {
     const g = this.g, u = this.u, hov = this.hover === key, lift = hov ? 2 * u : 0
@@ -953,7 +992,7 @@ export class UI {
     const pad = 12 * u
     if (on) {
       g.strokeStyle = 'rgba(45,58,107,0.18)'; g.lineWidth = 3 * u; P.roundRect(g, x - 3 * u, y - 3 * u, w + 6 * u, h + 6 * u, 12 * u); g.stroke()
-      this.editHandle?.move(x, y, w, h)
+      this.editHandle?.move(x + this.ox, y + this.oy, w, h)
       return
     }
     const pen = can && !code ? 20 * u : 0
@@ -965,7 +1004,7 @@ export class UI {
     this.editHandle?.close(true)
     this.editing = key
     this.editHandle = this.p0.web.editText({
-      ...r, value, max: o.max, size: Math.round(o.size * this.u), pad: o.pad, align: o.align, code: o.code, font: P.FONT, color: P.INK,
+      ...r, x: r.x + this.ox, y: r.y + this.oy, value, max: o.max, size: Math.round(o.size * this.u), pad: o.pad, align: o.align, code: o.code, font: P.FONT, color: P.INK,
       onDone: (v, how) => {
         if (this.editing === key) { this.editing = null; this.editHandle = null }
         if (v != null) done(v, how)
@@ -1076,21 +1115,22 @@ export class UI {
       else this.jesterCap(x + h * 0.55, y + h * 0.5, s)
       // the line under the name goes on two when it is long
       const tw = x + w - tx - 10 * u
-      g.font = this.font(11 * u, false)
+      g.font = this.font(11.5 * u, false)
       const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, tw).slice(0, 2), two = lines.length > 1
       this.text(champ ? T.champion : T.fool, tx, y + h * (two ? 0.3 : 0.38), { size: Math.min(19, h / u / 3.4), color: champ ? '#9a6b00' : '#3a2a4c', max: tw })
-      lines.forEach((l, i) => this.text(l, tx, y + h * (two ? 0.58 + i * 0.22 : 0.68), { size: 11, bold: false, color: '#5b544c', max: tw }))
+      lines.forEach((l, i) => this.text(l, tx, y + h * (two ? 0.58 + i * 0.22 : 0.68), { size: 11.5, bold: false, color: '#5b544c', max: tw }))
       g.restore()
       if (action) this.hits.push({ key, x, y, w, h: h + lift, action })
       return
     }
-    const s = Math.min(w * 0.42, h * 0.36)
-    if (champ) this.crown(x + w / 2, y + h * 0.31, s)
-    else this.jesterCap(x + w / 2, y + h * 0.31, s)
-    this.text(champ ? T.champion : T.fool, x + w / 2, y + h * 0.6, { size: Math.min(26, w / u / 7.5), align: 'center', color: champ ? '#9a6b00' : '#3a2a4c' })
+    // (the line under the name, kept big on a small screen, may go on three: the picture and the name go up for it)
     g.font = this.font(12.5 * u, false)
-    const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u).slice(0, 2)
-    lines.forEach((l, i) => this.text(l, x + w / 2, y + h * 0.79 + (i - (lines.length - 1) / 2) * 17 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c' }))
+    const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u).slice(0, 3), three = lines.length > 2
+    const s = Math.min(w * 0.42, h * (three ? 0.3 : 0.36)), lh = this.lineH(12.5, 17)
+    if (champ) this.crown(x + w / 2, y + h * (three ? 0.25 : 0.31), s)
+    else this.jesterCap(x + w / 2, y + h * (three ? 0.25 : 0.31), s)
+    this.text(champ ? T.champion : T.fool, x + w / 2, y + h * (three ? 0.5 : 0.6), { size: Math.min(26, w / u / 7.5), align: 'center', color: champ ? '#9a6b00' : '#3a2a4c' })
+    lines.forEach((l, i) => this.text(l, x + w / 2, (three ? y + h * 0.5 + 1.05 * lh + i * lh : y + h * 0.79 + (i - (lines.length - 1) / 2) * lh), { size: 12.5, align: 'center', bold: false, color: '#5b544c' }))
     g.restore()
     if (action) this.hits.push({ key, x, y, w, h: h + lift, action })
   }
@@ -1201,7 +1241,7 @@ export class UI {
     const kx = x + w * v, hov = this.hover === key || this.drag?.key === key
     g.fillStyle = '#ffffff'; g.strokeStyle = hov ? '#e8743b' : 'rgba(43,38,34,0.35)'; g.lineWidth = 1.5 * u
     g.beginPath(); g.arc(kx, cy, (hov ? 9 : 8) * u, 0, Math.PI * 2); g.fill(); g.stroke()
-    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - x) / w), end: () => { app.saveSettings(); app.playSound('select', 0.5) } })
+    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - this.ox - x) / w), end: () => { app.saveSettings(); app.playSound('select', 0.5) } })
   }
   /** The title screens' corner: the slider, then the speaker. */
   soundControl() {
@@ -1226,24 +1266,23 @@ export class UI {
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.96)' })
     this.text(this.helpPage === 0 ? T.howToPlay : T.theCards, W / 2, y + 30 * u, { size: 22, align: 'center' })
+    // the web build: the First Match again, tips and all, between the buttons or (a narrow screen) over them
+    const replay = this.helpPage === 0 && !!this.p0.web, rw = Math.min(180 * u, pw - 390 * u), beside = rw > 90 * u
     if (this.helpPage === 0) {
       const g = this.g
       let yy = y + 74 * u
       for (const [head, para] of T.rules) {
-        this.text(head, x + 30 * u, yy, { size: 16, color: '#e8743b' }); yy += 23 * u
+        this.text(head, x + 30 * u, yy, { size: 16, color: '#e8743b' }); yy += this.lineH(16, 23)
         g.font = this.font(15 * u, false)
         const lines = P.wrapText(g, para, pw - 60 * u)
-        for (const l of lines) { this.text(l, x + 30 * u, yy, { size: 15, bold: false }); yy += 21 * u }
+        for (const l of lines) { this.text(l, x + 30 * u, yy, { size: 15, bold: false }); yy += this.lineH(15, 21) }
         yy += 12 * u
-        if (yy > y + ph - 70 * u) break
+        if (yy > y + ph - (replay && !beside ? 108 : 70) * u) break
       }
     }
     this.button('helpback', T.back, x + 20 * u, y + ph - 56 * u, 130 * u, 40 * u, () => { app.screen = 'menu'; this.dirty = true })
-    // the web build: the First Match again, tips and all
-    if (this.helpPage === 0 && this.p0.web) {
-      const rw = Math.min(180 * u, pw - 390 * u)
-      if (rw > 90 * u) this.ghostButton('replay', T.replayTutorial, x + 160 * u + (pw - 370 * u - rw) / 2, y + ph - 54 * u, rw, 36 * u, () => app.startFirstMatch())
-    }
+    if (replay && beside) this.ghostButton('replay', T.replayTutorial, x + 160 * u + (pw - 370 * u - rw) / 2, y + ph - 54 * u, rw, 36 * u, () => app.startFirstMatch())
+    else if (replay) this.ghostButton('replay', T.replayTutorial, W / 2 - 90 * u, y + ph - 98 * u, 180 * u, 36 * u, () => app.startFirstMatch())
     this.button('helpnext', this.helpPage === 0 ? T.theCards + ' →' : '← ' + T.rulesShort, x + pw - 200 * u, y + ph - 56 * u, 180 * u, 40 * u, () => { this.helpPage = 1 - this.helpPage; this.dirty = true }, { primary: true })
   }
 
@@ -1260,7 +1299,7 @@ export class UI {
     const setUp = isHost && !quick
     const seats = lob.seats, n = seats.filter(Boolean).length, humans = seats.filter(s => s && !s.b).length
     const bots = seats.map((s, i) => (s?.b && !s.q ? i : -1)).filter(i => i >= 0)
-    const L = this.menuLayout(660 * u)
+    const L = this.menuLayout(this.menuW(660))
     const side = L.wide, gap = 24 * u, sideW = 230 * u
     const mw = side ? L.w - sideW - gap : L.w
     const cols = mw >= 400 * u ? 2 : 1, rowH = 42 * u, rowGap = 8 * u
@@ -1337,10 +1376,10 @@ export class UI {
     const rm = setUp && bot ? 30 * u : 0
     let right = x + w - 8 * u - (rm ? rm + 4 * u : 0)
     if (tag) {
-      g.font = this.font(10.5 * u)
+      g.font = this.font(11.5 * u)
       const tw = g.measureText(tag).width + 14 * u
       g.fillStyle = bot ? 'rgba(45,58,107,0.1)' : 'rgba(42,168,118,0.14)'; P.roundRect(g, right - tw, cy - 10 * u, tw, 20 * u, 10 * u); g.fill()
-      this.text(tag, right - tw / 2, cy + 1, { size: 10.5, align: 'center', color: bot ? '#2d3a6b' : '#1f7a55' })
+      this.text(tag, right - tw / 2, cy + 1, { size: 11.5, align: 'center', color: bot ? '#2d3a6b' : '#1f7a55' })
       right -= tw + 6 * u
     }
     this.text(s.n + (mine ? ` (${T.you})` : ''), x + 38 * u, cy + 1, { size: 14.5, max: right - x - 38 * u })
@@ -1355,8 +1394,8 @@ export class UI {
     const pw = Math.min(W - 20 * u, 430 * u), ph = (128 + rows * 46 + 64) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2)
     this.modal = true
-    this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
-    this.g.fillStyle = 'rgba(30,26,22,0.35)'; this.g.fillRect(0, 0, W, H)
+    this.blockScreen()
+    this.fillScreen('rgba(30,26,22,0.35)')
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.98)', stroke: '#2d3a6b', lw: 2.5 })
     this.text(T.inviteTitle, W / 2, y + 32 * u, { size: 21, align: 'center', color: '#2d3a6b' })
     const room = this.p0.web?.room
@@ -1390,8 +1429,8 @@ export class UI {
     const pw = Math.min(W - 20 * u, 400 * u), ph = (ending ? 196 : 174) * u
     const x = (W - pw) / 2, y = Math.max(10 * u, H * 0.3 - ph / 2)
     this.modal = true
-    this.hits.push({ key: 'block', x: 0, y: 0, w: W, h: H, action: () => {} })
-    this.g.fillStyle = 'rgba(30,26,22,0.3)'; this.g.fillRect(0, 0, W, H)
+    this.blockScreen()
+    this.fillScreen('rgba(30,26,22,0.3)')
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.99)', stroke: '#e8743b', lw: 3 })
     const p = this.p0.players.get(inv.from)
     this.g.fillStyle = p?.color || '#2d3a6b'
@@ -1417,11 +1456,14 @@ export class UI {
     const hot = app.hotseat()
     const curtain = app.curtain()
     // players panel: the highest on the board at the top, the rows slide when places change
-    const pw = this.narrow ? Math.min(W - 16 * u, 340 * u) : 236 * u
-    const rowH = this.narrow ? 34 * u : 48 * u
+    // (on a small screen no narrower or lower than its text, kept big there, needs)
+    const pw = this.narrow ? W - 20 * u : Math.max(236 * u, 186)
+    const rowH = this.narrow ? 38 * u : Math.max(48 * u, 38)
     const cols = this.narrow ? 2 : 1
     const colW = (pw - (cols - 1) * 6 * u) / cols
-    const px = 10 * u, py = 10 * u
+    // (on a phone held upright the status stands at the top beside the corner buttons, the players under them)
+    const cb = Math.max(40 * u, 32), rx = W - cb - 10 * u, cornerX = rx - 2 * cb - 26 * u
+    const px = 10 * u, py = this.narrow ? 58 * u : 10 * u
     const tgtPlayers = this.target && this.target.kind === 'player' ? this.target.list : null
     const { order, leader, last } = this.standing(s)
     if (this.rowsGid !== s.gid || this.rowsCols !== cols) { this.rows.clear(); this.rowsGid = s.gid; this.rowsCols = cols }
@@ -1451,12 +1493,17 @@ export class UI {
       const nx = cx + rowH * 0.95
       const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos)
       if (this.narrow) {
-        this.text(p.n + (i === me && !hot ? ' ★' : ''), nx, cy + rowH * 0.33, { size: 12.5, max: colW - rowH - 34 * u })
-        this.text(sub, nx, cy + rowH * 0.72, { size: 10.5, bold: false, color: '#5b544c', max: colW - rowH - 34 * u })
+        this.text(p.n + (i === me && !hot ? ' ★' : ''), nx, cy + rowH * 0.32, { size: 13.5, max: colW - rowH - 34 * u })
+        this.text(sub, nx, cy + rowH * 0.71, { size: 11.5, bold: false, color: '#5b544c', max: colW - rowH - 34 * u })
       } else {
         // (a Quick Match table's bots, keeping their seats for players, sit there as players do)
-        this.text(p.n + (i === me && !hot ? ` (${T.you})` : '') + (p.b && !p.f ? ' · bot' : ''), nx, cy + 16 * u, { size: 14.5, max: colW - rowH - 50 * u })
-        this.text(sub, nx, cy + 34 * u, { size: 12, bold: false, color: '#5b544c' })
+        this.text(p.n + (i === me && !hot ? ` (${T.you})` : '') + (p.b && !p.f ? ' · bot' : ''), nx, cy + rowH / 3, { size: 14.5, max: colW - rowH - 50 * u })
+        // the cell and tier, or only the cell where the text (kept big on a small screen) would run into the effects
+        const nfx = Math.min(5, Object.keys(p.fx).filter(k => FX[k]).length)
+        const room = cx + colW - 26 * u - (nfx ? 34 * u + (nfx - 1) * 20 * u : 12 * u) - 4 * u - nx
+        g.font = this.font(12 * u, false)
+        const fits = g.measureText(sub).width <= room
+        this.text(fits || p.d || p.pos <= 0 ? sub : T.cellShort(p.pos), nx, cy + rowH * 0.71, { size: 12, bold: false, color: '#5b544c', max: room })
       }
       // cards in hand and effects
       const hx = cx + colW - 26 * u
@@ -1465,11 +1512,11 @@ export class UI {
       this.text(String(p.h.length), hx, cy + rowH / 2 + 1, { size: 12, color: '#ffffff', align: 'center' })
       const fx = Object.keys(p.fx).filter(k => FX[k])
       if (!this.narrow) fx.slice(0, 5).forEach((k, j) => {
-        const ix = hx - 26 * u - j * 20 * u, iy = cy + 34 * u
+        const ix = hx - 26 * u - j * 20 * u, iy = cy + rowH * 0.71
         P.drawIcon(g, FX[k].card, ix, iy, 16 * u, P.CAT_COLORS[FX[k].card[0]])
-        if (p.fx[k].t) this.text(String(p.fx[k].t), ix + 8 * u, iy - 6 * u, { size: 9 })
+        if (p.fx[k].t) this.text(String(p.fx[k].t), ix + 8 * u, iy - 6 * u, { size: 10 })
       })
-      else if (fx.length) this.text('✦' + fx.length, hx - 22 * u, cy + rowH / 2, { size: 11, color: '#7b5ce0', align: 'center' })
+      else if (fx.length) this.text('✦' + fx.length, hx - 22 * u, cy + rowH / 2, { size: 12, color: '#7b5ce0', align: 'center' })
       if (valid) this.hits.push({ key: 'pl' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.chooseTarget(i) })
     })
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
@@ -1486,24 +1533,23 @@ export class UI {
     else if (myTurn && s.frozen && !s.rolled) status = T.cantPlay
     else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(s.pl[me].n) : T.yourTurn
     else status = T.waitingFor(s.pl[s.cur].n)
-    const sw = Math.min(W - 20 * u, Math.max(260 * u, this.measure(status, 17) + 60 * u))
-    const sy = this.narrow ? panelBottom + 4 * u : 10 * u
-    const sx = this.narrow ? (W - sw) / 2 : Math.max(pw + 20 * u, (W - sw) / 2)
+    const sw = this.narrow ? cornerX - 20 * u : Math.min(W - 20 * u, Math.max(260 * u, this.measure(status, 17) + 60 * u))
+    const sy = 10 * u
+    const sx = this.narrow ? 10 * u : Math.max(pw + 20 * u, (W - sw) / 2)
     this.panel(sx, sy, sw, 40 * u, { fill: myTurn ? '#2d3a6b' : 'rgba(255,255,255,0.93)', r: 20 })
     this.statusRect = { x: sx, y: sy, w: sw, h: 40 * u }
     this.text(status, sx + sw / 2, sy + 21 * u, { size: 17, align: 'center', color: myTurn ? '#ffffff' : P.INK, max: sw - 20 * u })
     if (!this.narrow) this.text(T.round(s.round, CFG.roundLimit) + (s.mode === 'fool' ? ' · Fool' : ' · Champion'), sx + sw / 2, sy + 52 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c' })
     if (app.turnLeft != null && myTurn) this.text(`${Math.ceil(app.turnLeft)} s`, sx + sw - 30 * u, sy + 21 * u, { size: 14, align: 'center', color: app.turnLeft < 10 ? '#ffb4a8' : '#ffffff' })
     // corner buttons: menu, speed, sound, zoom
-    const cb = 40 * u
-    const rx = W - cb - 10 * u
     this.button('menu', '☰', rx, 10 * u, cb, cb, () => app.openGameMenu(), { size: 18 })
     this.button('speed', `${app.speedLabel()}`, rx - cb - 18 * u, 10 * u, cb + 10 * u, cb, () => app.cycleSpeed(), { size: 14 })
     this.soundButton('snd', rx - 2 * cb - 26 * u, 10 * u, cb)
-    const zy = this.narrow ? panelBottom + 54 * u : 64 * u
+    const zy = this.narrow ? panelBottom + 6 * u : 24 * u + cb
     this.button('zin', '+', rx, zy, cb, cb, () => app.view.zoom(0.8), { size: 20 })
     this.button('zout', '−', rx, zy + cb + 6 * u, cb, cb, () => app.view.zoom(1.25), { size: 20 })
     this.button('zall', '⤢', rx, zy + 2 * (cb + 6 * u), cb, cb, () => app.view.overview(), { size: 18 })
+    this.zoomX = rx; this.zoomW = cb; this.zoomBottom = zy + 3 * cb + 12 * u // (the log's button goes under them where the log has no room)
     // the dice tray (the view draws the dice into it): it shows a roll, waits with a gold frame for my click
     // to roll, offers the values of a chosen roll, and once I have rolled it ends my turn
     const handTop = H - this.handHeight()
@@ -1519,7 +1565,7 @@ export class UI {
       const g = this.g, mode = this.trayMode
       this.panel(tx - 4 * u, ty - 4 * u, tw + 8 * u, th + 8 * u, { fill: '#fffdf8', stroke: mode === 'roll' || mode === 'end' ? null : undefined, r: 12 })
       this.trayRect = { x: tx, y: ty, w: tw, h: th }
-      if (mode === 'roll' || mode === 'show' || mode === 'pick') this.trayDice = this.trayRect
+      if (mode === 'roll' || mode === 'show' || mode === 'pick') this.trayDice = { x: tx + this.ox, y: ty + this.oy, w: tw, h: th, close: this.narrow }
       const k = tw / (354 * u) // the tray's size against the desktop one
       // labels go under the tray, or over it on a phone where the hand is under it
       const ly = this.narrow ? ty - 22 * u : ty + th + 18 * u
@@ -1537,7 +1583,8 @@ export class UI {
         g.save()
         g.shadowColor = 'rgba(255,184,40,0.95)'; g.shadowBlur = 22 * u * k
         const lift = this.hover === 'tray' ? 2 * u : 0
-        for (let i = 0; i < 2; i++) this.text(T.endTurn, tx + tw / 2, ty + th / 2 - lift, { size: 40 * k, align: 'center', color: '#2d3a6b', max: tw - 24 * u })
+        const es = this.narrow ? tw / u / 5.4 : 40 * k
+        for (let i = 0; i < 2; i++) this.text(T.endTurn, tx + tw / 2, ty + th / 2 - lift, { size: es, align: 'center', color: '#2d3a6b', max: tw - 16 * u })
         g.restore()
         if (!this.narrow) pill(T.clickToEnd)
         hit(() => { if (this.target) this.cancelTarget(); app.act({ t: 'end' }) })
@@ -1545,6 +1592,13 @@ export class UI {
         // Choose Your Roll: the two dice lie in the tray, the left one and the right one each take a click
         pill(this.narrow ? T.tapDie : T.pickDie)
         for (const i of [0, 1]) this.hits.push({ key: 'die' + i, x: tx - 10 * u + i * (tw / 2 + 10 * u), y: ty - 10 * u, w: tw / 2 + 10 * u, h: th + 20 * u, action: () => this.choose('pick', i) })
+      } else if (mode === 'choose' && this.narrow) {
+        // the small tray says what to do; the values stand in a grid beside it, big enough for a finger
+        const n = choose, lines = this.wrap(pmy.fx.bk ? T.chooseBack : T.chooseValue, 15, tw - 16 * u)
+        lines.forEach((l, i) => this.text(l, tx + tw / 2, ty + th / 2 + (i - (lines.length - 1) / 2) * this.lineH(15, 19), { size: 15, align: 'center', color: '#2d3a6b', max: tw - 12 * u }))
+        const gx = tx + tw + 12 * u, gw = W - 10 * u - gx, rows = n > 3 ? 2 : 1, cols = Math.ceil(n / rows), gap = 8 * u
+        const bw = (gw - gap * (cols - 1)) / cols, bh = Math.min(56 * u, (th - gap * (rows - 1)) / rows), gy = ty + (th - rows * bh - (rows - 1) * gap) / 2
+        for (let v = 1; v <= n; v++) this.button('v' + v, String(v), gx + ((v - 1) % cols) * (bw + gap), gy + Math.floor((v - 1) / cols) * (bh + gap), bw, bh, () => app.act({ t: 'roll', v }), { primary: true, color: pmy.fx.gd ? '#c99400' : '#7b5ce0', size: 22 })
       } else if (mode === 'choose') {
         this.text(pmy.fx.bk ? T.chooseBack : T.chooseValue, tx + tw / 2, ty + th * 0.24, { size: 20 * k, align: 'center', color: '#2d3a6b' })
         const n = choose, gap = 6 * u, w = Math.min((tw - 16 * u) / n - gap, 64 * u * k), bh = Math.min(th * 0.44, 62 * u * k)
@@ -1603,10 +1657,10 @@ export class UI {
       this.button('peekx', '✕', r.x + r.w + 12 * u - cb - 2 * u, r.y - 34 * u + 2 * u, cb, cb, () => this.closePeek(), { size: 15 })
     }
     if (this.offerRect && s.ph === 'take') {
-      const r = this.offerRect
-      this.panel(r.x - 14 * u, r.y - 52 * u, r.w + 28 * u, r.h + 66 * u, { fill: 'rgba(255,253,248,0.96)', stroke: P.CAT_COLORS.C, lw: 3 })
-      this.text(T.chooseCard, r.x + r.w / 2, r.y - 33 * u, { size: 17, align: 'center', color: '#2d3a6b' })
-      this.text(T.chooseCardHint, r.x + r.w / 2, r.y - 14 * u, { size: 12, align: 'center', bold: false, color: '#5b544c', max: r.w + 20 * u })
+      const r = this.offerRect, head = this.offerHead(), t1 = this.lineH(17, 19), top = r.y - head + Math.max(6 * u, (head - t1 - this.lineH(12, 19)) / 2)
+      this.panel(r.x - 14 * u, r.y - head, r.w + 28 * u, r.h + head + 14 * u, { fill: 'rgba(255,253,248,0.96)', stroke: P.CAT_COLORS.C, lw: 3 })
+      this.text(T.chooseCard, r.x + r.w / 2, top + t1 / 2, { size: 17, align: 'center', color: '#2d3a6b' })
+      this.text(T.chooseCardHint, r.x + r.w / 2, top + t1 + this.lineH(12, 19) / 2, { size: 12, align: 'center', bold: false, color: '#5b544c', max: r.w + 20 * u })
     }
     const curtain = app.curtain()
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
@@ -1623,11 +1677,10 @@ export class UI {
       this.button('skiptut', T.skip, mx + 40 * u + bw, my + mh - 64 * u, bw, 44 * u, () => { app.skipTutorial(); app.toMenu() }, { size: 16 })
     } else if (app.menuOpen) {
       const web = !!this.p0.web
-      const mw = Math.min(W - 20 * u, 320 * u)
+      const mw = Math.min(W - 20 * u, Math.max(320 * u, 300))
       // the controls, which used to stand over the players' list, are told here
-      this.g.font = this.font(11.5 * u, false)
-      const keys = P.wrapText(this.g, T.controls, mw - 36 * u)
-      const mh = (web ? 262 : 310) * u + keys.length * 15 * u + 14 * u
+      const keys = this.wrap(T.controls, 11.5, mw - 36 * u, false), klh = this.lineH(11.5, 15)
+      const mh = (web ? 262 : 310) * u + keys.length * klh + 14 * u
       const mx = (W - mw) / 2, my = (H - mh) / 2, bx = mx + 24 * u, bw = mw - 48 * u
       this.panel(mx, my, mw, mh, { fill: 'rgba(255,253,248,0.97)' })
       this.text(T.menuTitle, W / 2, my + 30 * u, { size: 20, align: 'center' })
@@ -1638,7 +1691,7 @@ export class UI {
       this.volumeSlider('vol2', bx + 58 * u, my + 160 * u, bw - 68 * u, 40 * u)
       this.button('leave', T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.leaveGame(), { size: 15 })
       if (!web) this.button('exitcity', T.exitCity, bx, my + 256 * u, bw, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
-      keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * 15 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
+      keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * klh, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
     }
   }
 
@@ -1646,7 +1699,7 @@ export class UI {
   drawCurtain(p) {
     const W = this.W, H = this.H, u = this.u, g = this.g
     this.hits = this.hits.filter(h => h.key === 'menu' || h.key === 'snd')
-    g.fillStyle = 'rgba(30,26,22,0.42)'; g.fillRect(0, 0, W, H)
+    this.fillScreen('rgba(30,26,22,0.42)')
     const pw = Math.min(W - 20 * u, 380 * u), ph = 196 * u
     const x = (W - pw) / 2, y = (H - ph) / 2
     const color = P.PLAYER_COLORS[p.c % 6]
@@ -1705,13 +1758,24 @@ export class UI {
   }
 
   measure(t, size) { this.g.font = this.font(size * this.u); return this.g.measureText(t).width }
-  handHeight() { return this.cardW() * 1.4 * 0.86 + 14 * this.u }
+  /** Text of a size broken into lines `w` wide. */
+  wrap(t, size, w, bold = true) { this.g.font = this.font(size * this.u, bold); return P.wrapText(this.g, t, w) }
+  handHeight() { return this.cardW() * 1.4 * 0.86 + 14 * this.u - this.handSink() }
+  /** How much lower my hand rests on a short screen on its side (a phone's): the cards' text shows as one rises to read. */
+  handSink() { return !this.narrow && this.H < 440 ? this.cardW() * 0.4 : 0 }
   cardW() { return this.narrow ? Math.min(225, (this.W - 16) / 2.55, this.H * 0.26) : 225 * this.u }
-  /** The dice tray: bottom right beside the hand, or on a phone at the left over it. */
+  /**
+   * The dice tray: bottom right beside the hand; on a phone held upright a small, squarer one at the left
+   * over the hand, well short of the middle of the screen (the view frames the dice closer in it).
+   */
   trayBox() {
     const u = this.u, W = this.W, H = this.H
-    const w = this.narrow ? THREE.MathUtils.clamp(W * 0.62, 225, 360) : 354 * u, h = w * 0.66
-    return { x: this.narrow ? 14 : W - w - 12 * u, y: this.narrow ? H - this.handHeight() - h - 12 * u : H - h - 46 * u, w, h }
+    if (this.narrow) {
+      const w = Math.round(THREE.MathUtils.clamp(W * 0.36, 112, 190)), h = Math.round(w * 0.82)
+      return { x: 10 * u, y: H - this.handHeight() - h - 10 * u, w, h }
+    }
+    const w = 354 * u, h = w * 0.66
+    return { x: W - w - 12 * u, y: H - h - 46 * u, w, h }
   }
   /**
    * What stands over the board in a game, as screen rectangles: my hand at rest, the dice tray with its label,
@@ -1723,7 +1787,7 @@ export class UI {
     const n = this.cards.filter(c => c.kind === 'hand').length
     if (n) {
       const cw = this.cardW(), { left, right } = this.handLayout(n)
-      const top = this.H - cw * 1.4 * 0.42 + 6 * u - cw * 0.7 - 6 * u // the fanned cards lean a little higher
+      const top = this.H - cw * 1.4 * 0.42 + 6 * u - cw * 0.7 - 6 * u + this.handSink() // the fanned cards lean a little higher
       out.push({ x: left, y: top, w: right - left, h: this.H - top })
     }
     if (this.trayTop != null && this.trayRect) {
@@ -1734,9 +1798,9 @@ export class UI {
     if (this.statusRect) out.push(this.statusRect)
     if (this.logRect) out.push(this.logRect)
     // (the tips' bubbles are not cover: they keep clear of the pieces themselves, the camera would jump as they come and go)
-    return out
+    return out.map(r => ({ x: r.x + this.ox, y: r.y + this.oy, w: r.w, h: r.h }))
   }
-  /** A point over the hand, the tray, the panels or the log (see cover). */
+  /** A point (screen px) over the hand, the tray, the panels or the log (see cover). */
   overCover(x, y) { return this.cover().some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
   handLayout(n) {
@@ -1753,26 +1817,31 @@ export class UI {
   drawLog() {
     const u = this.u, H = this.H
     this.logRect = null
-    const lines = this.logOpen ? this.logLines.slice(-16) : this.logLines.slice(-5)
-    if (!lines.length) return
-    if (this.narrow && !this.logOpen) {
-      this.button('log', T.log, 10 * u, (this.trayTop ?? H - this.handHeight() - 22 * u) - 40 * u, 70 * u, 34 * u, () => { this.logOpen = true; this.dirty = true }, { size: 13 })
-      return
-    }
-    const w = this.narrow ? this.W - 20 * u : 330 * u
-    const lh = 19 * u
-    const x = 10 * u
-    // at the bottom left, or over the hand when the hand reaches there
+    const all = this.logOpen ? this.logLines.slice(-16) : this.logLines.slice(-5)
+    if (!all.length) return
+    const lh = this.lineH(12.5, 19)
+    let x = 10 * u, w = this.narrow ? this.W - 70 * u : 330 * u // (on a phone, clear of the zoom buttons)
+    // at the bottom left, or over the hand when the hand reaches there; on a phone, or where that leaves no
+    // room for a line (a small screen: the players and the hand fill the left), a button opens it under the status
     const hand = this.cards.filter(c => c.kind === 'hand').length
     const over = !this.narrow && hand && this.handLayout(hand).left < x + w + 8 * u
-    if (over) {
-      const fit = Math.floor((H - this.handHeight() - 8 * u - (this.panelBottom || 0) - 10 * u - 16 * u) / lh)
-      if (fit < 1) return
-      lines.splice(0, Math.max(0, lines.length - fit))
+    let top = (this.panelBottom || 0) + 10 * u
+    let bottom = over ? H - this.handHeight() - 8 * u : H - 12 * u
+    const compact = this.narrow || bottom - top - 16 * u < lh
+    if (compact && !this.logOpen) {
+      const open = () => { this.logOpen = true; this.dirty = true }
+      if (this.narrow) this.button('log', T.log, 10 * u, (this.trayTop ?? H - this.handHeight() - 22 * u) - 40 * u, 70 * u, 34 * u, open, { size: 13 })
+      else this.button('log', T.log, this.zoomX, this.zoomBottom + 6 * u, this.zoomW, this.zoomW, open, { size: 12 })
+      return
     }
+    if (compact && this.narrow) { top = this.bannerTop(); bottom = (this.trayTop ?? H - this.handHeight()) - 48 * u }
+    else if (compact) { x = this.gameLeft || x; w = Math.min(430 * u, this.zoomX - 10 * u - x); top = this.bannerTop(); bottom = H - this.handHeight() - 8 * u }
+    const fit = Math.floor((bottom - top - 16 * u) / lh)
+    if (fit < 1) return
+    const lines = all.slice(-fit)
     const h = lines.length * lh + 16 * u
-    const y = this.narrow ? 120 * u : over ? H - this.handHeight() - h - 8 * u : H - h - 12 * u
-    this.panel(x, y, w, h, { fill: 'rgba(255,255,255,0.82)', r: 10 })
+    const y = compact ? top : bottom - h
+    this.panel(x, y, w, h, { fill: compact ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.82)', r: 10 })
     this.logRect = { x, y, w, h }
     lines.forEach((l, i) => this.text(l, x + 10 * u, y + 8 * u + lh * (i + 0.5), { size: 12.5, bold: false, max: w - 20 * u, color: i === lines.length - 1 ? P.INK : '#4b453e' }))
     this.hits.push({ key: 'logtoggle', x, y, w, h, action: () => { this.logOpen = !this.logOpen; this.dirty = true } })
@@ -1868,13 +1937,18 @@ export class UI {
     const { cx, gap } = this.handLayout(n)
     // while a First Match tip points at the board, the card chosen stays down in the hand: the board is to see
     const down = ['cell', 'el'].includes(app.tut?.now?.at)
+    // (a card under the pointer or held up grows to read, on a small screen more, and stays on the screen)
+    const read = Math.min(Math.max(1.12, CARD_READ / cw), (H - 8 * u) / 1.4 / cw)
     hand.forEach((c, k) => {
       const x = cx + (k - (n - 1) / 2) * gap
       const hov = this.hover === 'card' + c.i
       const sel = this.selected === c.i && !down
       const lift = sel ? 0.5 : hov ? 0.32 : 0
-      c.tx = x; c.ty = H - cw * 1.4 * 0.42 + 6 * u - lift * cw * 0.7
-      c.ts = cw * (sel || hov ? 1.12 : 1)
+      c.tx = x; c.ty = H - cw * 1.4 * 0.42 + 6 * u - lift * cw * 0.7 + (lift ? 0 : this.handSink())
+      c.ts = cw * (sel || hov ? read : 1)
+      if (sel || hov) c.ty = Math.min(c.ty, H - c.ts * 0.7 - 4 * u)
+      // a card waiting for its target stands clear of the players' panel, whose rows take the target too
+      if (sel && this.target && !this.narrow && this.gameLeft && c.ty - c.ts * 0.7 < (this.panelBottom || 0)) c.tx = Math.max(c.tx, this.gameLeft + c.ts / 2)
       c.tx = Math.min(W - c.ts / 2 - 4, Math.max(c.ts / 2 + 4, c.tx))
       c.rot = (k - (n - 1) / 2) * -0.05 * (sel ? 0 : 1)
       const playable = myTurn && (s.ph === 'disc' || !whyNot(s, me, c.id))
@@ -1891,7 +1965,12 @@ export class UI {
       const top = Math.max(8 * u, (H - ph) / 2 - 30 * u)
       const x0 = W / 2 - (n - 1) / 2 * pw * 1.05
       const y = top + 34 * u + pw * 0.7
-      peek.forEach((c, k) => { c.tx = x0 + k * pw * 1.05; c.ty = y; c.ts = pw; c.rot = 0; c.dim = 0; c.lift = 0; c.z = 60 })
+      peek.forEach((c, k) => {
+        // the one under the pointer (or tapped) grows to read
+        const hov = this.hover === 'peek' + c.i
+        c.tx = x0 + k * pw * 1.05; c.ty = y; c.ts = hov ? Math.min(Math.max(pw * 1.06, CARD_READ), (H - 8 * u) / 1.4) : pw; c.rot = 0; c.dim = 0; c.lift = hov ? 0.6 : 0; c.z = hov ? 62 : 60
+        if (hov) { c.tx = Math.min(W - c.ts / 2 - 4 * u, Math.max(c.ts / 2 + 4 * u, c.tx)); c.ty = Math.min(H - c.ts * 0.7 - 4 * u, Math.max(c.ts * 0.7 + 4 * u, c.ty)) }
+      })
       this.peekRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * 1.05 + pw, h: pw * 1.4 }
     } else if (peeking) {
       this.peekRect = { x: W / 2 - 90 * u, y: H * 0.38 - 12 * u, w: 180 * u, h: 24 * u, empty: true }
@@ -1902,13 +1981,15 @@ export class UI {
       const n = offer.length
       // over the board, clear of the status at the top and of my hand at the bottom
       const room = H - cw * 1.4 * 0.62 - this.bannerTop() - 8 * u
-      const pw = Math.min(cw * 0.95, (W - 40 * u) / (n * 1.08), (room - 78 * u) / 1.4)
-      const top = this.bannerTop() + Math.max(0, (room - pw * 1.4 - 70 * u) / 2)
+      const head = this.offerHead()
+      const pw = Math.min(cw * 0.95, (W - 40 * u) / (n * 1.08), (room - head - 26 * u) / 1.4)
+      const top = this.bannerTop() + Math.max(0, (room - pw * 1.4 - head - 18 * u) / 2)
       const x0 = W / 2 - (n - 1) / 2 * pw * 1.08
-      const y = top + 52 * u + pw * 0.7
+      const y = top + head + pw * 0.7
       offer.forEach((c, k) => {
         const hov = this.hover === 'offer' + c.i
-        c.tx = x0 + k * pw * 1.08; c.ty = y - (hov ? 8 * u : 0); c.ts = pw * (hov ? 1.06 : 1); c.rot = 0; c.dim = 0; c.lift = hov ? 0.6 : 0; c.z = 60
+        c.tx = x0 + k * pw * 1.08; c.ty = y - (hov ? 8 * u : 0); c.ts = hov ? Math.min(Math.max(pw * 1.06, CARD_READ), (H - 8 * u) / 1.4) : pw; c.rot = 0; c.dim = 0; c.lift = hov ? 0.6 : 0; c.z = hov ? 62 : 60
+        if (hov) { c.tx = Math.min(W - c.ts / 2 - 4 * u, Math.max(c.ts / 2 + 4 * u, c.tx)); c.ty = Math.min(H - c.ts * 0.7 - 4 * u, Math.max(c.ts * 0.7 + 4 * u, c.ty)) }
       })
       this.offerRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * 1.08 + pw, h: pw * 1.4 }
     }
@@ -1936,7 +2017,7 @@ export class UI {
         const hov = this.hover === 'cat' + k
         c.tx = W / 2 + (col - (cols - 1) / 2) * (areaW / cols)
         c.ty = (H - ph) / 2 + 66 * u + (row + 0.5) * (areaH / rows)
-        c.ts = cwc * (hov ? 2.28 : 1)
+        c.ts = hov ? Math.min(Math.max(cwc * 2.28, CARD_READ * 1.05), (H - 8 * u) / 1.4, W - 8 * u) : cwc
         // the big card stays on the screen
         if (hov) { c.tx = Math.min(W - c.ts / 2 - 4 * u, Math.max(c.ts / 2 + 4 * u, c.tx)); c.ty = Math.min(H - c.ts * 0.7 - 4 * u, Math.max(c.ts * 0.7 + 4 * u, c.ty)) }
         c.rot = 0; c.dim = 0; c.lift = hov ? 1 : 0
@@ -2184,9 +2265,34 @@ export class UI {
   }
 
   // ---------- input ----------
-  hitAt(x, y) { for (let k = this.hits.length - 1; k >= 0; k--) { const h = this.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) return h } return null }
+  /** The height of Choose Your Card's window over its cards: its title and the line under it. */
+  offerHead() { return Math.max(52 * this.u, this.lineH(17, 19) + this.lineH(12, 19) + 12 * this.u) }
+  /** The hover key of a card on screen (as pointerMove sets it). */
+  cardKey(c) { return c.kind === 'hand' ? 'card' + c.i : c.kind === 'offer' ? 'offer' + c.i : c.kind === 'peek' ? 'peek' + c.i : c.kind === 'echo' ? 'pl' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null }
+  /**
+   * What takes a click at x, y (screen px): the topmost button there; on a touch screen, else the nearest one
+   * within TOUCH_HIT across of it (a small button takes a finger that lands beside it).
+   */
+  hitAt(x, y, near = true) {
+    x -= this.ox; y -= this.oy
+    let k = this.hits.length - 1
+    while (k >= 0) { const h = this.hits[k]; if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) break; k-- }
+    const on = k >= 0 ? this.hits[k] : null
+    if (!near || !this.touch || (on && on.key !== 'block')) return on
+    // (only the buttons of a window open over the rest: those after the 'block' under it)
+    let best = null, bd = Infinity
+    for (let i = k + 1; i < this.hits.length; i++) {
+      const h = this.hits[i]
+      if (h.key === 'block' || (h.w >= TOUCH_HIT && h.h >= TOUCH_HIT)) continue
+      const mx = Math.max(0, (TOUCH_HIT - h.w) / 2), my = Math.max(0, (TOUCH_HIT - h.h) / 2)
+      const dx = Math.max(h.x - x, 0, x - h.x - h.w), dy = Math.max(h.y - y, 0, y - h.y - h.h)
+      if (dx <= mx && dy <= my && dx + dy < bd) { bd = dx + dy; best = h }
+    }
+    return best || on
+  }
   cardAt(x, y) {
     if (this.modal) return null
+    x -= this.ox; y -= this.oy
     const list = [...this.cards].sort((a, b) => (b.mesh.renderOrder - a.mesh.renderOrder))
     for (const c of list) {
       const w = c.s, h = c.s * 1.4
@@ -2195,12 +2301,12 @@ export class UI {
     return null
   }
   pointerMove(x, y) {
-    this.pointer = { x, y }
+    this.pointer = { x: x - this.ox, y: y - this.oy }
     const h = this.hitAt(x, y)
     let key = h ? h.key : null
     if (!key) {
       const c = this.cardAt(x, y)
-      if (c) key = c.kind === 'hand' ? 'card' + c.i : c.kind === 'offer' ? 'offer' + c.i : c.kind === 'echo' ? 'pl' + c.i : c.kind === 'catalog' ? 'cat' + this.cards.filter(k => k.kind === 'catalog').indexOf(c) : null
+      if (c) key = this.cardKey(c)
     }
     if (key !== this.hover) { this.hover = key; this.dirty = true }
     if (this.target?.kind === 'player' && key) this.hoverTarget(null, key.startsWith('pl') ? +key.slice(2) : null)
@@ -2216,11 +2322,14 @@ export class UI {
   }
   /** A click: true when the UI used it. A long press on a card only shows it bigger. */
   click(x, y, long = false) {
-    const h = this.hitAt(x, y)
+    // a button, else a card; a button near the finger only where there is no card
+    const h = this.hitAt(x, y, false) || (this.cardAt(x, y) ? null : this.hitAt(x, y))
     // (while a tip asks for one thing, the rest waits)
     if (h && !this.app.allowsHit(h.key)) { this.app.nudge(); return true }
     if (h) { this.menuSound(h); h.action(); this.dirty = true; return true }
     const c = this.cardAt(x, y)
+    // held, an offered card grows to read instead (a finger has no pointer to rest on it); a tap takes it
+    if (c && c.kind === 'offer' && long) { this.hover = this.cardKey(c); this.dirty = true; return true }
     if (c && c.kind === 'offer') { this.choose('take', c.i); return true }
     if (c && c.kind === 'echo') { this.chooseTarget(c.i); return true }
     if (c && c.kind === 'hand') {
@@ -2228,6 +2337,8 @@ export class UI {
       else this.cardClicked(c)
       return true
     }
+    // a card of the catalogue or a peeked hand: a tap shows it big, another puts it back
+    if (c && this.touch) { const k = this.cardKey(c); this.hover = this.hover === k ? null : k; this.dirty = true }
     if (c) return true
     return false
   }
@@ -2250,7 +2361,7 @@ export class UI {
   update(dt) {
     this.time += dt
     if (this.toast) { this.toast.t -= dt; if (this.toast.t <= 0) { this.toast = null; this.dirty = true } }
-    if (this.p0.width !== this.W || this.p0.height !== this.H) this.resize()
+    if (this.p0.width !== this.FW || this.p0.height !== this.FH || [this.p0.web?.safe?.left, this.p0.web?.safe?.top, this.p0.web?.safe?.right, this.p0.web?.safe?.bottom].map(v => Math.max(0, Math.round(v || 0))).join() !== this.safeKey) this.resize()
     const n = this.rollPrompt()
     if (n !== this.promptN) { this.promptN = n; this.dirty = true }
     // the tray (End Turn, the dice, the values to choose) follows whose turn it is and whether the table is busy:

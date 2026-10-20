@@ -150,8 +150,12 @@ export class View {
     this.tray.add(pad)
     this.trayDice = [0, 1].map(() => { const m = new THREE.Mesh(this.dieGeo, this.mat.dice); m.visible = false; this.tray.add(m); return m })
     this.trayCam = new THREE.PerspectiveCamera(35, 1.4, 0.1, 50)
-    this.trayCam.position.set(0, 2.155, 1.31) // 15% closer than (0, 2.5, 1.55), so the dice fill more of it
-    this.trayCam.lookAt(0, 0.2, -0.05)
+    this.trayAim = new THREE.Vector3(0, 0.2, -0.05)
+    this.trayAway = new THREE.Vector3(0, 2.155, 1.31).sub(this.trayAim) // 15% closer than (0, 2.5, 1.55), so the dice fill more of it
+    this.trayZoom = 1 // the camera's distance against that one: a phone's small tray frames the dice closer
+    this.trayFit = null // { aspect } of a tray that frames them so (renderTray sets it)
+    this.trayCam.position.copy(this.trayAim).add(this.trayAway)
+    this.trayCam.lookAt(this.trayAim)
     this.trayVisible = 0
     this.trayLabel = ''
     this.trayPrompt = 0 // dice waiting in the tray for my click (the screen layer sets it every frame)
@@ -1064,6 +1068,7 @@ export class View {
     this.trayVisible = Math.max(0, this.trayVisible - dt)
     this.idleDice(dt)
     this.pickDice(dt)
+    this.zoomTray(dt)
     this.updateCamera(dt)
   }
 
@@ -1104,9 +1109,26 @@ export class View {
     })
   }
 
-  /** Draws the dice tray into a corner rectangle (CSS px) after the main scene. */
+  /**
+   * The tray camera's distance: as on a computer, or (a phone's small tray) as close as shows the dice lying
+   * there whole, one die closer than two; it glides when their number changes.
+   */
+  zoomTray(dt) {
+    const fit = this.trayFit
+    let want = 1
+    if (fit) {
+      const two = this.trayDice[1].visible && this.trayDice[0].visible, t = Math.tan(THREE.MathUtils.degToRad(this.trayCam.fov / 2))
+      const d = Math.max((two ? 0.92 : 0.45) / (t * fit.aspect), (two ? 0.55 : 0.5) / t)
+      want = THREE.MathUtils.clamp(d / this.trayAway.length(), 0.5, 1.2)
+    }
+    this.trayZoom += (want - this.trayZoom) * (1 - Math.exp(-7 * dt))
+    this.trayCam.position.copy(this.trayAim).addScaledVector(this.trayAway, this.trayZoom)
+  }
+
+  /** Draws the dice tray into a corner rectangle (CSS px) after the main scene; `rect.close` frames the dice closer. */
   renderTray(renderer, rect) {
     if (!rect) return
+    this.trayFit = rect.close ? { aspect: rect.w / rect.h } : null
     const { x, y, w, h } = rect
     const H = this.p0.height
     renderer.setScissorTest(true)

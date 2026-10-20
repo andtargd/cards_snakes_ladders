@@ -340,6 +340,7 @@ function resolution(renderer, p0) {
     frame(dt) {
       // the screen changed (another monitor, the browser's zoom): start from its full resolution
       if (top() !== max) { max = top(); set(max); upBlocked = 0; return }
+      if (p0.web?.fixedRatio) return // (a test of how it looks at one pixel ratio)
       upBlocked = Math.max(0, upBlocked - dt)
       // hidden, or just shown again: these frames say nothing about the machine
       if (globalThis.document?.hidden || dt > 0.25) { settle = 1; sum = 0; n = 0; return }
@@ -1002,6 +1003,7 @@ export default async function start(p0) {
   let down = null
   p0.on('pointerdown', e => {
     if (app.adBusy) { down = null; return } // the site is showing something between games
+    app.ui.touch = !!e.touch // (a finger gets bigger buttons)
     app.tut?.onInput()
     // a slider follows the pointer until it lets go
     const h = app.ui.hitAt(e.x, e.y)
@@ -1010,6 +1012,7 @@ export default async function start(p0) {
   })
   p0.on('pointermove', e => {
     if (app.ui.drag) { app.ui.drag.drag(e.x); return }
+    if (!e.touch) app.ui.touch = false
     const overUI = app.ui.pointerMove(e.x, e.y)
     if (app.ui.target && !overUI && app.screen === 'game') app.ui.hoverTarget(app.view.pick(e.x, e.y))
     if (down && (e.buttons || e.touch)) {
@@ -1098,12 +1101,13 @@ export default async function start(p0) {
     renderer.render(p0.scene, p0.camera)
     renderer.autoClear = false
     renderer.clearDepth()
-    // the screen and the hand, then the dice tray, then the windows over them all
-    app.ui.render(renderer, false)
+    // the screen, then the dice tray, then the cards, then the windows over them all
+    app.ui.render(renderer, 0, 10)
     renderer.autoClear = true
     app.view.renderTray(renderer, app.ui.trayDice)
     renderer.autoClear = false
-    app.ui.render(renderer, true)
+    app.ui.render(renderer, 10, 50)
+    app.ui.render(renderer, 50)
     renderer.autoClear = true
   })
   renderer.render(p0.scene, p0.camera)

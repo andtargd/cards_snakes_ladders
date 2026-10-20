@@ -45,6 +45,8 @@ It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `in
 
 To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build.
 
+`tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
+
 ## Project structure
 
 ```
@@ -63,7 +65,7 @@ experience/         the game itself: rules, board, UI, sounds (also the Project 
   board.config.js   where snakes and ladders may stand, for tuning
 tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews, the CrazyGames build,
                     online tests (nettest.html: the network; onlinetest.html: three players through a whole game;
-                    quicktest.html: Quick Match with bots, on two sites)
+                    quicktest.html: Quick Match with bots, on two sites), shots.html: every screen at every QA size
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page
 ```

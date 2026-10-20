@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screen shots</title>
+<!--
+  Saves the game's screens at the CrazyGames QA sizes (and phone ones) as PNGs at DPR 1, to check that
+  the text reads and nothing is cut off or covered. Needs tools/server.py (it saves through /save/).
+  tools/shots.html?out=tmp/shots/now&sizes=821x462,390x844&screens=menu,game&dpr=1&safe=0,44,0,44
+  sizes, screens: lists (default: all); dpr: the game's pixel ratio (default 1); safe: safe-area insets
+  top,right,bottom,left in px to pretend (a phone's notch). Results: window.results, await window.done.
+-->
+<style>
+  html, body { margin: 0; background: #20232a; color: #ddd; font: 13px system-ui, sans-serif; }
+  #log { white-space: pre-wrap; padding: 8px; }
+  iframe { border: 0; display: block; background: #000; }
+</style>
+</head>
+<body>
+<div id="log"></div>
+<div id="holder"></div>
+<script type="module">
+const QA = ['907x510', '1216x684', '1077x606', '821x462', '1366x768', '1920x1080', '1536x864', '1280x720', '800x450', '1080x607']
+const PHONES = ['390x844', '844x390', '360x740']
+const q = new URLSearchParams(location.search)
+const sizes = q.get('sizes') ? q.get('sizes').split(',') : [...QA, ...PHONES]
+const out = (q.get('out') || 'tmp/shots/now').replace(/^\/+|\/+$/g, '')
+const dpr = q.get('dpr') || '1'
+const logEl = document.getElementById('log'), holder = document.getElementById('holder')
+const log = t => { logEl.textContent += t + '\n'; console.log('[shots]', t) }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+async function waitFor(fn, ms, what) {
+  const t0 = performance.now()
+  for (;;) { try { const v = fn(); if (v) return v } catch { /* not yet */ } if (performance.now() - t0 > ms) throw new Error('timed out: ' + what); await sleep(50) }
+}
+
+// ---------- the screens ----------
+const LOG = ['Pip rolls 4 and climbs a ladder to 38.', 'Juniper plays Slow Down on Lucky Ladder.', 'Mossy rolls 6.', 'Bramble falls down a snake to 12.', 'Clover draws a card.', 'Fennel plays Swamp on cell 44.', 'Lucky Ladder rolls 3.', 'Pip plays Swap Places with Mossy.']
+/** A game of six on the board of 100: my turn, four cards in my hand, the others spread up the board; `mutate(s)` changes it. */
+function game(app, mutate) {
+  if (app.screen !== 'game' || !app.table?.s || app.table.cfg?.bots !== 5 || app.table.s.n !== 100) app.startLocal({ mode: 'champion', humans: 1, names: [], bots: 5, level: 2, size: 100 })
+  app.menuOpen = false
+  const s = app.table.s, me = app.mySeat(), o = (me + 1) % 6
+  s.cur = me; s.ph = 'main'; s.rolled = false; s.played = false; s.peek = null; s.pick = null; s.offer = null; s.frozen = false
+  s.round = 7
+  s.pl[me].n = 'Lucky Ladder'
+  ;[34, 57, 12, 88, 45, 71].forEach((pos, i) => { s.pl[i].pos = pos; s.pl[i].d = 0; s.pl[i].fx = {} })
+  s.pl[me].h = ['M1', 'B2', 'H1', 'P1']
+  s.pl[o].h = ['M2', 'D1', 'C2']
+  s.pl[o].fx = { sl: { t: 2 }, sh: { t: 1 } }
+  s.pl[(me + 3) % 6].fx = { bo: { t: 3 } }
+  mutate?.(s, me, o)
+  const ui = app.ui
+  ui.target = null; ui.selected = -1; ui.hidden = null; ui.logOpen = false; ui.flyers.forEach(f => ui.dropCard(f.mesh)); ui.flyers = []
+  ui.logLines = [...LOG]
+  app.view.tasks = []
+  app.view.setState(JSON.parse(JSON.stringify(s)), { players: app.p0.players })
+  app.view.setHighlight(null)
+  app.view.distWant = 7.5
+  app.view.focusWant.copy(app.view.tokens[me].group.position)
+  ui.banner.turn = 0; ui.banner.turnKey = `${s.gid}:${s.turnNo}:${me}`
+  ui.dirty = true
+}
+const SCREENS = {
+  menu: app => { app.first = 'done'; app.toMenu() },
+  first: app => { app.first = 'due'; app.toMenu() },
+  tutorial: app => { app.first = 'due'; app.toMenu(); app.startFirstMatch() }, // the First Match's first tip
+  solo: app => { app.first = 'done'; app.toMenu(); app.toScreen('solo') },
+  pass: app => { app.toMenu(); app.pass.names = ['Ann', 'Bartholomew', 'Cleo', 'Dmitri', 'Eve', 'Fay']; app.pass.bots = 0; app.toScreen('pass') },
+  online: app => { app.toMenu(); app.toScreen('online') },
+  help: app => { app.toMenu(); app.toScreen('help'); app.ui.helpPage = 0 },
+  cards: app => { app.toMenu(); app.toScreen('help'); app.ui.helpPage = 1 },
+  cardzoom: app => { app.toMenu(); app.toScreen('help'); app.ui.helpPage = 1; app.ui.hover = 'cat10' },
+  game: app => game(app),
+  hold: app => { game(app); app.ui.selected = 1 }, // a card held up to read
+  target: app => {
+    game(app)
+    const ui = app.ui
+    for (const c of ui.cards.filter(c => c.kind === 'hand')) { ui.cardClicked(c); if (ui.target) break }
+  },
+  end: app => game(app, s => { s.rolled = true }),
+  pick: app => {
+    game(app, s => { s.ph = 'pick'; s.pick = { d: [2, 5], b: false } })
+    app.view.trayDice.forEach((m, i) => { m.visible = true; m.scale.setScalar(1); m.position.set(i ? 0.5 : -0.5, 0.23, i ? 0.15 : -0.1) })
+  },
+  choose: app => game(app, (s, me) => { s.pl[me].fx = { gd: {} } }),
+  offer: app => game(app, s => { s.ph = 'take'; s.offer = ['M1', 'B1', 'H2'] }),
+  peek: app => game(app, (s, me, o) => { s.peek = { by: me, tg: o } }),
+  log: app => { game(app); app.ui.logOpen = true; app.ui.logLines = [...LOG, ...LOG] },
+  menuopen: app => { game(app); app.menuOpen = true },
+  results: app => game(app, s => { s.ph = 'over'; s.res = { mode: 'champion', winner: 3, places: [2, 4, 6, 1, 5, 3] }; s.pl[3].pos = 100 }),
+}
+const screens = q.get('screens') ? q.get('screens').split(',') : Object.keys(SCREENS)
+
+/** The canvas as a PNG right after the game's next frame (the frame listener after the game's own runs after it renders). */
+function grab(w, app) {
+  return new Promise(res => {
+    let n = 0
+    const off = app.p0.loop(() => {
+      if (++n < 3) return
+      off()
+      w.document.getElementById('c').toBlob(res, 'image/png')
+    })
+  })
+}
+
+async function shoot(size) {
+  const [W, H] = size.split('x').map(Number)
+  holder.textContent = ''
+  const f = document.createElement('iframe')
+  f.style.width = W + 'px'; f.style.height = H + 'px'
+  holder.append(f)
+  const p = new URLSearchParams({ dpr })
+  if (q.get('safe')) p.set('safe', q.get('safe'))
+  f.src = '../index.html?' + p
+  const w = await waitFor(() => f.contentWindow.__csl && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false && f.contentWindow, 40000, size + ' loaded')
+  const app = w.__csl
+  app.sound.on = false
+  w.__errors = []
+  w.addEventListener('error', e => w.__errors.push(e.message))
+  const ce = w.console.error
+  w.console.error = (...a) => { w.__errors.push(a.map(String).join(' ')); ce.apply(w.console, a) }
+  const done = []
+  for (const name of screens) {
+    try {
+      SCREENS[name](app)
+      await sleep(name === 'menu' || name === 'first' ? 1600 : name === 'tutorial' ? 2600 : 1100)
+      const blob = await grab(w, app)
+      const path = `${out}/${size}-${name}.png`
+      const r = await fetch('/save/' + path, { method: 'POST', body: blob, headers: { 'content-type': 'image/png' } })
+      if (!r.ok) throw new Error('save: ' + r.status)
+      done.push(name)
+    } catch (e) { log(`${size} ${name}: ${e.message}`) }
+  }
+  const errors = w.__errors || []
+  log(`${size}: ${done.length}/${screens.length}${errors.length ? ' errors: ' + errors.join(' | ') : ''}`)
+  try { w.localStorage.removeItem('csl-game') } catch {}
+  return { size, done, errors }
+}
+
+window.results = []
+window.done = (async () => {
+  for (const s of sizes) window.results.push(await shoot(s))
+  holder.textContent = ''
+  log('done: ' + out)
+  return window.results
+})()
+</script>
+</body>
+</html>

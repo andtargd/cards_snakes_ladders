@@ -203,8 +203,21 @@
     <tr><td><span class="tag">окно</span></td><td><code>907×510</code> · <code>1216×684</code> (по умолчанию) · <code>1077×606</code> · <code>821×462</code></td></tr>
     <tr><td><span class="tag cg">полный экран</span></td><td><code>1366×768</code> · <code>1920×1080</code> · <code>1536×864</code> · <code>1280×720</code></td></tr>
     <tr><td><span class="tag ok">телефон / планшет</span></td><td><code>800×450</code> · <code>1080×607</code></td></tr>
+    <tr><td><span class="tag">наши, не из списка QA</span></td><td><code>390×844</code> (телефон вертикально) · <code>844×390</code> (телефон горизонтально)</td></tr>
   </table></div>
   <p>Нужный размер можно сразу передать в адресе: <a href="http://localhost:5500/tools/cgframe.html?size=800x450"><code>cgframe.html?size=800x450</code></a>.</p>
+
+  <h3>Снимки всех экранов на всех размерах</h3>
+  <p><a href="http://localhost:5500/tools/shots.html?sizes=821x462,390x844&amp;screens=menu,game"><code>tools/shots.html</code></a> по очереди открывает игру (<code>index.html</code>, не сборку) в рамке каждого размера при DPR 1, выводит на экран меню, Solo Play, Pass &amp; Play, Online, How to Play, The Cards, партию на 6 игроков на поле 100, руку из 4 карт, выбор цели, лог, конец партии, игровое меню и другие, и сохраняет PNG в <code>tmp/shots/now/</code>. Полный прогон (10 размеров QA и 3 телефонных) идёт около 12 минут.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Параметр</th><th>Что делает</th></tr>
+    <tr><td><code>sizes=821x462,390x844</code></td><td>только эти размеры (по умолчанию все)</td></tr>
+    <tr><td><code>screens=menu,game,target</code></td><td>только эти экраны (по умолчанию все; список в начале страницы)</td></tr>
+    <tr><td><code>out=tmp/shots/after</code></td><td>куда сохранить</td></tr>
+    <tr><td><code>dpr=2</code></td><td>плотность пикселей (по умолчанию 1)</td></tr>
+    <tr><td><code>safe=47,0,34,0</code></td><td>изобразить вырез и полоску «домой» телефона: отступы сверху, справа, снизу, слева</td></tr>
+  </table></div>
+  <p>Последние два параметра понимает и сама игра: <a href="http://localhost:5500/?dpr=1&amp;safe=0,44,21,44"><code>localhost:5500/?dpr=1&amp;safe=0,44,21,44</code></a>. С <code>?dpr=</code> игра не снижает разрешение на медленной машине; <code>?dpr=2&amp;adapt</code> снижает, как обычно.</p>
 
   <div class="note"><b>SDK CrazyGames пока не подключён</b>В <code>web/platform.js</code> для него есть заглушки, работают пока только mute и unmute. Поэтому локально проверяются загрузка, размеры и профиль сайта, но не реклама и не другие функции SDK.</div>
 
@@ -218,6 +231,7 @@
     <tr><td><a href="http://localhost:5500/tools/nettest.html"><code>nettest.html</code></a></td><td>17 сетевых сценариев</td></tr>
     <tr><td><a href="http://localhost:5500/tools/onlinetest.html"><code>onlinetest.html</code></a></td><td>Три игрока проходят целую партию</td></tr>
     <tr><td><a href="http://localhost:5500/tools/quicktest.html"><code>quicktest.html</code></a></td><td>Quick Match с ботами, на двух сайтах</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/shots.html?sizes=821x462&amp;screens=menu,game"><code>shots.html</code></a></td><td>Снимки экранов на размерах QA и телефонов (см. шаг 2)</td></tr>
   </table></div>
   <p>Онлайн-тесты ходят на настоящие публичные серверы (PeerJS и MQTT-брокеры), поэтому нужен интернет.</p>
 

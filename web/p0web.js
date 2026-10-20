@@ -25,7 +25,21 @@ const off = (ev, fn) => listeners.get(ev)?.delete(fn)
 const emit = (ev, ...a) => { for (const fn of [...(listeners.get(ev) || [])]) { try { fn(...a) } catch (e) { console.error(e) } } }
 function mulberry32(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 } }
 
-const view = { width: innerWidth, height: innerHeight, dpr: Math.min(devicePixelRatio || 1, 2) }
+// ?dpr=1 renders as a screen of that pixel ratio would (tools/shots.html checks the text at DPR 1)
+const DPR = Math.min(Math.max(+q.get('dpr') || 0, 0), 3)
+const pixelRatio = () => DPR || Math.min(devicePixelRatio || 1, 2)
+// the safe area (a phone's notch, rounded corners, home bar) from CSS: the game keeps its buttons inside it.
+// ?safe=top,right,bottom,left pretends one (px), to try a notch on a computer
+const safeProbe = document.createElement('div')
+safeProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)'
+document.body.append(safeProbe)
+const fakeSafe = q.get('safe') ? q.get('safe').split(',').map(v => Math.max(0, +v || 0)) : null
+function safeArea() {
+  if (fakeSafe) return { top: fakeSafe[0] || 0, right: fakeSafe[1] || 0, bottom: fakeSafe[2] || 0, left: fakeSafe[3] || 0 }
+  const cs = getComputedStyle(safeProbe), px = v => parseFloat(v) || 0
+  return { top: px(cs.paddingTop), right: px(cs.paddingRight), bottom: px(cs.paddingBottom), left: px(cs.paddingLeft) }
+}
+const view = { width: innerWidth, height: innerHeight, dpr: pixelRatio(), safe: safeArea() }
 const scene = new THREE.Scene()
 scene.add(new THREE.HemisphereLight(0xffffff, 0x9a9a96, 2.2))
 const camera = new THREE.PerspectiveCamera(62, view.width / view.height, 0.05, 3000)
@@ -139,6 +153,8 @@ const watchers = new Set()
 const online = onlineControl({ net, me, siteName: () => siteName, changed: () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } } })
 const web = {
   platform, // the site this runs on (web/platform.js)
+  fixedRatio: !!DPR && !q.has('adapt'), // ?dpr= keeps that pixel ratio (the game would lower it on a slow machine), unless ?adapt
+  get safe() { return view.safe }, // the screen's safe area: { top, right, bottom, left } px the game's buttons keep clear of
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
   room: null, // { code, quick, mode, size, link } while in an online room (mode and size: a quick table's); link is null where only the code is shared
@@ -213,7 +229,7 @@ const sounding = new Set()
 mute.listen(on => { for (const a of sounding) a.muted = on })
 
 function resize() {
-  view.width = innerWidth; view.height = innerHeight; view.dpr = Math.min(devicePixelRatio || 1, 2)
+  view.width = innerWidth; view.height = innerHeight; view.dpr = pixelRatio(); view.safe = safeArea()
   camera.aspect = view.width / view.height; camera.updateProjectionMatrix()
   if (renderer) renderer.setSize(view.width, view.height, false)
   emit('resize', view.width, view.height)

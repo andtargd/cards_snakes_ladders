@@ -42,6 +42,8 @@ const SIZES = [
   ['907x510', 'window'], ['1216x684', 'window'], ['1077x606', 'window'], ['821x462', 'window'],
   ['1366x768', 'fullscreen'], ['1920x1080', 'fullscreen'], ['1536x864', 'fullscreen'], ['1280x720', 'fullscreen'],
   ['800x450', 'phone'], ['1080x607', 'tablet'],
+  // not CrazyGames' own: real phones, upright and on their side
+  ['390x844', 'phone upright'], ['844x390', 'phone on its side'],
 ]
 const q = new URLSearchParams(location.search)
 const $ = id => document.getElementById(id)
