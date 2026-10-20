@@ -59,6 +59,8 @@ export const T = {
   codeHint: 'CODE',
   join: 'Join',
   invitedRoom: code => `You are invited to room ${code}`,
+  onlinePrivacy: 'Online play connects you directly to other players (they can see your IP address).',
+  privacy: 'Privacy',
   ok: 'OK',
   playBots: 'Play vs Bots',
   champion: 'Champion',

@@ -3,7 +3,8 @@
     python tools/build_cg.py
 
 Only what the web game loads goes in: index.html (with window.CSL_PLATFORM = 'crazygames'),
-web/, experience/ (without experience.json, which is Project 0's manifest) and vendor/.
+privacy.html (the privacy policy the game links to), web/, experience/ (without experience.json,
+which is Project 0's manifest) and vendor/.
 Every path the pages and modules load must be relative, since the portal serves the game from a
 folder of its own CDN. No dependencies beyond Python 3.
 """
@@ -18,6 +19,8 @@ OUT = os.path.join(ROOT, 'dist', 'crazygames')
 ZIP = os.path.join(ROOT, 'dist', 'crazygames.zip')
 
 DIRS = ('web', 'experience', 'vendor')
+# pages beside index.html, copied as they are (the privacy policy the game links to)
+PAGES = ('privacy.html',)
 SKIP_FILES = {'experience/experience.json'}
 SKIP_NAMES = {'__pycache__', '.DS_Store', 'Thumbs.db', '.gitkeep'}
 SKIP_EXT = ('.md', '.docx', '.py', '.pyc', '.map')
@@ -108,6 +111,12 @@ def build():
         f.write(html)
 
     copied = [os.path.join(OUT, 'index.html')]
+    for name in PAGES:
+        src = os.path.join(ROOT, name)
+        if not os.path.isfile(src):
+            sys.exit(f'missing {name}')
+        shutil.copy2(src, os.path.join(OUT, name))
+        copied.append(os.path.join(OUT, name))
     for d in DIRS:
         src_dir = os.path.join(ROOT, d)
         if not os.path.isdir(src_dir):

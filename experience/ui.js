@@ -808,8 +808,11 @@ export class UI {
     if (!web) { app.toScreen('menu'); return }
     const set = fn => () => { fn(); app.saveSettings(); this.dirty = true }
     const site = web.siteName, invited = web.invited
+    // the word about privacy at the panel's foot, where the site asks for one (its height in the narrowest panel)
+    const openPrivacy = () => web.openPrivacy()
+    const privH = web.privacy ? 12 * u + this.linkNote('olprivacy', T.onlinePrivacy, T.privacy, 0, 0, 244 * u, openPrivacy, false) : 0
     // (laid out with room for the invitation and a word about the name, so they do not move the screen)
-    const panelH = (inv, note) => 14 * u + (inv ? 26 * u : 0) + 20 * u + 40 * u + (note ? 18 * u : 0) + 18 * u + 46 * u + 22 * u + 34 * u + 44 * u + 16 * u
+    const panelH = (inv, note) => 14 * u + (inv ? 26 * u : 0) + 20 * u + 40 * u + (note ? 18 * u : 0) + 18 * u + 46 * u + 22 * u + 34 * u + 44 * u + privH + 16 * u
     // (the line under Quick Match goes on two where its text is kept big for a small screen)
     const note = this.wrap(T.quickTable(app.quickSeats(c.size)), 12, this.setupLayout(276 * u, panelH(true, true), { paint: false }).mw, false).slice(0, 2)
     const S = this.setupLayout(276 * u, panelH(true, true), { mid: 46 * u, under: 12 * u + note.length * this.lineH(12, 14) })
@@ -854,6 +857,11 @@ export class UI {
     const jw = 92 * u, join = () => app.joinRoom(this.joinCode)
     this.field('olcode', ix, y, iw - jw - 8 * u, 44 * u, this.joinCode, (v, how) => { this.joinCode = v; if (how === 'enter' && v.length >= 3) join() }, { size: 18, max: 5, align: 'center', code: true, hint: T.codeHint })
     this.button('oljoin', T.join, ix + iw - jw, y, jw, 44 * u, join, { primary: !!invited || this.joinCode.length >= 3, size: 16 })
+    // who sees what online, and the policy in a new tab (at the panel's foot: a wider panel takes fewer lines)
+    if (web.privacy) {
+      const nh = this.linkNote('olprivacy', T.onlinePrivacy, T.privacy, 0, 0, iw, openPrivacy, false)
+      this.linkNote('olprivacy', T.onlinePrivacy, T.privacy, ix + iw / 2, S.py + S.ph - 14 * u - nh, iw, openPrivacy)
+    }
     this.soundControl()
   }
 
@@ -1072,6 +1080,32 @@ export class UI {
     g.restore()
   }
 
+  /** A word or two that open a page beside the game: ink blue and underlined. Returns its width. */
+  link(key, t, x, y, action, { size = 11.5, align = 'left' } = {}) {
+    const g = this.g, u = this.u, color = this.hover === key ? P.INK : '#2d3a6b'
+    g.font = this.font(size * u, false)
+    const w = g.measureText(t).width, x0 = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x
+    this.text(t, x0, y, { size, bold: false, color })
+    g.fillStyle = color; g.fillRect(x0, y + this.textPx(size * u) * 0.58, w, Math.max(1, u))
+    this.hits.push({ key, x: x0 - 6 * u, y: y - 13 * u, w: w + 12 * u, h: 26 * u, action })
+    return w
+  }
+  /** A quiet note centred on `cx`, `w` wide, whose last word is a link; from `y` down. Returns its height (`draw` false only measures). */
+  linkNote(key, text, link, cx, y, w, action, draw = true) {
+    const size = 11.5, lh = this.lineH(size, 15), lines = this.wrap(text + ' ' + link, size, w, false)
+    if (draw) lines.forEach((l, i) => {
+      const ly = y + lh / 2 + i * lh
+      if (i < lines.length - 1) { this.text(l, cx, ly, { size, align: 'center', bold: false, color: '#7a7268', max: w }); return }
+      // the last line: the words before the link, then the link, centred together
+      const head = l.slice(0, -link.length), g = this.g
+      g.font = this.font(size * this.u, false)
+      const hw = head ? g.measureText(head).width : 0, x0 = cx - (hw + g.measureText(link).width) / 2
+      if (head) this.text(head, x0, ly, { size, bold: false, color: '#7a7268' })
+      this.link(key, link, x0 + hw, ly, action, { size })
+    })
+    return lines.length * lh
+  }
+
   /** A quiet button: no fill until the pointer is on it. */
   ghostButton(key, label, x, y, w, h, action) {
     const g = this.g, hov = this.hover === key
@@ -1266,6 +1300,8 @@ export class UI {
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.96)' })
     this.text(this.helpPage === 0 ? T.howToPlay : T.theCards, W / 2, y + 30 * u, { size: 22, align: 'center' })
+    // the web build's privacy policy, quietly in the corner (it opens in a new tab)
+    if (this.helpPage === 0 && this.p0.web?.privacy) this.link('privacy', T.privacy, x + pw - 24 * u, y + 30 * u, () => this.p0.web.openPrivacy(), { size: 12, align: 'right' })
     // the web build: the First Match again, tips and all, between the buttons or (a narrow screen) over them
     const replay = this.helpPage === 0 && !!this.p0.web, rw = Math.min(180 * u, pw - 390 * u), beside = rw > 90 * u
     if (this.helpPage === 0) {

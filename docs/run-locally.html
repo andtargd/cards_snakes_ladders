@@ -164,7 +164,7 @@
     <tr><th></th><th>GitHub Pages</th><th>CrazyGames</th></tr>
     <tr><td>Комнаты Quick Match</td><td><code>QM…</code></td><td><code>CG…</code>: игроки двух сайтов не встречаются</td></tr>
     <tr><td>Ссылки-приглашения</td><td>есть (<code>?room=КОД</code>)</td><td>нет, только код комнаты</td></tr>
-    <tr><td>Уведомление о приватности</td><td>нет</td><td>есть</td></tr>
+    <tr><td>Уведомление о приватности</td><td>есть: строка в Play Online, ссылка Privacy в How to Play</td><td>то же</td></tr>
     <tr><td>Лог платформы в консоли (F12)</td><td>с <code>?debug</code></td><td>с <code>?platform=crazygames</code> или <code>?debug</code></td></tr>
   </table></div>
 
@@ -185,6 +185,7 @@
   <div class="cmd tree"><pre>dist/
 ├── crazygames/
 │   ├── index.html     ← с window.CSL_PLATFORM = 'crazygames'
+│   ├── privacy.html   ← политика приватности, на неё ведёт ссылка Privacy
 │   ├── web/
 │   ├── experience/    ← без experience.json (это манифест Project 0)
 │   └── vendor/        ← three.js, PeerJS

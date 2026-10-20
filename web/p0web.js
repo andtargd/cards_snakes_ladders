@@ -176,6 +176,14 @@ const web = {
   editText, // a real input over a box the game draws (web/textfield.js)
   share() { return shareRoom(web.room) },
   leave() { net.leave() },
+  // the privacy policy (privacy.html beside index.html), where the site's profile asks for a word about it; null elsewhere
+  privacy: platform.privacyNotice ? new URL('../privacy.html', import.meta.url).href : null,
+  /** Opens the privacy policy in a new tab (the game stays as it is in this one). */
+  openPrivacy() {
+    if (!web.privacy) return
+    const w = open(web.privacy, '_blank')
+    if (w) w.opener = null
+  },
 }
 addEventListener('pagehide', () => {
   // a reload: the room is kept (with the time it was left) to come back to it
