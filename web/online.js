@@ -114,5 +114,6 @@ async function copyText(s) {
   let ok = false
   try { ok = document.execCommand('copy') } catch { /* no clipboard */ }
   ta.remove()
+  document.getElementById('c')?.focus({ preventScroll: true }) // the keys go back to the game
   return ok
 }

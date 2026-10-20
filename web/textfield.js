@@ -7,7 +7,7 @@ let current = null
 
 /**
  * `x, y, w, h`: the box in CSS pixels. `code`: a room code (capitals and digits, the key's Latin
- * letter on another layout). `onDone(value, how)`: how is 'enter' or 'blur', or value is null for
+ * letter on another layout). `onDone(value, how)`: how is 'enter', 'tab' or 'blur', or value is null for
  * Escape (nothing changes then). Returns { move(x, y, w, h), close(keep) }.
  */
 export function editText({ x, y, w, h, value = '', max = 14, size = 16, pad = 12, align = 'left', code = false, font = 'sans-serif', color = '#2b2622', onDone = () => {} }) {
@@ -42,6 +42,8 @@ export function editText({ x, y, w, h, value = '', max = 14, size = 16, pad = 12
   el.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); finish(true, 'enter'); return }
     if (e.key === 'Escape') { e.preventDefault(); finish(false, 'cancel'); return }
+    // Tab keeps what was typed and goes back to the game, not on out of the page (or the site's frame)
+    if (e.key === 'Tab') { e.preventDefault(); finish(true, 'tab'); return }
     // a non-Latin keyboard layout (Russian, say): the key's place gives the Latin letter on it
     const m = code && /^Key([A-Z])$/.exec(e.code || '')
     if (!m || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || /[A-Za-z0-9]/.test(e.key)) return

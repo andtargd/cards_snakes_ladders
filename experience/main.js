@@ -464,6 +464,8 @@ class App {
   }
   /** A click the tip does not let through: the tip shakes. */
   nudge() { this.ui.kickTip() }
+  /** Back in a game (Escape, Backspace, the right button): a card waiting for its target goes back, else another player's hand closes. */
+  backInGame() { if (this.ui.target) this.ui.cancelTarget(); else this.ui.closePeek() }
   /** The game menu's Main Menu: during the First Match it asks first whether to skip the tips. */
   leaveGame() {
     if (this.tut?.active) { this.confirmSkip = true; this.ui.dirty = true; return }
@@ -783,6 +785,7 @@ class App {
       return
     }
     if (m.t === 'inv') {
+      if (this.p0.web) return // the Shared Table's invitations are Project 0's: an online room has its code instead
       const atTable = this.screen === 'lobby' || this.table?.kind === 'shared'
       if (atTable) { try { this.p0.room.sendTo(from, { t: 'invr', r: 'here' }) } catch { /* fine */ } return }
       this.invite = { from, t: INVITE_SECONDS }
@@ -945,6 +948,8 @@ class App {
     this.scored = s.gid
     const won = s.mode === 'champion' ? s.res.winner === me : s.res.places[me] === 1
     if (!won) return
+    this.hook('happytime')
+    if (this.p0.web) return // the web build has no week's table: no score to send or show
     const n = s.n || 100
     let score = 0
     s.pl.forEach((p, i) => { if (i !== me) score += 100 + (p.b ? (p.b - 1) * 40 : 80) })
@@ -952,7 +957,6 @@ class App {
     score = Math.round(score * (0.6 + 0.4 * n / 100))
     if (s.mode === 'fool') score = Math.round(score * 0.8)
     this.reward = T.scoreSent(score)
-    this.hook('happytime')
     try { this.p0.score(score); this.p0.win() } catch (e) { this.p0.log('score', String(e)) }
   }
   onReward(r) {
@@ -1019,24 +1023,30 @@ export default async function start(p0) {
     const d = down
     down = null
     if (d.moved) return
+    // the right button only backs out of a card's target or another player's hand (as Escape does): it clicks nothing
+    if (e.button === 2) { if (app.screen === 'game' && !app.menuOpen) app.backInGame(); return }
     if (app.menuOpen && app.ui.hitAt(e.x, e.y)) { app.ui.click(e.x, e.y); return }
     if (app.ui.click(e.x, e.y, p0.time - d.at > 0.45)) return
     // a click beside what a tip with a veil asks for
     if (app.tipNow()?.veil) { app.nudge(); return }
     if (app.screen !== 'game') return
     const hit = app.view.pick(e.x, e.y)
+    // a click beside the board and the panels over it puts a card waiting for its target back (the First Match's tips only point again)
+    if (!hit && app.ui.target && !app.menuOpen && !app.ui.overCover(e.x, e.y)) { if (app.tut?.forced) app.nudge(); else app.ui.cancelTarget(); return }
     if (!app.ui.boardClick(hit) && app.ui.selected >= 0 && !app.ui.target) { app.ui.selected = -1; app.ui.dirty = true }
   })
   p0.on('wheel', e => { if (app.screen === 'game' && !app.adBusy) app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
   p0.on('keydown', e => {
     if (e.repeat || app.adBusy) return
     app.tut?.onInput()
-    // an online attempt on screen: Escape cancels it or puts its message away
+    // "back": Escape, or Backspace (Escape also leaves the browser's full screen, so it is never the only way)
+    const back = e.code === 'Escape' || e.code === 'Backspace'
+    // an online attempt on screen: back cancels it or puts its message away
     const st = app.p0.web?.status
-    if (st) { if (e.code === 'Escape') { if (st.busy) app.p0.web.cancel(); else app.p0.web.dismiss() } return }
+    if (st) { if (back) { if (st.busy) app.p0.web.cancel(); else app.p0.web.dismiss() } return }
     if (app.screen === 'solo' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
     if (app.screen === 'pass' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startPass(); return }
-    if (['solo', 'pass', 'online', 'help'].includes(app.screen) && e.code === 'Escape') { app.toScreen('menu'); return }
+    if (['solo', 'pass', 'online', 'help'].includes(app.screen) && back) { app.toScreen('menu'); return }
     if (app.screen !== 'game') return
     const s = app.view.state, me = app.mySeat()
     if (app.curtain() >= 0) { if (e.code === 'Space') app.reveal(); return }
@@ -1046,8 +1056,7 @@ export default async function start(p0) {
     else if (e.code === 'Space' && mine && s.rolled && !app.view.busy && !app.menuOpen) { if (app.ui.target) app.ui.cancelTarget(); app.act({ t: 'end' }) }
     else if (/^Digit[1-5]$/.test(e.code) && s && me >= 0 && s.cur === me && (s.ph === 'pick' || s.ph === 'take')) app.ui.choose(s.ph, +e.code.slice(5) - 1)
     else if (/^Digit[1-4]$/.test(e.code) && s && me >= 0) { const c = app.ui.cards.find(k => k.kind === 'hand' && k.i === +e.code.slice(5) - 1); if (c) app.ui.cardClicked(c) }
-    else if (e.code === 'Escape' && app.ui.target) app.ui.cancelTarget()
-    else if (e.code === 'Escape') app.ui.closePeek()
+    else if (back) app.backInGame()
     else if (e.code === 'Equal' || e.code === 'NumpadAdd') app.view.zoom(0.8)
     else if (e.code === 'Minus' || e.code === 'NumpadSubtract') app.view.zoom(1.25)
     else if (e.code === 'KeyR' && s?.ph === 'over') app.rematch()

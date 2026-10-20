@@ -45,7 +45,7 @@ export const T = {
   onlineHead: 'Play people online, or bring your friends.',
   inRoom: code => `Back to room ${code}`,
   invitedShort: code => `Invited to room ${code}`,
-  sharedTableSub: 'Sit down with everyone in this lot',
+  sharedTableSub: 'Sit down with everyone in this lot', // Project 0 only (the lot's Shared Table)
   play: 'Play',
   // the setup screens
   addPlayer: '+ Add player',
@@ -83,6 +83,7 @@ export const T = {
   theCards: 'The Cards',
   rulesShort: 'Rules',
   back: 'Back',
+  // Project 0's Shared Table and its invitations (the web build has online rooms with a code instead)
   othersHere: n => `${n} other player${n > 1 ? 's' : ''} here: invite them to the Shared Table.`,
   aloneHere: 'Invite friends from the bar and play at the Shared Table.',
   weekTable: "This week's best",
@@ -191,6 +192,7 @@ export const T = {
   mainMenu: 'Main Menu',
   skips: name => `${name} skips this turn`,
   noTargets: 'No valid targets',
+  // Project 0's week's table (the web build has none)
   score: (score, best, place) => `Weekly score ${score}${best != null ? ` · your best ${best}` : ''}${place ? ` · place ${place}` : ''}`,
   scoreSent: score => `Weekly score ${score} sent`,
   hostLeft: 'The host left: the table carries on',
@@ -202,14 +204,14 @@ export const T = {
   menuTitle: 'Game menu',
   resume: 'Resume',
   leaveGame: 'Main Menu',
-  exitCity: 'Exit to the City',
-  controls: 'Click a card, then its target; hold a card to read it. Click the dice tray to roll, and again to end the turn. Space rolls and ends the turn, 1-4 play a card, wheel or +/- zoom, drag to look around, M or Tab opens this menu.',
+  exitCity: 'Exit to the City', // Project 0 only
+  controls: 'Click a card, then its target; Cancel, a right-click or a click beside the board puts it back. Hold a card to read it. Click the dice tray to roll, and again to end the turn. Space rolls and ends the turn, 1-4 play a card, wheel or +/- zoom, drag to look around, Backspace or Esc goes back, M or Tab opens this menu.',
   // How to Play: only the basics, a heading and a line or two each
   rules: [
     ['Goal', 'Be the first to reach the last cell of the board.'],
     ['Your turn', 'Roll the die once (click the dice tray) and, before or after it, play one card if you like. Then End Turn.'],
     ['The board', 'Stop on a ladder to climb it, on a snake’s head to slide down. A swamp stops you; a trampoline or a portal sends you on.'],
-    ['Cards', `Draw one each turn and keep up to ${CFG.hand}. Click a card, then its target. Rarer cards come up less often and hit harder.`],
+    ['Cards', `Draw one each turn and keep up to ${CFG.hand}. Click a card, then its target (Cancel or a right-click puts it back). Rarer cards come up less often and hit harder.`],
     ['Modes', 'Champion: the first to finish wins. Fool: the last one left on the board loses.'],
   ],
 }

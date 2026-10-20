@@ -943,7 +943,7 @@ export class UI {
   /**
    * A text field: a white box with its text (and a pencil). A click puts a real input over it (the web
    * build's p0.web.editText: a phone's keyboard, paste, any layout), and `done(value, how)` gets what was
-   * typed, how being 'enter' or 'blur'. Without one (Project 0) it only shows the text.
+   * typed, how being 'enter', 'tab' or 'blur'. Without one (Project 0) it only shows the text.
    */
   field(key, x, y, w, h, value, done, { size = 15, max = 14, align = 'left', code = false, hint = '' } = {}) {
     const g = this.g, u = this.u, can = !!this.p0.web?.editText, on = this.editing === key, hov = this.hover === key && can
@@ -1736,6 +1736,8 @@ export class UI {
     // (the tips' bubbles are not cover: they keep clear of the pieces themselves, the camera would jump as they come and go)
     return out
   }
+  /** A point over the hand, the tray, the panels or the log (see cover). */
+  overCover(x, y) { return this.cover().some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
   handLayout(n) {
     const u = this.u, cw = this.cardW()
