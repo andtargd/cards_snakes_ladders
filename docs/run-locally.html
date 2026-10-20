@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Запуск игры локально</title>
+<style>
+  :root {
+    --bg: #f7f5f0; --card: #ffffff; --ink: #1f2328; --muted: #5f6670; --line: #e2ded5;
+    --accent: #2f6fdb; --accent-soft: #e6eefc; --cg: #7b3fe4; --cg-soft: #f0e8fd;
+    --ok: #1f8a4c; --ok-soft: #e3f4ea; --warn: #a36100; --warn-soft: #fdf1dc;
+    --code-bg: #f1efe9; --code-ink: #24292f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181c; --card: #1f2227; --ink: #e8e6e1; --muted: #9aa1aa; --line: #33373e;
+      --accent: #6ea0ff; --accent-soft: #1f2b44; --cg: #b28cff; --cg-soft: #2b2340;
+      --ok: #5fcf8f; --ok-soft: #1b3326; --warn: #f0b552; --warn-soft: #3a2d16;
+      --code-bg: #121417; --code-ink: #dfe3e8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --card: #1f2227; --ink: #e8e6e1; --muted: #9aa1aa; --line: #33373e;
+    --accent: #6ea0ff; --accent-soft: #1f2b44; --cg: #b28cff; --cg-soft: #2b2340;
+    --ok: #5fcf8f; --ok-soft: #1b3326; --warn: #f0b552; --warn-soft: #3a2d16;
+    --code-bg: #121417; --code-ink: #dfe3e8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; margin: 40px 0 12px; display: flex; align-items: center; gap: 10px; }
+  h3 { font-size: 1.05rem; margin: 22px 0 8px; }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); margin-bottom: 20px; }
+  a { color: var(--accent); }
+  .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff;
+         display: inline-grid; place-items: center; font-size: .95rem; }
+  .num.cg { background: var(--cg); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin: 12px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .grid .card { margin: 0; }
+  .tag { display: inline-block; font-size: .78rem; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .tag.cg { background: var(--cg-soft); color: var(--cg); }
+  .tag.ok { background: var(--ok-soft); color: var(--ok); }
+  .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  code { font: .9em ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--code-bg); color: var(--code-ink); padding: 1px 5px; border-radius: 4px; }
+  .cmd { position: relative; background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; }
+  .cmd pre { margin: 0; padding: 14px 92px 14px 16px; overflow-x: auto; font: .92rem/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--code-ink); }
+  .cmd pre::before { content: "$ "; color: var(--muted); }
+  .cmd.tree pre::before { content: none; }
+  .cmd.tree pre { padding-right: 16px; }
+  .copy { position: absolute; top: 8px; right: 8px; font: 600 .8rem system-ui, sans-serif; padding: 5px 10px; border-radius: 6px;
+          border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  .copy.done { color: var(--ok); border-color: var(--ok); }
+  .note { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+  .note.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .note.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .note b:first-child { display: block; margin-bottom: 2px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  ol.steps { padding-left: 0; list-style: none; counter-reset: s; margin: 10px 0; }
+  ol.steps li { counter-increment: s; position: relative; padding: 0 0 14px 40px; }
+  ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%;
+                        border: 2px solid var(--cg); color: var(--cg); display: grid; place-items: center; font-size: .85rem; font-weight: 700; }
+  ul.check { list-style: none; padding-left: 0; }
+  ul.check li { padding-left: 28px; position: relative; margin: 6px 0; }
+  ul.check li::before { content: "✓"; position: absolute; left: 4px; color: var(--ok); font-weight: 700; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+  summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+  details > div { padding: 0 16px 12px; }
+  .flow { width: 100%; height: auto; display: block; }
+  .flow .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  .flow .box.web { stroke: var(--accent); }
+  .flow .box.cg { stroke: var(--cg); }
+  .flow text { fill: var(--ink); font: 14px system-ui, sans-serif; }
+  .flow .sub { fill: var(--muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  .flow .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#ah); }
+  .flow .lbl { fill: var(--muted); font-size: 12px; }
+  .theme { float: right; font: inherit; font-size: .85rem; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <button class="theme" id="theme" type="button">◐ Тема</button>
+  <h1>Запуск игры локально</h1>
+  <p class="lead">Cards, Snakes &amp; Ladders: обычная веб-версия и версия для CrazyGames. Все команды выполняются из корня проекта.</p>
+
+  <svg class="flow" viewBox="0 0 820 250" role="img" aria-label="Схема: исходники отдаёт server.py; сборка build_cg.py создаёт dist/crazygames и zip; cgframe показывает сборку в рамке; zip загружается на портал">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" style="color:var(--muted)"/></marker></defs>
+    <rect class="box" x="10" y="95" width="160" height="60" rx="10"/>
+    <text x="90" y="121" text-anchor="middle">Исходники</text>
+    <text class="sub" x="90" y="140" text-anchor="middle">index.html, web/…</text>
+
+    <rect class="box web" x="250" y="20" width="200" height="60" rx="10"/>
+    <text x="350" y="46" text-anchor="middle">Сервер</text>
+    <text class="sub" x="350" y="65" text-anchor="middle">tools/server.py 5500</text>
+
+    <rect class="box web" x="560" y="20" width="250" height="60" rx="10"/>
+    <text x="685" y="46" text-anchor="middle">Браузер</text>
+    <text class="sub" x="685" y="65" text-anchor="middle">localhost:5500/</text>
+
+    <rect class="box cg" x="250" y="170" width="200" height="60" rx="10"/>
+    <text x="350" y="196" text-anchor="middle">Сборка</text>
+    <text class="sub" x="350" y="215" text-anchor="middle">tools/build_cg.py</text>
+
+    <rect class="box cg" x="560" y="120" width="250" height="52" rx="10"/>
+    <text x="685" y="142" text-anchor="middle">Проверка в рамке</text>
+    <text class="sub" x="685" y="160" text-anchor="middle">tools/cgframe.html</text>
+
+    <rect class="box cg" x="560" y="188" width="250" height="52" rx="10"/>
+    <text x="685" y="210" text-anchor="middle">Портал CrazyGames</text>
+    <text class="sub" x="685" y="228" text-anchor="middle">dist/crazygames.zip</text>
+
+    <path class="arrow" d="M170,115 C210,80 215,50 248,50"/>
+    <path class="arrow" d="M450,50 L558,50"/>
+    <path class="arrow" d="M170,135 C210,175 215,200 248,200"/>
+    <path class="arrow" d="M450,192 C500,180 510,150 558,148"/>
+    <path class="arrow" d="M450,208 L558,214"/>
+    <text class="lbl" x="200" y="66">отдаёт</text>
+    <text class="lbl" x="470" y="40">открыть</text>
+    <text class="lbl" x="470" y="160">dist/crazygames/</text>
+    <text class="lbl" x="476" y="232">загрузить zip</text>
+  </svg>
+
+  <h2>Что нужно</h2>
+  <ul class="check">
+    <li><b>Python 3</b>: на нём работают и сервер, и сборка.</li>
+    <li>Любой современный браузер.</li>
+    <li>npm, Node и сборщик не нужны. three.js и PeerJS уже лежат в <code>vendor/</code>, с CDN ничего не грузится.</li>
+  </ul>
+
+  <h2><span class="num">1</span> Веб-версия (как на GitHub Pages)</h2>
+  <p>Запустите сервер и не закрывайте терминал:</p>
+  <div class="cmd"><pre>python tools/server.py 5500</pre><button class="copy" type="button">Копировать</button></div>
+  <p>Откройте <a href="http://localhost:5500/">http://localhost:5500/</a>.</p>
+  <div class="note warn"><b>Двойной клик по index.html не сработает</b>Через <code>file://</code> браузер не загрузит ES-модули, поэтому нужен сервер.</div>
+  <div class="note"><b>Порт занят?</b>Возьмите другой, например <code>python tools/server.py 5510</code>, и замените порт во всех ссылках ниже.</div>
+  <p>Подойдёт и любой статический сервер (<code>python -m http.server 8765</code>), но с <code>tools/server.py</code> работают ещё и все тестовые страницы из <code>tools/</code>.</p>
+
+  <h2><span class="num cg">2</span> Версия для CrazyGames</h2>
+  <p>Есть два способа: быстрый, без сборки, и полный, с настоящим архивом.</p>
+  <div class="grid">
+    <div class="card">
+      <span class="tag ok">Быстро · без сборки</span>
+      <h3>Профиль CrazyGames</h3>
+      <p>Добавьте к обычной странице параметр:</p>
+      <p><a href="http://localhost:5500/?platform=crazygames"><code>localhost:5500/?platform=crazygames</code></a></p>
+      <p>Подходит, чтобы проверять поведение игры. Изменения в коде видны сразу после перезагрузки.</p>
+    </div>
+    <div class="card">
+      <span class="tag cg">Полный · со сборкой</span>
+      <h3>Архив + рамка портала</h3>
+      <p>Собирается настоящий zip, затем сборка открывается в iframe тех размеров, на которых тестирует CrazyGames.</p>
+      <p>Подходит для проверки перед загрузкой на портал.</p>
+    </div>
+  </div>
+
+  <h3>Что меняет профиль CrazyGames</h3>
+  <div class="table-wrap"><table>
+    <tr><th></th><th>GitHub Pages</th><th>CrazyGames</th></tr>
+    <tr><td>Комнаты Quick Match</td><td><code>QM…</code></td><td><code>CG…</code>: игроки двух сайтов не встречаются</td></tr>
+    <tr><td>Ссылки-приглашения</td><td>есть (<code>?room=КОД</code>)</td><td>нет, только код комнаты</td></tr>
+    <tr><td>Уведомление о приватности</td><td>нет</td><td>есть</td></tr>
+    <tr><td>Лог платформы в консоли (F12)</td><td>с <code>?debug</code></td><td>с <code>?platform=crazygames</code> или <code>?debug</code></td></tr>
+  </table></div>
+
+  <h3>Полная проверка по шагам</h3>
+  <ol class="steps">
+    <li><b>Соберите архив:</b>
+      <div class="cmd"><pre>python tools/build_cg.py</pre><button class="copy" type="button">Копировать</button></div>
+      Скрипт остановится с ошибкой, если что-то грузится по абсолютному пути. В конце он печатает число файлов и размер.</li>
+    <li><b>Проверьте, что сервер из шага 1 запущен.</b></li>
+    <li><b>Откройте рамку:</b> <a href="http://localhost:5500/tools/cgframe.html">localhost:5500/tools/cgframe.html</a>. Справа вверху показано время до появления меню.</li>
+    <li><b>Пройдите по размерам</b> из выпадающего списка. Если рамка больше окна, включите <b>fit</b>. Кнопка <b>Reload</b> перезапускает игру.</li>
+    <li><b>Загрузите</b> <code>dist/crazygames.zip</code> на портал CrazyGames.</li>
+  </ol>
+
+  <div class="note warn"><b>Сборка не обновляется сама</b>После каждого изменения кода снова запустите <code>build_cg.py</code>, иначе в рамке будет старая версия.</div>
+
+  <h3>Что лежит в сборке</h3>
+  <div class="cmd tree"><pre>dist/
+├── crazygames/
+│   ├── index.html     ← с window.CSL_PLATFORM = 'crazygames'
+│   ├── web/
+│   ├── experience/    ← без experience.json (это манифест Project 0)
+│   └── vendor/        ← three.js, PeerJS
+└── crazygames.zip     ← этот файл загружается на портал</pre></div>
+
+  <h3>Лимиты портала</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Параметр</th><th>Желательно</th><th>Максимум</th></tr>
+    <tr><td>Размер архива</td><td>до 20 МБ</td><td>50 МБ</td></tr>
+    <tr><td>Число файлов</td><td>—</td><td>1500</td></tr>
+  </table></div>
+
+  <h3>Размеры рамки в cgframe.html</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Где играют</th><th>Размеры</th></tr>
+    <tr><td><span class="tag">окно</span></td><td><code>907×510</code> · <code>1216×684</code> (по умолчанию) · <code>1077×606</code> · <code>821×462</code></td></tr>
+    <tr><td><span class="tag cg">полный экран</span></td><td><code>1366×768</code> · <code>1920×1080</code> · <code>1536×864</code> · <code>1280×720</code></td></tr>
+    <tr><td><span class="tag ok">телефон / планшет</span></td><td><code>800×450</code> · <code>1080×607</code></td></tr>
+  </table></div>
+  <p>Нужный размер можно сразу передать в адресе: <a href="http://localhost:5500/tools/cgframe.html?size=800x450"><code>cgframe.html?size=800x450</code></a>.</p>
+
+  <div class="note"><b>SDK CrazyGames пока не подключён</b>В <code>web/platform.js</code> для него есть заглушки, работают пока только mute и unmute. Поэтому локально проверяются загрузка, размеры и профиль сайта, но не реклама и не другие функции SDK.</div>
+
+  <h2><span class="num">3</span> Тестовые страницы</h2>
+  <p>Нужен сервер из шага 1.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Страница</th><th>Что проверяет</th></tr>
+    <tr><td><a href="http://localhost:5500/tools/harness.html?room=test&amp;name=Alice"><code>harness.html?room=test&amp;name=Alice</code></a></td><td>Общий стол. Откройте вторую вкладку с тем же <code>room</code> и другим <code>name</code>.</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/simtest.html?boards=60&amp;games=40"><code>simtest.html?boards=60&amp;games=40</code></a></td><td>Правила на всех размерах поля (<code>boards=400</code> займёт вкладку на минуты)</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/cards.html?ids=C1,M2&amp;w=300"><code>cards.html?ids=C1,M2&amp;w=300</code></a></td><td>Лицевые стороны карт</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/nettest.html"><code>nettest.html</code></a></td><td>17 сетевых сценариев</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/onlinetest.html"><code>onlinetest.html</code></a></td><td>Три игрока проходят целую партию</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/quicktest.html"><code>quicktest.html</code></a></td><td>Quick Match с ботами, на двух сайтах</td></tr>
+  </table></div>
+  <p>Онлайн-тесты ходят на настоящие публичные серверы (PeerJS и MQTT-брокеры), поэтому нужен интернет.</p>
+
+  <h2>Если что-то не так</h2>
+  <details><summary>Пустая страница или ошибки модулей в консоли</summary><div>Страница открыта через <code>file://</code>. Запустите сервер и откройте адрес <code>http://localhost:…</code>.</div></details>
+  <details><summary>«Address already in use» при запуске сервера</summary><div>Порт занят, например сервером из другого окна. Запустите на другом порту: <code>python tools/server.py 5510</code>.</div></details>
+  <details><summary>В cgframe.html ничего не загружается</summary><div>Сборки ещё нет. Сначала выполните <code>python tools/build_cg.py</code>: рамка открывает <code>../dist/crazygames/index.html</code>.</div></details>
+  <details><summary>В рамке старая версия игры</summary><div>Пересоберите архив через <code>build_cg.py</code> и нажмите Reload.</div></details>
+  <details><summary>build_cg.py остановился с ошибкой</summary><div>Какая-то страница или модуль грузит файл по абсолютному пути (<code>/…</code> или <code>http…</code>). На портале игра лежит в своей папке на CDN, поэтому все пути должны быть относительными. Скрипт пишет, какой файл и какой путь виноваты.</div></details>
+</main>
+<script>
+  for (const b of document.querySelectorAll('.copy')) b.addEventListener('click', async () => {
+    const text = b.previousElementSibling.textContent
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Скопировано'; b.classList.add('done') }
+    catch { b.textContent = 'Не вышло' }
+    setTimeout(() => { b.textContent = 'Копировать'; b.classList.remove('done') }, 1500)
+  })
+  const root = document.documentElement
+  try { const t = localStorage.getItem('run-theme'); if (t) root.dataset.theme = t } catch {}
+  document.getElementById('theme').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+    root.dataset.theme = dark ? 'light' : 'dark'
+    try { localStorage.setItem('run-theme', root.dataset.theme) } catch {}
+  })
+</script>
+</body>
+</html>
