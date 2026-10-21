@@ -180,6 +180,7 @@ export class View {
       new THREE.Mesh(G.buildTiers({ lot: this.p0.lot }), this.mat.paper),
       new THREE.Mesh(G.buildTiles(), this.mat.numbers),
       new THREE.Mesh(G.tierArrowsGeometry(), this.mat.paper),
+      new THREE.Mesh(G.cellArrowsGeometry(), this.mat.paper),
     ]
     for (const m of this.frame) this.root.add(m)
     this.boardKey = null

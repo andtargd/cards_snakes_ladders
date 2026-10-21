@@ -538,6 +538,30 @@ export function tierArrowsGeometry({ lod = 0 } = {}) {
   return b.geometry()
 }
 
+// ---------- small paper arrows between neighbouring cells of a tier (1 to 2, 2 to 3...) ----------
+// A triangle cut from the tier's own paper, a shade darker, lying over the gap between the two cells.
+export function cellArrowsGeometry() {
+  const b = new Builder()
+  const h = 0.012
+  for (let n = 1; n < B.cells; n++) {
+    if (n % 10 === 0) continue // the tier arrows take a row's last cell up
+    const p = cellPos(n), q = cellPos(n + 1)
+    const cx = (p.x + q.x) / 2, dir = q.x > p.x ? 1 : -1
+    const c = col(TIER_COLORS[Math.floor((n - 1) / 10)], 0.62), dc = c.clone().multiplyScalar(0.72)
+    // under the snakes and ladders (0.035 over the cell), under the card markers too
+    const y = p.y + h
+    const tip = V(cx + 0.075 * dir, y, p.z), l = V(cx - 0.055 * dir, y, p.z - 0.075), r = V(cx - 0.055 * dir, y, p.z + 0.075)
+    dir > 0 ? b.tri(tip, l, r, c) : b.tri(tip, r, l, c)
+    // its cut edges, down to the cell (both faces: the winding flips with the direction)
+    for (const [e0, e1] of [[tip, l], [l, r], [r, tip]]) {
+      const d0 = V(e0.x, y - h, e0.z), d1 = V(e1.x, y - h, e1.z)
+      b.quad(d0, d1, e1, e0, dc)
+      b.quad(d1, d0, e0, e1, dc)
+    }
+  }
+  return b.geometry({ worldUV: 0.32 })
+}
+
 // ---------- card markers on cells ----------
 export function markerGeometry(kind, cell, variant = 0) {
   const b = new Builder()
