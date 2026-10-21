@@ -461,6 +461,7 @@ function beginTurn(s, ev) {
     p.st = p.pos; p.tr = ''; delete p.up
     s.turnNo++
     s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
+    delete s.bonus
     ev.push({ e: 'turn', p: pi, round: s.round })
     if (p.fx.sk) {
       delete p.fx.sk
@@ -608,6 +609,8 @@ export function rollDistribution(fx) {
 /** A roll's total as it moves the piece: Slow Down caps it. */
 const slowTotal = (fx, t) => (fx.sl ? Math.min(CARD.H1.max, t) : t)
 const diceCount = fx => (fx.x ? Math.max(1, CARD.D1.dice | 0) : 1)
+/** The dice a roll throws: Choose Your Roll throws one more to pick from (the tray holds up to 3). */
+export const diceThrown = fx => (fx.pk ? Math.min(3, 1 + diceCount(fx)) : diceCount(fx))
 const heavyMin = () => Math.max(1, Math.min(6, CARD.D3.min | 0))
 /** The highest value a chosen roll may take (Golden Die, Choose a Face), or 0 for a roll of the dice. */
 export const choiceMax = fx => (fx.gd ? CARD.D4.max : fx.cf ? CARD.D2.max : 0)
@@ -695,7 +698,7 @@ function rollAndMove(s, pi, value, ev, bonus) {
     dice = [v]; chosen = true
     for (let k = 1; k < diceCount(fx); k++) dice.push(lo + rint(s, 7 - lo))
   } else {
-    const n = fx.pk ? 2 : diceCount(fx)
+    const n = diceThrown(fx)
     dice = []
     for (let k = 0; k < n; k++) dice.push(lo + rint(s, 7 - lo))
   }
@@ -704,9 +707,9 @@ function rollAndMove(s, pi, value, ev, bonus) {
   delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.pk
   if (pick) {
     ev.push({ e: 'roll', p: pi, dice, total: 0, chosen: false, slowed: false, bonus: !!bonus, pick: true })
-    log(s, ev, `${p.n} rolled ${dice.join(' and ')}`)
-    // two equal dice leave nothing to choose: the move goes on at once
-    if (pi === s.cur && dice[0] !== dice[1]) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
+    log(s, ev, `${p.n} rolled ${dice.slice(0, -1).join(', ')} and ${dice[dice.length - 1]}`)
+    // equal dice leave nothing to choose: the move goes on at once
+    if (pi === s.cur && dice.some(d => d !== dice[0])) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
     moveBy(s, pi, dice, ev, bonus, bestPick(s, pi, dice))
     return
   }
@@ -1021,8 +1024,8 @@ export function apply(s, pi, a) {
     afterAction(s, pi, ev)
   } else if (a.t === 'roll') {
     if (s.rolled) return fail('Already rolled')
-    s.rolled = true
-    rollAndMove(s, pi, a.v, ev, false)
+    // Double Move's roll comes first (with the value chosen for it); the turn's own roll is still to come
+    if (s.bonus) { delete s.bonus; rollAndMove(s, pi, a.v, ev, true) } else { s.rolled = true; rollAndMove(s, pi, a.v, ev, false) }
     afterAction(s, pi, ev)
   } else if (a.t === 'end') {
     if (!s.rolled) return fail('Roll first')
@@ -1134,7 +1137,12 @@ function cardEffect(s, pi, cardId, target, ev) {
       trail(p, ['p', who.pos, p.pos]); trail(who, ['p', p.pos, who.pos])
       break
     }
-    case 'M4': rollAndMove(s, target, undefined, ev, true); break
+    case 'M4':
+      // with a chosen roll waiting (Golden Die, Choose a Face) the player gives its value: their next roll
+      // is the bonus one, with that value, and the turn's own roll an ordinary one after it
+      if ((who.fx.gd || who.fx.cf) && target === s.cur && !s.rolled) { s.bonus = 1; break }
+      rollAndMove(s, target, undefined, ev, true)
+      break
     case 'D1': setFx('x'); break
     // the dice that are chosen or picked from replace each other: the last one played counts
     case 'D2': delete who.fx.gd; delete who.fx.pk; setFx('cf'); break
@@ -1207,26 +1215,22 @@ function expectedNext(s, q, els) {
   if (p.d) return 130
   if (p.fx.sk) return p.pos
   const scoreOf = l => (l.finished ? 115 : l.pos)
+  let ex = 0
   if (p.fx.gd || p.fx.cf) {
     const max = choiceMax(p.fx), rest = diceSums(p.fx, diceCount(p.fx) - 1)
-    let best = 0
     for (let v = 1; v <= max; v++) {
-      let ex = 0
-      for (const [t, pr] of rest) ex += pr * scoreOf(landing(s, q, p.pos, slowTotal(p.fx, v + t), els))
-      best = Math.max(best, ex)
+      let e = 0
+      for (const [t, pr] of rest) e += pr * scoreOf(landing(s, q, p.pos, slowTotal(p.fx, v + t), els))
+      ex = Math.max(ex, e)
     }
-    return best
-  }
-  if (p.fx.pk) { // Choose Your Roll: the better of two dice
-    const lo = p.fx.hv ? heavyMin() : 1, n = 7 - lo
+  } else if (p.fx.pk) { // Choose Your Roll: the best of the dice (two, three with an Extra Die)
+    const lo = p.fx.hv ? heavyMin() : 1, n = diceThrown(p.fx)
     const at = []
-    for (let f = lo; f <= 6; f++) at[f] = scoreOf(landing(s, q, p.pos, slowTotal(p.fx, f), els))
-    let ex = 0
-    for (let a = lo; a <= 6; a++) for (let b = lo; b <= 6; b++) ex += Math.max(at[a], at[b]) / (n * n)
-    return ex
-  }
-  let ex = 0
-  for (const [t, pr] of rollDistribution(p.fx)) ex += pr * scoreOf(landing(s, q, p.pos, t, els))
+    for (let f = lo; f <= 6; f++) at.push(scoreOf(landing(s, q, p.pos, slowTotal(p.fx, f), els)))
+    // the best of n dice: P(max <= k-th worst face) = (k / faces)^n
+    at.sort((a, b) => a - b)
+    at.forEach((v, k) => { ex += v * (((k + 1) / at.length) ** n - (k / at.length) ** n) })
+  } else for (const [t, pr] of rollDistribution(p.fx)) ex += pr * scoreOf(landing(s, q, p.pos, t, els))
   if (p.fx.dm) { // a pending Double Move (evaluation only): one more ordinary roll from there
     const after = ex
     let ex2 = 0

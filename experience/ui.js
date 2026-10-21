@@ -2,7 +2,7 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, choiceMax, CFG, SIZES } from './rules.js'
+import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, choiceMax, diceThrown, CFG, SIZES } from './rules.js'
 import { T } from './strings.js'
 
 /** The cards page of How to Play: by category, and within one from Common to Legendary. */
@@ -263,7 +263,7 @@ export class UI {
     // (it stays up while my roll is on its way to the table's host, so the dice are tossed from where they lie)
     if (app.view.busy || app.curtain() >= 0 || app.menuOpen || app.invite) return 0
     const fx = s.pl[me].fx
-    return fx.gd || fx.cf ? 0 : fx.x || fx.pk ? 2 : 1
+    return fx.gd || fx.cf ? 0 : diceThrown(fx)
   }
 
   // ---------- the soft message in the middle of the screen: "Your turn", "Choose any player" ----------
@@ -1658,9 +1658,10 @@ export class UI {
         if (!this.narrow) pill(T.clickToEnd)
         hit(() => { if (this.target) this.cancelTarget(); app.act({ t: 'end' }) })
       } else if (mode === 'pick') {
-        // Choose Your Roll: the two dice lie in the tray, the left one and the right one each take a click
+        // Choose Your Roll: the dice lie in the tray side by side (two, three with an Extra Die), each takes a click
         pill(this.narrow ? T.tapDie : T.pickDie)
-        for (const i of [0, 1]) this.hits.push({ key: 'die' + i, x: tx - 10 * u + i * (tw / 2 + 10 * u), y: ty - 10 * u, w: tw / 2 + 10 * u, h: th + 20 * u, action: () => this.choose('pick', i) })
+        const n = s.pick.d.length, dw = (tw + 20 * u) / n
+        for (let i = 0; i < n; i++) this.hits.push({ key: 'die' + i, x: tx - 10 * u + i * dw, y: ty - 10 * u, w: dw, h: th + 20 * u, action: () => this.choose('pick', i) })
       } else if (mode === 'choose' && this.narrow) {
         // the small tray says what to do; the values stand in a grid beside it, big enough for a finger
         const n = choose, lines = this.wrap(pmy.fx.bk ? T.chooseBack : T.chooseValue, 15, tw - 16 * u)
@@ -2482,7 +2483,7 @@ export class UI {
     if (this.dirty) this.draw()
     this.updateTip(dt)
     this.app.view.trayPrompt = n && this.trayRect ? n : 0
-    this.app.view.trayPick = this.trayMode === 'pick' ? (this.hover === 'die0' ? 0 : this.hover === 'die1' ? 1 : -1) : null
+    this.app.view.trayPick = this.trayMode === 'pick' ? (/^die\d$/.test(this.hover || '') ? +this.hover.slice(3) : -1) : null
     this.updateTrayFrame(dt)
   }
 }

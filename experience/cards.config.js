@@ -79,7 +79,7 @@ export default {
     D1: {
       name: 'Extra Die', rarity: 'C', weight: 1, enabled: true,
       target: 'current_player',
-      dice: 2, // dice in the next roll (the tray shows up to 2)
+      dice: 2, // dice in the next roll (the tray shows up to 3: Choose Your Roll throws one more)
       text: "A player's next roll uses {dice} dice.",
     },
     D2: {

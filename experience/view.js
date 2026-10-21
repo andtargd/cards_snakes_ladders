@@ -14,6 +14,11 @@ const rollLabel = (raw, total, sum, slowed, back) => {
   const t = slowed ? `${raw} → ${total}` : sum ? `= ${total}` : ''
   return back ? `${t ? t + ' ' : ''}← back` : t
 }
+/** Where die i of n rests in the tray: one in the middle, two side by side, three in a shallow arc. */
+const trayRest = (i, n) => new THREE.Vector3(
+  n === 1 ? 0 : n === 2 ? (i ? 0.5 : -0.5) : (i - 1) * 0.72, 0.23, n === 3 ? (i === 1 ? 0.18 : -0.08) : i ? 0.15 : -0.1)
+/** Where die i of n rests on the board's pad. */
+const padX = (i, n) => (n === 3 ? -0.8 : -0.4) + i * 0.8
 const TILT = 22 * Math.PI / 180
 const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
 // a roll of the dice: they tumble, and this far into it come to rest showing the number, all at once; they lie
@@ -126,9 +131,9 @@ export class View {
     this.pickCell = new THREE.Mesh(new THREE.PlaneGeometry(10.4, 12.6).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ visible: false }))
     // the dice resting on the pad (they show the last roll)
     this.dieGeo = G.dieGeometry(0.46)
-    this.padDice = [0, 1].map(i => {
+    this.padDice = [0, 1, 2].map(i => {
       const m = new THREE.Mesh(this.dieGeo, this.mat.dice)
-      m.position.set(G.B.dice.x - 0.4 + i * 0.8, G.B.base + 0.045 + 0.23, G.B.dice.z)
+      m.position.set(G.B.dice.x + padX(i, 2), G.B.base + 0.045 + 0.23, G.B.dice.z)
       m.quaternion.copy(P.dieQuaternion(i ? 4 : 6, 0.4 + i))
       m.visible = i === 0
       this.root.add(m)
@@ -152,7 +157,7 @@ export class View {
     const pad = new THREE.Mesh(new THREE.BoxGeometry(9, 0.1, 7), new THREE.MeshStandardMaterial({ color: '#ffffff', map: this.fibre, roughness: 0.95 }))
     pad.position.y = -0.05
     this.tray.add(pad)
-    this.trayDice = [0, 1].map(() => { const m = new THREE.Mesh(this.dieGeo, this.mat.dice); m.visible = false; this.tray.add(m); return m })
+    this.trayDice = [0, 1, 2].map(() => { const m = new THREE.Mesh(this.dieGeo, this.mat.dice); m.visible = false; this.tray.add(m); return m })
     this.trayCam = new THREE.PerspectiveCamera(35, 1.4, 0.1, 50)
     this.trayAim = new THREE.Vector3(0, 0.2, -0.05)
     this.trayAway = new THREE.Vector3(0, 2.155, 1.31).sub(this.trayAim) // 15% closer than (0, 2.5, 1.55), so the dice fill more of it
@@ -163,7 +168,7 @@ export class View {
     this.trayVisible = 0
     this.trayLabel = ''
     this.trayPrompt = 0 // dice waiting in the tray for my click (the screen layer sets it every frame)
-    this.trayPick = null // while I pick one of two dice: the one under the pointer (0, 1) or -1 (the screen layer sets it)
+    this.trayPick = null // while I pick one of the dice: the one under the pointer (0, 1, 2) or -1 (the screen layer sets it)
     this.trayRolling = false
   }
 
@@ -734,7 +739,7 @@ export class View {
         this.trayGold = e.chosen && e.dice[0] > 3
         starts = e.dice.map((v, i) => {
           const m = this.trayDice[i]
-          const end = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
+          const end = trayRest(i, n)
           const startPos = set(i) ? end.clone().add(new THREE.Vector3(0, 0.35, 0)) : tossed ? (m.visible ? m.position.clone() : new THREE.Vector3(end.x * 0.6, 0.23, end.z)) : new THREE.Vector3(1.8, 1.2 + i * 0.2, 0.9 - i * 0.6)
           m.visible = true
           m.material = this.trayGold && set(i) ? this.mat.gold : this.mat.dice
@@ -747,7 +752,7 @@ export class View {
           const spin = set(i) ? Math.PI : 10 + Math.random() * 4, spin2 = set(i) ? 0 : (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 3)
           return { m, end, startPos, qEnd, axis, across, spin, spin2, set: set(i) }
         })
-        for (let i = n; i < 2; i++) this.trayDice[i].visible = false
+        for (let i = n; i < this.trayDice.length; i++) this.trayDice[i].visible = false
         // the sounds go on a timeline from here: when the dice land is known now
         if (e.chosen) this.sfx('fold', 0.7)
         if (!allSet) this.emit('rollsound', ROLL_LAND * ROLL_DUR / this.speed)
@@ -778,38 +783,40 @@ export class View {
       end: () => {
         const total = e.total
         this.trayLabel = e.pick ? '' : rollLabel(e.dice.reduce((a, b) => a + b, 0), total, e.dice.length > 1, e.slowed, e.back)
-        e.dice.forEach((v, i) => { this.padDice[i].visible = true; this.padDice[i].quaternion.copy(P.dieQuaternion(v, 0.3 + i)) })
-        this.padDice[1].visible = e.dice.length > 1
+        this.padDice.forEach((m, i) => {
+          m.visible = i < n
+          if (i < n) { m.position.x = G.B.dice.x + padX(i, n); m.quaternion.copy(P.dieQuaternion(e.dice[i], 0.3 + i)) }
+        })
         this.trayRolling = false
       },
     })
     this.tasks.push({ dur: 0.25 })
   }
 
-  /** Choose Your Roll: the picked die hops to the middle of the tray, the other sinks away. */
+  /** Choose Your Roll: the picked die hops to the middle of the tray, the others sink away. */
   queuePick(e) {
-    let a, b, from
+    let a, rest, from
     this.tasks.push({
       dur: 0.55,
       start: () => {
         this.trayVisible = 3.2
         this.trayLabel = ''
-        a = this.trayDice[e.i]; b = this.trayDice[1 - e.i]
+        a = this.trayDice[e.i]; rest = this.trayDice.filter(m => m !== a)
         // (another player's bonus roll: the dice may not lie in the tray yet)
-        if (!a.visible) { a.visible = true; a.position.set(e.i ? 0.5 : -0.5, 0.23, e.i ? 0.15 : -0.1); a.quaternion.copy(P.dieQuaternion(e.dice[e.i], 0)) }
+        if (!a.visible) { a.visible = true; a.position.copy(trayRest(e.i, e.dice.length)); a.quaternion.copy(P.dieQuaternion(e.dice[e.i], 0)) }
         from = a.position.clone()
         this.sfx('select', 0.5)
       },
       update: k => {
         a.position.lerpVectors(from, new THREE.Vector3(0, 0.23, 0), easeOut(k))
         a.position.y += Math.sin(k * Math.PI) * 0.35
-        b.scale.setScalar(Math.max(0.01, 1 - easeOut(k)))
+        for (const b of rest) b.scale.setScalar(Math.max(0.01, 1 - easeOut(k)))
       },
       end: () => {
-        b.visible = false; b.scale.setScalar(1)
+        for (const b of rest) { b.visible = false; b.scale.setScalar(1) }
         this.trayLabel = rollLabel(e.dice[e.i], e.total, false, e.slowed, e.back)
-        this.padDice[0].visible = true; this.padDice[0].quaternion.copy(P.dieQuaternion(e.dice[e.i], 0.3))
-        this.padDice[1].visible = false
+        this.padDice.forEach((m, i) => { m.visible = i === 0 })
+        this.padDice[0].position.x = G.B.dice.x + padX(0, 2); this.padDice[0].quaternion.copy(P.dieQuaternion(e.dice[e.i], 0.3))
       },
     })
     this.tasks.push({ dur: 0.2 })
@@ -1121,9 +1128,9 @@ export class View {
     this.idleT += dt
     this.trayDice.forEach((m, i) => {
       if (i >= n) { m.visible = false; return }
-      if (!m.visible) { m.visible = true; m.position.set(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1) }
+      if (!m.visible) { m.visible = true; m.position.copy(trayRest(i, n)) }
       m.material = this.mat.dice
-      const rest = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
+      const rest = trayRest(i, n)
       // a hop every 2.4 s, the second die a little later
       const ph = (this.idleT + 1.6 - i * 0.18) % 2.4, k = ph < 0.55 ? ph / 0.55 : 0
       const hop = Math.sin(k * Math.PI)
@@ -1154,8 +1161,8 @@ export class View {
     const fit = this.trayFit
     let want = 1
     if (fit) {
-      const two = this.trayDice[1].visible && this.trayDice[0].visible, t = Math.tan(THREE.MathUtils.degToRad(this.trayCam.fov / 2))
-      const d = Math.max((two ? 0.92 : 0.45) / (t * fit.aspect), (two ? 0.55 : 0.5) / t)
+      const n = this.trayDice.filter(m => m.visible).length, t = Math.tan(THREE.MathUtils.degToRad(this.trayCam.fov / 2))
+      const d = Math.max((n > 2 ? 1.2 : n > 1 ? 0.92 : 0.45) / (t * fit.aspect), (n > 1 ? 0.55 : 0.5) / t)
       want = THREE.MathUtils.clamp(d / this.trayAway.length(), 0.5, 1.2)
     }
     this.trayZoom += (want - this.trayZoom) * (1 - Math.exp(-7 * dt))
