@@ -373,8 +373,8 @@ export class View {
       P.roundRect(g, (W - w) / 2, 4, w, 50, 25); g.fill()
       g.strokeStyle = on ? '#ffffff' : t.color; g.lineWidth = on ? 5 : 4; g.stroke()
       if (on && !fx.length) {
-        // the arrow down to the piece
-        g.fillStyle = t.color; g.beginPath(); g.moveTo(W / 2 - 13, 52); g.lineTo(W / 2 + 13, 52); g.lineTo(W / 2, 70); g.closePath(); g.fill()
+        // the arrow down to the piece: it starts inside the tag, over its white rim, so the two are one colour
+        g.fillStyle = t.color; g.beginPath(); g.moveTo(W / 2 - 21, 46); g.lineTo(W / 2 + 21, 46); g.lineTo(W / 2, 72); g.closePath(); g.fill()
       }
       g.fillStyle = on ? P.inkOn(t.color) : P.INK; g.textAlign = 'center'; g.textBaseline = 'middle'
       g.fillText(p.n, W / 2, 31, W - 30)
