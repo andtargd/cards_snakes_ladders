@@ -71,6 +71,9 @@ const BURN_SECS = 0.8
 const MIN_TEXT = 12
 // on a touch screen a button takes a tap this close to it (CSS px across), however small it is drawn
 const TOUCH_HIT = 40
+// the game's name on the menu, in the covers' three lines and colours, and how tall it stands (units)
+const LOGO = [[{ t: 'Cards,', c: '#ffcf4a' }], [{ t: 'Snakes', c: '#7ed46a' }, { t: '&', c: '#fffdf8' }], [{ t: 'Ladders', c: '#f39a4f' }]]
+const LOGO_H = 150
 // a card this wide (CSS px) shows its text 12.5 px tall (paper.js draws it 16.5 / 256 of the card's width):
 // a card held up to read is at least this big
 const CARD_READ = 12.5 * 256 / 16.5
@@ -612,16 +615,32 @@ export class UI {
     this.dirty = false
   }
 
+  /**
+   * The game's name as on the covers (tools/cover.js): thick letters in the cards' gold, the snakes' green
+   * and the ladders' wood, a navy rim and a paper-thick edge under them, in three lines. `y` is its top;
+   * it is LOGO_H units tall.
+   */
   drawLogo(cx, y, scale = 1) {
     const g = this.g, u = this.u * scale
-    const line = (t, yy, size, colors) => {
-      g.font = this.font(size * u)
-      g.textAlign = 'center'; g.textBaseline = 'middle'
-      colors.forEach((c, i) => { g.fillStyle = c; g.fillText(t, cx + (colors.length - 1 - i) * 3 * u, yy + (colors.length - 1 - i) * 3 * u) })
-    }
-    // navy letters on the cream panel, over a yellow / orange paper offset
-    line('Cards,', y, 40, ['rgba(45,58,107,0.18)', '#f2c14e', '#2d3a6b'])
-    line('Snakes & Ladders', y + 50 * u, 52, ['rgba(45,58,107,0.18)', '#e8743b', '#2d3a6b'])
+    const size = 50 * u, lead = size * 1.02, rim = size * 0.15, depth = Math.max(3, size * 0.09)
+    g.save()
+    g.font = `900 ${size}px "Arial Black", "Segoe UI Black", ${P.FONT}`
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic'
+    g.lineJoin = 'round'; g.miterLimit = 2
+    const space = g.measureText(' ').width * 0.9
+    LOGO.forEach((line, li) => {
+      const widths = line.map(w => g.measureText(w.t).width)
+      let x = cx - (widths.reduce((a, b) => a + b, 0) + space * (line.length - 1)) / 2
+      const at = line.map((w, i) => { const x0 = x; x += widths[i] + space; return x0 })
+      const by = y + size * 0.78 + li * lead
+      // the edge: the rim pushed down a few times; then the rim, then the letters
+      g.fillStyle = g.strokeStyle = '#1f2850'; g.lineWidth = rim
+      for (let d = depth; d > 0; d -= Math.max(1, depth / 8)) line.forEach((w, i) => { g.strokeText(w.t, at[i], by + d); g.fillText(w.t, at[i], by + d) })
+      g.strokeStyle = '#2d3a6b'
+      line.forEach((w, i) => g.strokeText(w.t, at[i], by))
+      line.forEach((w, i) => { g.fillStyle = w.c; g.fillText(w.t, at[i], by) })
+    })
+    g.restore()
   }
 
   /**
@@ -669,11 +688,12 @@ export class UI {
     const subLines = Math.max(...[T.soloSub, T.passSub, onlineSub].map(t => this.wrap(t, 11.5, tw - 28 * u, false).length))
     const lh = this.lineH(11.5, 15), tileH = Math.max(124 * u, 124 * u * 0.6 + this.tileGap() + (Math.min(3, subLines) - 1) * lh + 0.5 * lh + 4 * u)
     // (the web build's line about its online room is always room taken: the menu does not move when it comes or goes)
-    const ch = 152 * u + heroH + 14 * u + tileH + 14 * u + (web ? 0 : 22) * u + 48 * u + (web ? 36 : 0) * u
+    const headH = LOGO_H + 44
+    const ch = headH * u + heroH + 14 * u + tileH + 14 * u + (web ? 0 : 22) * u + 48 * u + (web ? 36 : 0) * u
     let y = Math.max(16 * u, (H - ch - (table.length ? 90 * u : 0)) / 2)
-    this.drawLogo(cx, y + 30 * u, Math.min(1, w / (440 * u)))
-    this.text(T.tagline, cx, y + 116 * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
-    y += 152 * u
+    this.drawLogo(cx, y, Math.min(1, w / (440 * u)))
+    this.text(T.tagline, cx, y + (LOGO_H + 18) * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
+    y += headH * u
     // one click into a game: players online (Project 0: the bots at once); the web build's first time, the First Match
     const mode = app.online.mode === 'fool' ? T.fool : T.champion
     if (app.firstDue()) this.heroButton('quick', T.firstMatch, T.firstMatchSub, x, y, w, heroH, () => app.startFirstMatch())
