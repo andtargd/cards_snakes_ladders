@@ -5,7 +5,7 @@
 
 export const MAX_NAME = 14
 /** Control characters out, spaces squeezed, at most 14 characters. */
-export const cleanName = s => String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME)
+export const cleanName = s => String(s || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME).replace(/[\ud800-\udbff]$/, '') // (not half an emoji)
 
 // ---------- random names ----------
 const ADJ = ['Paper', 'Lucky', 'Sly', 'Brave', 'Jolly', 'Swift', 'Clever', 'Sunny', 'Dizzy', 'Happy', 'Mighty', 'Quiet', 'Bouncy', 'Golden', 'Rusty', 'Velvet', 'Cosmic', 'Merry', 'Plucky', 'Nimble', 'Cozy', 'Wily', 'Tiny', 'Royal', 'Silver', 'Daring', 'Breezy', 'Fuzzy', 'Sleepy', 'Wobbly', 'Cheeky', 'Shiny', 'Rolling', 'Spotted', 'Striped', 'Bold', 'Calm', 'Gentle', 'Zippy', 'Peppy']

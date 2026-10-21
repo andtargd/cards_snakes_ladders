@@ -16,6 +16,10 @@ const rollLabel = (raw, total, sum, slowed, back) => {
 }
 const TILT = 22 * Math.PI / 180
 const HOLD = 1.0 // seconds the camera rests on a piece where its move ended
+// a roll of the dice: they tumble, and this far into it come to rest showing the number, all at once; they lie
+// still after. Their sounds go on a timeline (main.js rollSound); where they can't, the one of landing plays as
+// they land, LAND_LEAD s early (a sound played so takes about that long to start)
+const ROLL_DUR = 1.05, ROLL_LAND = 0.88, LAND_LEAD = 0.02
 const RING_ORDER = 50 // the rings under the pieces go after the other opaque things, the pieces after the rings
 // events that move a piece: who moved
 const MOVER = { move: e => e.p, ladder: e => e.p, snake: e => e.p, tramp: e => e.p, jump: e => e.p, portal: e => e.p, swap: e => e.a, rewind: e => e.p }
@@ -199,6 +203,7 @@ export class View {
       t.group.scale.setScalar(1)
     }
     this.layoutTokens(true)
+    this.turnOf = s.cur
     this.refreshLabels()
   }
 
@@ -343,24 +348,35 @@ export class View {
     }
   }
 
+  /**
+   * The name tags over the pieces. The tag of the player whose turn it is (from the turn's start, before the
+   * table is still again) is filled with their colour, a little arrow under it, and drawn over the others.
+   */
   refreshLabels() {
     const s = this.state
     if (!s) return
+    const cur = s.ph === 'over' ? -1 : this.turnOf ?? s.cur
     s.pl.forEach((p, i) => {
       const t = this.tokens[i]
       if (!t) return
       const fx = Object.keys(p.fx).filter(k => FX[k])
-      const key = JSON.stringify([p.n, fx.map(k => [k, p.fx[k].t ?? 0]), s.cur === i])
+      const on = cur === i
+      const key = JSON.stringify([p.n, fx.map(k => [k, p.fx[k].t ?? 0]), on])
       if (key === t.labelKey) return
       t.labelKey = key
+      t.labelOn = on
       const W = 320, H = 128
       const { c, g } = P.canvas(W, H)
       g.font = `bold 34px ${P.FONT}`
       const w = Math.min(W - 8, g.measureText(p.n).width + 40)
-      g.fillStyle = s.cur === i ? '#ffffff' : 'rgba(255,255,255,0.88)'
+      g.fillStyle = on ? t.color : 'rgba(255,255,255,0.88)'
       P.roundRect(g, (W - w) / 2, 4, w, 50, 25); g.fill()
-      g.strokeStyle = t.color; g.lineWidth = s.cur === i ? 7 : 4; g.stroke()
-      g.fillStyle = P.INK; g.textAlign = 'center'; g.textBaseline = 'middle'
+      g.strokeStyle = on ? '#ffffff' : t.color; g.lineWidth = on ? 5 : 4; g.stroke()
+      if (on && !fx.length) {
+        // the arrow down to the piece
+        g.fillStyle = t.color; g.beginPath(); g.moveTo(W / 2 - 13, 52); g.lineTo(W / 2 + 13, 52); g.lineTo(W / 2, 70); g.closePath(); g.fill()
+      }
+      g.fillStyle = on ? P.inkOn(t.color) : P.INK; g.textAlign = 'center'; g.textBaseline = 'middle'
       g.fillText(p.n, W / 2, 31, W - 30)
       const n = fx.length
       fx.forEach((k, j) => {
@@ -373,7 +389,7 @@ export class View {
       t.label.material.map?.dispose()
       t.label.material.map = P.texture(c)
       t.label.material.needsUpdate = true
-      t.label.scale.set(1.15, 0.46, 1)
+      t.label.renderOrder = on ? 7 : 6
       t.label.position.y = n ? 0.92 : 0.98
     })
   }
@@ -402,7 +418,7 @@ export class View {
     const tok = i => this.tokens[i]
     switch (e.e) {
       case 'log': this.tasks.push({ dur: 0, start: () => this.emit('log', e.text) }); break
-      case 'turn': this.tasks.push({ dur: 0.05, start: () => { this.manual = 0; this.focusOn(e.p); this.emit('turn', e) } }); break
+      case 'turn': this.tasks.push({ dur: 0.05, start: () => { this.manual = 0; this.focusOn(e.p); this.turnOf = e.p; this.refreshLabels(); this.emit('turn', e) } }); break
       case 'draw': this.tasks.push({ dur: 0.35, start: () => this.emit('draw', e) }); break
       case 'discard': this.tasks.push({ dur: 0.5, start: () => this.emit('discard', e) }); break
       case 'mustdisc': this.tasks.push({ dur: 0, start: () => this.emit('mustdisc', e) }); break
@@ -702,9 +718,9 @@ export class View {
   queueRoll(e) {
     // the dice tumble in the tray in the corner, then rest on the board's pad
     const n = e.dice.length
-    let starts = [], tossed = false
+    let starts = [], tossed = false, landed = false
     this.tasks.push({
-      dur: e.chosen ? 0.7 : 1.05,
+      dur: e.chosen ? 0.7 : ROLL_DUR,
       start: () => {
         // dice lying in the tray (it always shows the last roll) are tossed up from where they lie
         tossed = (this.trayPrompt > 0 || this.trayDice[0].visible) && !e.chosen
@@ -719,14 +735,21 @@ export class View {
           m.visible = true
           m.material = this.trayGold ? this.mat.gold : this.mat.dice
           const qEnd = P.dieQuaternion(v, (Math.random() - 0.5) * 0.8)
-          const axis = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.4, Math.random() - 0.5).normalize()
-          return { m, end, startPos, qEnd, axis, spin: e.chosen ? Math.PI : 9 + Math.random() * 4 }
+          // it tumbles head over heels about a level axis and turns over sideways about the one across it, so
+          // its faces go round whatever it rolls (about a near-upright axis the face up would stay up the
+          // whole time: the same number as the last roll did not seem to roll at all)
+          const a = Math.random() * Math.PI * 2
+          const axis = new THREE.Vector3(Math.cos(a), 0, Math.sin(a)), across = new THREE.Vector3(-Math.sin(a), 0.35, Math.cos(a)).normalize()
+          const spin = e.chosen ? Math.PI : 10 + Math.random() * 4, spin2 = e.chosen ? 0 : (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 3)
+          return { m, end, startPos, qEnd, axis, across, spin, spin2 }
         })
         for (let i = n; i < 2; i++) this.trayDice[i].visible = false
-        this.sfx(e.chosen ? 'fold' : 'roll', 0.7)
+        // the sounds go on a timeline from here: when the dice land is known now
+        if (e.chosen) this.sfx('fold', 0.7); else this.emit('rollsound', ROLL_LAND * ROLL_DUR / this.speed)
         this.emit('roll', e)
       },
-      update: k => {
+      update: t => {
+        const k = e.chosen ? t : Math.min(1, t / ROLL_LAND)
         for (const d of starts) {
           if (e.chosen) {
             d.m.position.lerpVectors(d.startPos, d.end, easeOut(k))
@@ -737,9 +760,15 @@ export class View {
             if (tossed) d.m.position.y = d.startPos.y + (d.end.y - d.startPos.y) * k + Math.abs(Math.sin(k * Math.PI * 2.5)) * Math.pow(1 - k, 1.6) * 0.75
             else d.m.position.y = d.end.y + Math.abs(Math.cos(k * Math.PI * 2.5)) * (1 - k) * (1 - k) * 1.1
           }
-          const q = new THREE.Quaternion().setFromAxisAngle(d.axis, d.spin * Math.pow(1 - k, 2))
+          const left = Math.pow(1 - k, 2)
+          const q = new THREE.Quaternion().setFromAxisAngle(d.axis, d.spin * left)
+          q.multiply(new THREE.Quaternion().setFromAxisAngle(d.across, d.spin2 * left))
           d.m.quaternion.copy(q.multiply(d.qEnd))
         }
+        if (e.chosen || landed) return
+        // how long until they land, as the frames go (a slow one puts it off: the sound of it follows)
+        this.emit('rollwhen', (ROLL_LAND - t) * ROLL_DUR / this.speed)
+        if (t >= ROLL_LAND - LAND_LEAD * this.speed / ROLL_DUR) { landed = true; this.emit('rolland') }
       },
       end: () => {
         const total = e.total
@@ -1015,6 +1044,9 @@ export class View {
       t.ring.material.color.set(chosen ? '#2ecc40' : valid ? '#8fe39a' : t.color)
       t.ring.scale.setScalar(chosen ? 1.25 + Math.sin(this.time * 8) * 0.06 : 1)
       t.ring.material.depthTest = !(chosen || valid) // lit for a choice it shows through whatever stands in front
+      // the name tag of the player whose turn it is: bigger, and it breathes
+      const lk = t.labelOn ? 1.16 + Math.sin(this.time * 4) * 0.04 : 1
+      t.label.scale.set(1.15 * lk, 0.46 * lk, 1)
       // face where the piece goes; standing, turn back to the camera
       const dx = t.group.position.x - t.prev.x, dz = t.group.position.z - t.prev.z
       t.prev.copy(t.group.position)

@@ -98,17 +98,69 @@ def arp(names, step, sec=0.22, wave_='tri', decay=9.0, gain=1.0):
     return s
 
 
+# The dice: they tumble and come to rest showing the number LAND s after the throw (view.js: ROLL_LAND of
+# ROLL_DUR). The game plays a take of wooden ticks as they are thrown (sped up with the game's speed) and a ding
+# of its own when they land (the view says when: it stays on time at any speed). Several takes of each, a little
+# different, so the sound heard every turn is never quite the same.
+LAND = 0.88 * 1.05
+
+
+def soft_mallet(f, sec=0.09, decay=34.0, bright=0.05, wave_='sine'):
+    """A muted marimba knock: little of the bright partial, the edge of the attack rounded off."""
+    s = note(f, sec, wave_=wave_, attack=0.004, decay=decay)
+    mix(s, note(f * 3.98, sec * 0.5, wave_='sine', attack=0.002, decay=decay * 3), 0, bright)
+    return lowpass(s, 0.5)
+
+
+def soft_bell(f, sec, decay=6.0, overtone=0.12):
+    s = note(f, sec, wave_='sine', attack=0.004, decay=decay)
+    mix(s, note(f * 2.0, sec, wave_='sine', attack=0.004, decay=decay * 2), 0, overtone)
+    return s
+
+
+def cents(r, c):
+    return 2 ** (r.uniform(-c, c) / 1200)
+
+
+def roll_take(seed):
+    """A prize wheel slowing, in wood: low ticks climbing the scale, further apart each time, done a moment before the dice land."""
+    r = random.Random(seed)
+    s = silence(LAND)
+    scale = ['C5', 'D5', 'E5', 'G5', 'A5', 'C6', 'D6', 'E6']
+    tune = cents(r, 10) * 0.5  # (an octave under the scale)
+    t, gap, k = 0.0, r.uniform(0.04, 0.047), 0
+    grow, first = r.uniform(1.11, 1.14), r.choice([0, 0, 1])
+    while t < LAND - 0.2:
+        f = N[scale[min(len(scale) - 1, first + k * len(scale) // 12)]] * tune * cents(r, 6)
+        mix(s, soft_mallet(f, 0.09, 26, wave_='tri'), max(0.0, t + r.uniform(-0.004, 0.004)), (0.55 + 0.35 * t / LAND) * r.uniform(0.85, 1))
+        t += gap
+        gap *= grow
+        k += 1
+    return s
+
+
+def land_take(seed):
+    """The dice come to rest: a warm, round two-note ding (C6, E6 over a soft C5), a hair different each take."""
+    r = random.Random(seed)
+    tune = cents(r, 12)
+    d = soft_bell(N['C6'] * tune, 0.7, decay=4.5, overtone=0.06)
+    mix(d, note(N['C6'] * tune / 2, 0.5, wave_='sine', attack=0.006, decay=6), 0, 0.25)
+    mix(d, soft_bell(N['E6'] * tune, 0.65, decay=5, overtone=0.06), r.uniform(0.055, 0.07), r.uniform(0.45, 0.6))
+    return echo(d, 0.1, 0.3, 0.2, 2)
+
+
 def sounds():
     S = {}
     # a little "bip" for each hop
     S['hop'] = (note(N['G5'], 0.07, N['C6'], decay=30), 0.22)
-    # dice tumbling: soft wooden knocks, fading
-    s = silence(0.7)
-    t = 0.0
-    for k in range(7):
-        mix(s, note(rnd.uniform(620, 980), 0.06, wave_='sine', attack=0.002, decay=70), t, (1 - k / 9) * rnd.uniform(0.6, 1))
-        t += rnd.uniform(0.06, 0.1) * (1 + k * 0.08)
-    S['roll'] = (s, 0.34)
+    # the dice: a few takes of the throw and of the landing (roll_take, land_take); the random numbers their
+    # first sound took are taken still, so the sounds after come out as they always did
+    for _ in range(21):
+        rnd.random()
+    for i in range(4):
+        S[f'roll{i + 1}'] = (roll_take(200 + i), 0.24)
+    for i in range(3):
+        S[f'land{i + 1}'] = (land_take(500 + i), 0.28)
     # ladder: up the scale
     S['ladder'] = (echo(arp(['C5', 'E5', 'G5', 'C6', 'E6'], 0.065, 0.2)), 0.36)
     # snake: a soft slide down with a wobble

@@ -119,6 +119,8 @@ export class UI {
     this.toast = null
     this.logOpen = false
     this.logLines = []
+    this.logScroll = 0 // the log scrolled back this many lines (0: it shows the newest)
+    this.logScrollF = 0
     this.target = null // { i, card, kind, list, sel }
     this.selected = -1
     this.helpPage = 0
@@ -522,6 +524,17 @@ export class UI {
     g.textAlign = align
     g.textBaseline = 'middle'
     if (max) g.fillText(t, x, y, max); else g.fillText(t, x, y)
+  }
+  /** A name's first letter, or the emoji it starts with, white in its round badge centred at x, y. */
+  initial(name, x, y, size) {
+    const { ch, emoji } = P.initial(name)
+    if (!emoji) { this.text(ch, x, y, { size, align: 'center', color: '#ffffff' }); return }
+    // an emoji's picture sits off the line of letters: it goes by its own box, a little smaller
+    const g = this.g
+    g.font = this.font(size * 0.9 * this.u, false)
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = '#ffffff'
+    const m = g.measureText(ch)
+    g.fillText(ch, x - (m.actualBoundingBoxRight - m.actualBoundingBoxLeft) / 2, y + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2)
   }
   panel(x, y, w, h, { fill = 'rgba(255,255,255,0.92)', stroke = 'rgba(43,38,34,0.18)', r = 12, lw = 1.5 } = {}) {
     const g = this.g
@@ -1525,7 +1538,7 @@ export class UI {
       else if (i === last) this.rowHalo(cx, cy, colW, rowH, 'gloom')
       g.fillStyle = P.PLAYER_COLORS[p.c % 6]
       g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
-      this.text(p.n.slice(0, 1).toUpperCase(), cx + rowH / 2, cy + rowH / 2 + 1, { size: this.narrow ? 13 : 16, color: '#ffffff', align: 'center' })
+      this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
       const nx = cx + rowH * 0.95
       const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos)
       if (this.narrow) {
@@ -1742,7 +1755,7 @@ export class UI {
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.98)', stroke: color, lw: 3.5 })
     g.fillStyle = color
     g.beginPath(); g.arc(W / 2, y + 40 * u, 20 * u, 0, Math.PI * 2); g.fill()
-    this.text(p.n.slice(0, 1).toUpperCase(), W / 2, y + 41 * u, { size: 20, align: 'center', color: '#ffffff' })
+    this.initial(p.n, W / 2, y + 41 * u, 20)
     this.text(T.passTo(p.n), W / 2, y + 82 * u, { size: 22, align: 'center', max: pw - 30 * u })
     this.text(T.passHint, W / 2, y + 108 * u, { size: 13.5, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
     this.button('reveal', T.showCards, x + 40 * u, y + ph - 62 * u, pw - 80 * u, 46 * u, () => this.app.reveal(), { primary: true, color, size: 18 })
@@ -1853,7 +1866,7 @@ export class UI {
   drawLog() {
     const u = this.u, H = this.H
     this.logRect = null
-    const all = this.logOpen ? this.logLines.slice(-16) : this.logLines.slice(-5)
+    const all = this.logLines.slice(this.logOpen ? -16 : -5) // (at most as many lines show at once; the rest scroll)
     if (!all.length) return
     const lh = this.lineH(12.5, 19)
     let x = 10 * u, w = this.narrow ? this.W - 70 * u : 330 * u // (on a phone, clear of the zoom buttons)
@@ -1872,16 +1885,46 @@ export class UI {
     }
     if (compact && this.narrow) { top = this.bannerTop(); bottom = (this.trayTop ?? H - this.handHeight()) - 48 * u }
     else if (compact) { x = this.gameLeft || x; w = Math.min(430 * u, this.zoomX - 10 * u - x); top = this.bannerTop(); bottom = H - this.handHeight() - 8 * u }
-    const fit = Math.floor((bottom - top - 16 * u) / lh)
+    const fit = Math.min(all.length, Math.floor((bottom - top - 16 * u) / lh))
     if (fit < 1) return
-    const lines = all.slice(-fit)
-    const h = lines.length * lh + 16 * u
+    // scrolled back, the lines that many before the newest
+    const lines = this.logLines, more = lines.length - fit
+    const back = this.logScroll = THREE.MathUtils.clamp(this.logScroll, 0, Math.max(0, more))
+    const shown = lines.slice(lines.length - fit - back, lines.length - back).map(l => /^(\d+)\. (.*)$/.exec(l) || [l, '', l])
+    const h = shown.length * lh + 16 * u
     const y = compact ? top : bottom - h
     this.panel(x, y, w, h, { fill: compact ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.82)', r: 10 })
     this.logRect = { x, y, w, h }
-    lines.forEach((l, i) => this.text(l, x + 10 * u, y + 8 * u + lh * (i + 0.5), { size: 12.5, bold: false, max: w - 20 * u, color: i === lines.length - 1 ? P.INK : '#4b453e' }))
+    // the turn's number in a column of its own, then what happened
+    const numW = Math.max(0, ...shown.map(m => (m[1] ? this.measure(m[1] + '.', 12.5) : 0)))
+    const tx = x + 10 * u + (numW ? numW + 6 * u : 0), bar = more > 0 ? 8 * u : 0
+    shown.forEach(([, n, l], i) => {
+      const ly = y + 8 * u + lh * (i + 0.5), last = i === shown.length - 1 && !back
+      if (n) this.text(n + '.', x + 10 * u + numW, ly, { size: 12.5, align: 'right', color: '#9a8f80' })
+      this.text(l, tx, ly, { size: 12.5, bold: false, max: x + w - 10 * u - bar - tx, color: last ? P.INK : '#4b453e' })
+    })
+    // more lines than it shows: where these stand among them
+    if (more > 0) {
+      const g = this.g, tw = 4 * u, th = h - 16 * u, kh = Math.max(14 * u, th * fit / lines.length)
+      const ky = y + 8 * u + (th - kh) * (1 - back / more)
+      g.fillStyle = 'rgba(43,38,34,0.08)'; P.roundRect(g, x + w - 6 * u - tw, y + 8 * u, tw, th, tw / 2); g.fill()
+      g.fillStyle = 'rgba(43,38,34,0.32)'; P.roundRect(g, x + w - 6 * u - tw, ky, tw, kh, tw / 2); g.fill()
+    }
     this.hits.push({ key: 'logtoggle', x, y, w, h, action: () => { this.logOpen = !this.logOpen; this.dirty = true } })
   }
+  /** The log goes back `n` lines (forward when negative); the fractions a drag or a touchpad gives add up. */
+  scrollLog(n) {
+    this.logScrollF += n
+    const k = Math.trunc(this.logScrollF)
+    if (!k) return
+    this.logScrollF -= k
+    this.logScroll = Math.max(0, this.logScroll + k) // (the drawing keeps it to the lines there are)
+    this.dirty = true
+  }
+  /** A drag of `dy` px over the log: its lines follow it. */
+  dragLog(dy) { this.scrollLog(dy / this.lineH(12.5, 19)) }
+  /** A point (screen px) over the log. */
+  overLog(x, y) { const r = this.logRect; x -= this.ox; y -= this.oy; return !!r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h }
 
   drawResults(s, me) {
     const W = this.W, H = this.H, u = this.u, app = this.app
@@ -2392,7 +2435,12 @@ export class UI {
     return false
   }
   say(text, secs = 1.8) { this.toast = { text, t: secs }; this.dirty = true }
-  log(text) { this.logLines.push(text); if (this.logLines.length > 200) this.logLines.shift(); this.dirty = true }
+  log(text) {
+    this.logLines.push(text)
+    if (this.logLines.length > 200) this.logLines.shift()
+    else if (this.logScroll > 0) this.logScroll++ // scrolled back, the lines on show stay
+    this.dirty = true
+  }
 
   update(dt) {
     this.time += dt

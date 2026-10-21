@@ -20,6 +20,22 @@ export const canvas = (w, h) => {
   const c = new OffscreenCanvas(w, h)
   return { c, g: c.getContext('2d') }
 }
+/** Text over a fill of `color` (#rrggbb): ink on a light one (the yellow piece's), else white. */
+export function inkOn(color) {
+  const lin = k => { const v = parseInt(color.slice(k, k + 2), 16) / 255; return v <= 0.04 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }
+  return 0.2126 * lin(1) + 0.7152 * lin(3) + 0.0722 * lin(5) > 0.45 ? INK : '#ffffff'
+}
+const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter() : null
+/**
+ * A name's first character for its round badge, whole: an emoji made of several code points (a flag, a
+ * family, a skin tone) stays one; `emoji` says it is a picture, not a letter (no capital, drawn by its box).
+ */
+export function initial(name) {
+  const s = String(name || '').trim()
+  const ch = graphemes ? graphemes.segment(s)[Symbol.iterator]().next().value?.segment || '' : Array.from(s)[0] || ''
+  const emoji = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(ch)
+  return { ch: emoji ? ch : ch.toUpperCase(), emoji }
+}
 function hash(n) { n = (n ^ 61) ^ (n >>> 16); n = Math.imul(n, 9); n ^= n >>> 4; n = Math.imul(n, 0x27d4eb2d); n ^= n >>> 15; return (n >>> 0) / 4294967296 }
 
 /** Paper fibres: a light, tileable grain to multiply over vertex colours. */

@@ -408,7 +408,7 @@ export function createGame({ seed, mode = 'champion', players, cells = CFG.cells
   }
   const order = players.map((p, i) => i)
   for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
-  s.pl = order.map(i => ({ n: String(players[i].n).slice(0, 14), b: players[i].b | 0, id: players[i].id ?? null, c: players[i].c ?? i, pos: 0, h: [], d: 0, fx: {} }))
+  s.pl = order.map(i => ({ n: String(players[i].n).slice(0, 14).replace(/[\ud800-\udbff]$/, ''), b: players[i].b | 0, id: players[i].id ?? null, c: players[i].c ?? i, pos: 0, h: [], d: 0, fx: {} }))
   const ev = []
   beginTurn(s, ev)
   s.ev0 = ev
@@ -417,10 +417,15 @@ export function createGame({ seed, mode = 'champion', players, cells = CFG.cells
 
 export const clone = s => JSON.parse(JSON.stringify(s))
 const onBoard = s => s.pl.map((p, i) => i).filter(i => !s.pl[i].d)
-function log(s, ev, text) {
-  s.log.push(text)
+/** A line for the game's log, the turn's number before it ("12. Pip rolls 4"); returns the line. */
+export function addLog(s, text) {
+  const line = `${s.turnNo}. ${text}`
+  s.log.push(line)
   if (s.log.length > 6) s.log.shift()
-  ev.push({ e: 'log', text })
+  return line
+}
+function log(s, ev, text) {
+  ev.push({ e: 'log', text: addLog(s, text) })
 }
 const nm = (s, i) => s.pl[i].n
 

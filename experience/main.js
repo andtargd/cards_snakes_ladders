@@ -21,12 +21,17 @@ const QUICK_TABLE = { 50: 4, 70: 4, 100: 5 } // players at the table the bots fi
 const SETTINGS_KEY = 'csl-settings'
 const GAME_KEY = 'csl-game' // the game being played in this browser, so a reload carries on with it
 const MAX_NAME = 14
+// The dice's sounds (tools/make_sfx.py), a few takes of each so no two rolls sound quite alike: `roll` the
+// wooden ticks as they are thrown (quicker with the game), `land` the ding as they come to rest showing the number
+const takes = (name, n) => Array.from({ length: n }, (_, i) => `${name}${i + 1}`)
+const ROLL_SOUNDS = { roll: takes('roll', 4), land: takes('land', 3) }
+const ROLL_VOL = { roll: 0.5, land: 0.55 }
 
 /** Players at a table the rules allow: Fool needs three. */
 const least = mode => (mode === 'fool' ? 3 : 2)
 /** Bots for `humans` players at a table the rules allow (at most 6 in all). */
 function fitBots(c, humans) { c.bots = Math.min(6 - humans, Math.max(c.bots, least(c.mode) - humans, 0)) }
-const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME)
+const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, MAX_NAME).replace(/[\ud800-\udbff]$/, '') // (not half an emoji)
 
 /**
  * The menu's choices and the sound, as last left (kept in this browser, where it lets us): Solo Play
@@ -74,7 +79,7 @@ function clearGame() { try { globalThis.localStorage?.removeItem(GAME_KEY) } cat
 class LocalTable {
   /**
    * `saved` (from loadGame) carries on with a game from before the page was reloaded. `names`: the players'
-   * (Pass & Play). `first`: the First Match, whose start is set up (tutorial.js) and whose bots play quicker.
+   * (Pass & Play). `first`: the First Match, whose start is set up (tutorial.js).
    */
   constructor(app, { kind, mode, humans = 1, names = [], bots, level, size = 100, first = false }, saved = null) {
     this.app = app
@@ -149,7 +154,7 @@ class LocalTable {
     if (!p.b) return
     this.wait -= dt * view.speed
     if (this.wait > 0) return
-    this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5) * (this.cfg.first ? 0.6 : 1)
+    this.wait = BOT_DELAY * (0.75 + Math.random() * 0.5)
     const r = R.apply(s, s.cur, R.botAction(s, s.cur))
     if (!r.ok) { this.app.p0.log('bot error', r.err); R.apply(s, s.cur, { t: s.rolled ? 'end' : 'roll' }); return }
     this.after(r.ev)
@@ -248,8 +253,7 @@ class SharedTable {
     if (i < 0 || s.ph === 'over') return
     s.pl[i].b = 2
     s.pl[i].rb = 1
-    const text = T.replacedByBot(s.pl[i].n)
-    s.log.push(text); if (s.log.length > 6) s.log.shift()
+    const text = R.addLog(s, T.replacedByBot(s.pl[i].n))
     s.seq++
     this.publish([{ e: 'log', text }])
   }
@@ -277,8 +281,7 @@ class SharedTable {
     p.id = id
     p.b = 0
     delete p.rb
-    const text = T.seatBack(p.n)
-    s.log.push(text); if (s.log.length > 6) s.log.shift()
+    const text = R.addLog(s, T.seatBack(p.n))
     s.seq++
     this.publish([{ e: 'log', text }])
     this.app.keepLobbySeat(id, old)
@@ -409,6 +412,14 @@ class App {
     // the log has caught up with the game: keep it with the saved game
     v.on('settled', () => { if (this.table?.kind === 'solo') this.table.save() })
     v.on('sfx', (name, vol) => this.sfx(name, vol))
+    // the dice's sounds on a timeline from the throw (rollSound); the landing moves with the frames if they lag
+    v.on('rollsound', landIn => this.rollSound(landIn))
+    v.on('rollwhen', landIn => { this.diceCue?.land?.move(landIn); this.diceCue?.roll?.until(landIn) })
+    v.on('rolland', () => { if (this.diceCue && !this.diceCue.land) this.playSound(this.diceCue.landName, ROLL_VOL.land) })
+    this.lastTake = {}
+    this.diceCue = null
+    // the dice's sounds ready before the first roll: the one as they land must not wait to be fetched
+    for (const list of Object.values(ROLL_SOUNDS)) for (const name of list) { try { p0.sound.preload?.(`sfx/${name}.mp3`) } catch { /* sound is optional */ } }
     v.on('ladder', e => this.tut?.onLadder(e))
     v.on('swamp', e => this.tut?.onSwamp(e))
     // the web build's online play: how an attempt goes, and a room's link that brought the player
@@ -420,10 +431,34 @@ class App {
     this.lastSfx[name] = now
     this.playSound(name, volume)
   }
-  playSound(name, volume = 0.5) {
+  /** A take of the dice's sound `part` (ROLL_SOUNDS), other than the last one. */
+  take(part) {
+    const list = ROLL_SOUNDS[part]
+    let i = Math.floor(Math.random() * list.length)
+    if (list.length > 1 && list[i] === this.lastTake[part]) i = (i + 1) % list.length
+    return (this.lastTake[part] = list[i])
+  }
+  /**
+   * A roll's sounds, on one timeline from the throw: the ticks now, faded out just before the dice land
+   * `landIn` s from now (they never run into the ding, however quick the game), and the ding exactly then.
+   * The last roll's sounds still ringing fade out first. Where sounds can't be timed so (Project 0, a page
+   * not touched yet), the ticks play now and the ding as the view says the dice land.
+   */
+  rollSound(landIn) {
+    for (const c of [this.diceCue?.roll, this.diceCue?.land]) c?.fade()
+    this.diceCue = null
+    if (this.table?.kind === 'idle' || !this.sound.on || this.sound.vol < 0.005 || this.p0.web?.muted) return
+    const roll = this.take('roll'), land = this.take('land'), vol = this.sound.vol
+    const cue = (name, o) => { try { return this.p0.sound.cue?.(`sfx/${name}.mp3`, o) || null } catch { return null } }
+    // (at the Skip speed they land at once: the ding alone)
+    const ticks = landIn > 0.15 ? cue(roll, { volume: ROLL_VOL.roll * vol, until: landIn }) : null
+    if (!ticks && landIn > 0.15) this.playSound(roll, ROLL_VOL.roll, Math.min(4, this.view.speed))
+    this.diceCue = { roll: ticks, land: cue(land, { volume: ROLL_VOL.land * vol, at: landIn }), landName: land }
+  }
+  playSound(name, volume = 0.5, rate = 1) {
     const v = this.sound.on ? volume * this.sound.vol : 0
     if (v < 0.005 || this.p0.web?.muted) return
-    try { this.p0.sound.play(`sfx/${name}.mp3`, { volume: v }) } catch { /* sound is optional */ }
+    try { this.p0.sound.play(`sfx/${name}.mp3`, rate === 1 ? { volume: v } : { volume: v, rate }) } catch { /* sound is optional */ }
   }
   saveSettings() {
     try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first })) } catch { /* no storage here */ }
@@ -934,8 +969,7 @@ class App {
     const p = s.pl[kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a))], bot = p.n
     p.id = id; p.b = 0; p.n = (this.nameOf(id) || 'Player').slice(0, 14)
     delete p.f
-    const text = T.takesSeat(p.n, bot)
-    s.log.push(text); if (s.log.length > 6) s.log.shift()
+    const text = R.addLog(s, T.takesSeat(p.n, bot))
     s.seq++
     sh.publish([{ e: 'log', text }])
     const lob = this.lobby()
@@ -972,11 +1006,6 @@ class App {
     this.syncStatus()
     this.quickTick()
     this.table?.update(dt)
-    // the First Match's bots move quicker (the speed chosen still counts)
-    if (this.screen === 'game' && this.table?.cfg?.first) {
-      const v = this.view.state
-      this.view.speed = SPEEDS[this.speedIdx][0] * (v && v.ph !== 'over' && v.pl[v.cur]?.b ? 1.6 : 1)
-    }
     this.tut?.update(dt)
     this.syncGameplay()
     const trayOn = this.view.trayVisible > 0
@@ -1001,26 +1030,53 @@ export default async function start(p0) {
 
   // input
   let down = null
+  // fingers on the screen (id -> where): two of them pinch the board closer or further and move it between
+  // them; until they are all lifted they click nothing
+  const fingers = new Map()
+  let pinch = 0, pinched = false
+  const spread = () => { const [a, b] = fingers.values(); return Math.hypot(a.x - b.x, a.y - b.y) }
   p0.on('pointerdown', e => {
     if (app.adBusy) { down = null; return } // the site is showing something between games
     app.ui.touch = !!e.touch // (a finger gets bigger buttons)
+    if (e.touch && e.id != null) {
+      fingers.set(e.id, { x: e.x, y: e.y })
+      if (fingers.size === 2) { pinch = spread(); pinched = true; down = null; if (app.ui.drag) { app.ui.drag.end?.(); app.ui.drag = null } return }
+      if (fingers.size > 2) return
+    }
     app.tut?.onInput()
     // a slider follows the pointer until it lets go
     const h = app.ui.hitAt(e.x, e.y)
     if (h?.drag) { app.ui.drag = h; h.drag(e.x); down = null; return }
-    down = { x: e.x, y: e.y, at: p0.time, moved: false, ui: !!(app.ui.hitAt(e.x, e.y) || app.ui.cardAt(e.x, e.y)) }
+    down = { x: e.x, y: e.y, at: p0.time, moved: false, ui: !!(app.ui.hitAt(e.x, e.y) || app.ui.cardAt(e.x, e.y)), log: app.ui.overLog(e.x, e.y) }
   })
   p0.on('pointermove', e => {
+    if (e.touch && fingers.has(e.id)) {
+      fingers.set(e.id, { x: e.x, y: e.y })
+      if (fingers.size >= 2) {
+        if (app.screen !== 'game' || app.adBusy) return
+        const d = spread()
+        if (pinch > 0 && d > 0) app.view.zoom(pinch / d)
+        pinch = d
+        // each finger moves the board half its way: together, the point between them
+        app.view.pan(e.dx / 2, e.dy / 2)
+        return
+      }
+    }
+    if (pinched) return
     if (app.ui.drag) { app.ui.drag.drag(e.x); return }
     if (!e.touch) app.ui.touch = false
     const overUI = app.ui.pointerMove(e.x, e.y)
     if (app.ui.target && !overUI && app.screen === 'game') app.ui.hoverTarget(app.view.pick(e.x, e.y))
     if (down && (e.buttons || e.touch)) {
       if (!down.moved && Math.hypot(e.x - down.x, e.y - down.y) > 8) down.moved = true
-      if (down.moved && !down.ui && app.screen === 'game') app.view.pan(e.dx, e.dy)
+      // (a drag over the log scrolls it)
+      if (down.moved && down.log) app.ui.dragLog(e.dy)
+      else if (down.moved && !down.ui && app.screen === 'game') app.view.pan(e.dx, e.dy)
     }
   })
   p0.on('pointerup', e => {
+    if (e.touch) fingers.delete(e.id)
+    if (pinched) { pinch = 0; if (!fingers.size) pinched = false; down = null; return }
     if (app.ui.drag) { app.ui.drag.end?.(); app.ui.drag = null; return }
     if (!down) return
     const d = down
@@ -1038,7 +1094,13 @@ export default async function start(p0) {
     if (!hit && app.ui.target && !app.menuOpen && !app.ui.overCover(e.x, e.y)) { if (app.tut?.forced) app.nudge(); else app.ui.cancelTarget(); return }
     if (!app.ui.boardClick(hit) && app.ui.selected >= 0 && !app.ui.target) { app.ui.selected = -1; app.ui.dirty = true }
   })
-  p0.on('wheel', e => { if (app.screen === 'game' && !app.adBusy) app.view.zoom(Math.exp((e.dy || 0) * 0.0012)) })
+  p0.on('wheel', e => {
+    if (app.screen !== 'game' || app.adBusy) return
+    // over the log the wheel scrolls it (down to the newest lines), elsewhere it zooms
+    const pt = app.p0.input?.pointer
+    if (pt && app.ui.overLog(pt.x, pt.y)) app.ui.scrollLog(-(e.dy || 0) / 40)
+    else app.view.zoom(Math.exp((e.dy || 0) * 0.0012))
+  })
   p0.on('keydown', e => {
     if (e.repeat || app.adBusy) return
     app.tut?.onInput()

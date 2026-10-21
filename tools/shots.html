@@ -36,7 +36,7 @@ async function waitFor(fn, ms, what) {
 }
 
 // ---------- the screens ----------
-const LOG = ['Pip rolls 4 and climbs a ladder to 38.', 'Juniper plays Slow Down on Lucky Ladder.', 'Mossy rolls 6.', 'Bramble falls down a snake to 12.', 'Clover draws a card.', 'Fennel plays Swamp on cell 44.', 'Lucky Ladder rolls 3.', 'Pip plays Swap Places with Mossy.']
+const LOG = ['31. Pip rolls 4 and climbs a ladder to 38.', '32. Juniper plays Slow Down on Lucky Ladder.', '33. Mossy rolls 6.', '34. Bramble falls down a snake to 12.', '35. Clover draws a card.', '35. Fennel plays Swamp on cell 44.', '36. Lucky Ladder rolls 3.', '37. Pip plays Swap Places with Mossy.']
 /** A game of six on the board of 100: my turn, four cards in my hand, the others spread up the board; `mutate(s)` changes it. */
 function game(app, mutate) {
   if (app.screen !== 'game' || !app.table?.s || app.table.cfg?.bots !== 5 || app.table.s.n !== 100) app.startLocal({ mode: 'champion', humans: 1, names: [], bots: 5, level: 2, size: 100 })

@@ -218,6 +218,46 @@ const p0 = {
         a.play().catch(() => sounding.delete(a)); return a
       } catch { return 0 }
     },
+    /** Fetches a sound ahead, so the first time it plays it starts at once (and decodes it for cue). */
+    preload(path) { try { const a = new Audio(p0.asset(path)); a.preload = 'auto'; a.load(); preloaded.push(a) } catch {} decoded(path) },
+    /**
+     * A sound on the timeline (Web Audio): it starts exactly `o.at` s from now, and with `o.until` fades out
+     * quickly to end that long from now. Returns { move(at), until(sec), fade() }: start it at another time
+     * (while it has not started), make it end at another time (while it has not begun to fade), fade it out
+     * now; or null where it cannot be timed so (no Web Audio, the sound not decoded yet, the page not touched
+     * yet): then the game plays it as usual.
+     */
+    cue(path, o = {}) {
+      const c = actx, buf = decoded(path)
+      if (!c || !buf || c.state !== 'running') return null
+      const FADE = 0.03
+      try {
+        const gain = c.createGain(), level = Math.min(1, (o.volume ?? 1) * 0.5)
+        gain.connect(master)
+        let src = null, start = 0, end = Infinity
+        // it ends `sec` from now: full until then, fading out over FADE s before
+        const endIn = sec => {
+          end = Math.max(start + 0.01, c.currentTime + sec)
+          gain.gain.cancelScheduledValues(c.currentTime)
+          gain.gain.setValueAtTime(level, Math.max(c.currentTime, start, end - FADE)); gain.gain.linearRampToValueAtTime(0, end)
+          src.stop(end + 0.01)
+        }
+        const begin = at => {
+          start = c.currentTime + Math.max(0, at)
+          src = c.createBufferSource(); src.buffer = buf; src.connect(gain)
+          gain.gain.cancelScheduledValues(0); gain.gain.setValueAtTime(level, start)
+          src.onended = () => { try { gain.disconnect() } catch {} }
+          src.start(start)
+          if (o.until != null) endIn(o.until)
+        }
+        begin(o.at ?? 0)
+        return {
+          move(at) { if (c.currentTime < start - 0.005 && Math.abs(c.currentTime + Math.max(0, at) - start) > 0.012) { src.onended = null; try { src.stop() } catch {} begin(at) } },
+          until(sec) { if (c.currentTime < end - FADE - 0.005 && Math.abs(c.currentTime + sec - end) > 0.012) try { endIn(sec) } catch {} },
+          fade() { const now = c.currentTime; try { gain.gain.cancelScheduledValues(now); gain.gain.setValueAtTime(now < start ? 0 : gain.gain.value, now); gain.gain.linearRampToValueAtTime(0, now + 0.06); src.stop(now + 0.07) } catch {} },
+        }
+      } catch { return null }
+    },
     stop(a) { try { a.pause(); sounding.delete(a) } catch {} }, stopAll() {},
   },
   music: { play() {}, stop() {}, volume() {}, seek() {}, time: 0, playing: false, duration: 0 },
@@ -234,7 +274,34 @@ const p0 = {
 
 // sounds still playing go quiet while the site mutes everything, and come back after
 const sounding = new Set()
-mute.listen(on => { for (const a of sounding) a.muted = on })
+const preloaded = [] // (kept, or the browser may let go of what it fetched)
+mute.listen(on => { for (const a of sounding) a.muted = on; if (master) master.gain.value = on ? 0 : 1 })
+
+// sounds on a timeline (sound.cue): a Web Audio context, made when the player first touches the page (made
+// before, the browser would not let it run and warn about it), and the sounds decoded for it
+let actx = null, master = null
+const buffers = new Map() // url -> { buf } (buf once decoded)
+function decoded(path) {
+  let url
+  try { url = p0.asset(path) } catch { return null }
+  let e = buffers.get(url)
+  if (!e) { e = { buf: null, asked: false }; buffers.set(url, e) }
+  if (actx && !e.asked) {
+    e.asked = true
+    fetch(url).then(r => r.arrayBuffer()).then(b => actx.decodeAudioData(b)).then(buf => { e.buf = buf }).catch(() => {})
+  }
+  return e.buf
+}
+function wakeAudio() {
+  const AC = globalThis.AudioContext || globalThis.webkitAudioContext
+  if (!actx && AC) {
+    try { actx = new AC(); master = actx.createGain(); master.gain.value = mute.on ? 0 : 1; master.connect(actx.destination) } catch { actx = null; return }
+    for (const url of buffers.keys()) decoded(url)
+  }
+  if (actx && actx.state !== 'running') actx.resume().catch(() => {})
+}
+addEventListener('pointerdown', wakeAudio, true)
+addEventListener('keydown', wakeAudio, true)
 
 function resize() {
   view.width = innerWidth; view.height = innerHeight; view.dpr = pixelRatio(); view.safe = safeArea()

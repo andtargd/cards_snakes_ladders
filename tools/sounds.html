@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sounds</title>
+<style>
+  body { margin: 16px; background: #f3efe6; color: #2b2622; font: 15px "Trebuchet MS", "Segoe UI", sans-serif; max-width: 720px }
+  h2 { font-size: 17px; margin: 22px 0 8px }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap }
+  button { font: inherit; padding: 7px 12px; border-radius: 10px; border: 1px solid #b9b0a2; background: #fff; cursor: pointer }
+  button.big { background: #2d3a6b; color: #fff; border-color: #2d3a6b; padding: 9px 16px }
+  button:hover { filter: brightness(0.96) }
+  .hint { color: #6b6257; font-size: 13px }
+  #die { display: inline-block; width: 44px; height: 44px; line-height: 44px; text-align: center; font-size: 30px; border-radius: 9px; background: #fff; border: 2px solid #2b2622; margin-left: 8px; vertical-align: middle }
+</style>
+</head>
+<body>
+<h1 style="font-size: 20px">The game's sounds (experience/sfx, made by tools/make_sfx.py)</h1>
+<h2>The dice <span id="die">⚀</span></h2>
+<div class="hint">Roll plays a roll as the game does: a take of the throw, and a take of the ding when the dice come to rest 0.924 s later (the die above stops then). Neither take is the last one played.</div>
+<div class="row"><button class="big" id="roll">▶ Roll</button></div>
+<div class="row" id="takes"></div>
+<h2>Everything else</h2>
+<div class="row" id="rest"></div>
+<script>
+// Plays every sound of the game; the dice's as a roll goes in the game (main.js ROLL_SOUNDS, view.js queueRoll).
+const LAND = 0.88 * 1.05
+const takes = (name, n) => Array.from({ length: n }, (_, i) => `${name}${i + 1}`)
+const DICE = { roll: takes('roll', 4), land: takes('land', 3) }
+const REST = ['hop', 'ladder', 'snake', 'win', 'swamp', 'shield', 'skip', 'freeze', 'tramp', 'jump', 'portal', 'fold', 'quake', 'card', 'draw', 'select', 'target', 'menu', 'tick', 'back']
+// (fetched ahead: the ding must not wait)
+const cache = new Map()
+const load = name => { if (!cache.has(name)) { const a = new Audio(`../experience/sfx/${name}.mp3`); a.preload = 'auto'; a.load(); cache.set(name, a) } return cache.get(name) }
+function play(name, vol = 0.8) { const a = load(name).cloneNode(); a.volume = vol; a.play() }
+const last = {}
+const pick = key => { const list = DICE[key]; let i = Math.floor(Math.random() * list.length); if (list[i] === last[key]) i = (i + 1) % list.length; return (last[key] = list[i]) }
+const FACES = '⚀⚁⚂⚃⚄⚅'
+document.getElementById('roll').onclick = () => {
+  // the die's faces flicker while it tumbles and stop as it lands
+  const die = document.getElementById('die'), flick = setInterval(() => { die.textContent = FACES[Math.floor(Math.random() * 6)] }, 70)
+  setTimeout(() => clearInterval(flick), LAND * 1000)
+  play(pick('roll'), 0.8)
+  setTimeout(() => play(pick('land'), 0.88), (LAND - 0.02) * 1000)
+}
+for (const n of [...DICE.roll, ...DICE.land]) { load(n); const b = document.createElement('button'); b.textContent = n; b.onclick = () => play(n); document.getElementById('takes').append(b) }
+for (const n of REST) { const b = document.createElement('button'); b.textContent = '▶ ' + n; b.onclick = () => play(n); document.getElementById('rest').append(b) }
+</script>
+</body>
+</html>
