@@ -86,7 +86,7 @@ export default {
       name: 'Choose a Face', rarity: 'R', weight: 1, enabled: true,
       target: 'current_player',
       max: 3, // the player picks a value from 1 to this
-      text: 'A player picks a value from 1 to {max} instead of rolling.',
+      text: 'A player picks a value from 1 to {max} for a die instead of rolling it.',
     },
     D3: {
       name: 'Heavy Die', rarity: 'R', weight: 1, enabled: true,
@@ -98,7 +98,7 @@ export default {
       name: 'Golden Die', rarity: 'L', weight: 1, enabled: true,
       target: 'current_player',
       max: 6, // the player picks a value from 1 to this
-      text: 'A player picks any value from 1 to {max} instead of rolling.',
+      text: 'A player picks any value from 1 to {max} for a die instead of rolling it.',
     },
     D5: {
       name: 'Choose Your Roll', rarity: 'U', weight: 1, enabled: true,

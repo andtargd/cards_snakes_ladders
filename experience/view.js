@@ -719,12 +719,15 @@ export class View {
   queueRoll(e) {
     // the dice tumble in the tray in the corner, then rest on the board's pad
     const n = e.dice.length
+    // a chosen value (Golden Die, Choose a Face) is the first die and is set down, not thrown; an Extra Die
+    // beside it is rolled
+    const set = i => e.chosen && i === 0, allSet = e.chosen && n === 1
     let starts = [], tossed = false, landed = false
     this.tasks.push({
-      dur: e.chosen ? 0.7 : ROLL_DUR,
+      dur: allSet ? 0.7 : ROLL_DUR,
       start: () => {
         // dice lying in the tray (it always shows the last roll) are tossed up from where they lie
-        tossed = (this.trayPrompt > 0 || this.trayDice[0].visible) && !e.chosen
+        tossed = (this.trayPrompt > 0 || this.trayDice[0].visible) && !allSet
         this.trayRolling = true
         this.trayVisible = 3.2
         this.trayLabel = ''
@@ -732,27 +735,28 @@ export class View {
         starts = e.dice.map((v, i) => {
           const m = this.trayDice[i]
           const end = new THREE.Vector3(n === 1 ? 0 : (i ? 0.5 : -0.5), 0.23, i ? 0.15 : -0.1)
-          const startPos = e.chosen ? end.clone().add(new THREE.Vector3(0, 0.35, 0)) : tossed ? (m.visible ? m.position.clone() : new THREE.Vector3(end.x * 0.6, 0.23, end.z)) : new THREE.Vector3(1.8, 1.2 + i * 0.2, 0.9 - i * 0.6)
+          const startPos = set(i) ? end.clone().add(new THREE.Vector3(0, 0.35, 0)) : tossed ? (m.visible ? m.position.clone() : new THREE.Vector3(end.x * 0.6, 0.23, end.z)) : new THREE.Vector3(1.8, 1.2 + i * 0.2, 0.9 - i * 0.6)
           m.visible = true
-          m.material = this.trayGold ? this.mat.gold : this.mat.dice
+          m.material = this.trayGold && set(i) ? this.mat.gold : this.mat.dice
           const qEnd = P.dieQuaternion(v, (Math.random() - 0.5) * 0.8)
           // it tumbles head over heels about a level axis and turns over sideways about the one across it, so
           // its faces go round whatever it rolls (about a near-upright axis the face up would stay up the
           // whole time: the same number as the last roll did not seem to roll at all)
           const a = Math.random() * Math.PI * 2
           const axis = new THREE.Vector3(Math.cos(a), 0, Math.sin(a)), across = new THREE.Vector3(-Math.sin(a), 0.35, Math.cos(a)).normalize()
-          const spin = e.chosen ? Math.PI : 10 + Math.random() * 4, spin2 = e.chosen ? 0 : (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 3)
-          return { m, end, startPos, qEnd, axis, across, spin, spin2 }
+          const spin = set(i) ? Math.PI : 10 + Math.random() * 4, spin2 = set(i) ? 0 : (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 3)
+          return { m, end, startPos, qEnd, axis, across, spin, spin2, set: set(i) }
         })
         for (let i = n; i < 2; i++) this.trayDice[i].visible = false
         // the sounds go on a timeline from here: when the dice land is known now
-        if (e.chosen) this.sfx('fold', 0.7); else this.emit('rollsound', ROLL_LAND * ROLL_DUR / this.speed)
+        if (e.chosen) this.sfx('fold', 0.7)
+        if (!allSet) this.emit('rollsound', ROLL_LAND * ROLL_DUR / this.speed)
         this.emit('roll', e)
       },
       update: t => {
-        const k = e.chosen ? t : Math.min(1, t / ROLL_LAND)
+        const k = allSet ? t : Math.min(1, t / ROLL_LAND)
         for (const d of starts) {
-          if (e.chosen) {
+          if (d.set) {
             d.m.position.lerpVectors(d.startPos, d.end, easeOut(k))
           } else {
             d.m.position.x = d.startPos.x + (d.end.x - d.startPos.x) * easeOut(k)
@@ -766,7 +770,7 @@ export class View {
           q.multiply(new THREE.Quaternion().setFromAxisAngle(d.across, d.spin2 * left))
           d.m.quaternion.copy(q.multiply(d.qEnd))
         }
-        if (e.chosen || landed) return
+        if (allSet || landed) return
         // how long until they land, as the frames go (a slow one puts it off: the sound of it follows)
         this.emit('rollwhen', (ROLL_LAND - t) * ROLL_DUR / this.speed)
         if (t >= ROLL_LAND - LAND_LEAD * this.speed / ROLL_DUR) { landed = true; this.emit('rolland') }

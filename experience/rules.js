@@ -586,18 +586,23 @@ function finish(s, pi, ev) {
   if (onBoard(s).length <= 1) gameOver(s, ev)
 }
 
-/** The roll a player would make with their effects: [[total, probability], ...] (choices excluded). */
-export function rollDistribution(fx) {
+/** The sum of n dice thrown with a player's effects, before Slow Down: [[sum, probability], ...]. */
+function diceSums(fx, n) {
   const faces = []
   for (let f = fx.hv ? heavyMin() : 1; f <= 6; f++) faces.push(f)
   let sums = new Map([[0, 1]])
-  for (let k = 0; k < diceCount(fx); k++) {
+  for (let k = 0; k < n; k++) {
     const next = new Map()
     for (const [t, p] of sums) for (const f of faces) next.set(t + f, (next.get(t + f) || 0) + p / faces.length)
     sums = next
   }
+  return [...sums]
+}
+
+/** The roll a player would make with their effects: [[total, probability], ...] (choices excluded). */
+export function rollDistribution(fx) {
   const out = new Map()
-  for (const [t, p] of sums) { const v = slowTotal(fx, t); out.set(v, (out.get(v) || 0) + p) }
+  for (const [t, p] of diceSums(fx, diceCount(fx))) { const v = slowTotal(fx, t); out.set(v, (out.get(v) || 0) + p) }
   return [...out]
 }
 /** A roll's total as it moves the piece: Slow Down caps it. */
@@ -645,12 +650,19 @@ export function landing(s, pi, pos, total, els = effectiveElements(s)) {
 
 const parachute = fall => Math.max(0, Math.min(fall, Math.floor(fall * CARD.P1.slide)))
 
-/** The best value for a chosen roll (Choose a Face, Golden Die): the one that ends furthest. */
+/**
+ * The best value for a chosen roll (Choose a Face, Golden Die): the one that ends furthest, on average over
+ * the dice an Extra Die rolls beside it.
+ */
 export function bestChoice(s, pi, max) {
+  const fx = s.pl[pi].fx, rest = diceSums(fx, diceCount(fx) - 1)
   let best = 1, bestPos = -1
   for (let v = 1; v <= max; v++) {
-    const l = landing(s, pi, s.pl[pi].pos, slowTotal(s.pl[pi].fx, v))
-    const score = l.finished ? 1000 : l.pos
+    let score = 0
+    for (const [t, pr] of rest) {
+      const l = landing(s, pi, s.pl[pi].pos, slowTotal(fx, v + t))
+      score += pr * (l.finished ? 1000 : l.pos)
+    }
     if (score > bestPos) { bestPos = score; best = v }
   }
   return best
@@ -675,12 +687,15 @@ export function bestPick(s, pi, dice) {
 function rollAndMove(s, pi, value, ev, bonus) {
   const p = s.pl[pi], fx = p.fx
   let dice, chosen = false
+  const lo = fx.hv ? heavyMin() : 1
   if (fx.gd || fx.cf) {
+    // the chosen value is the first die; an Extra Die is rolled beside it and adds to it
     const max = choiceMax(fx)
     const v = Number.isInteger(value) && value >= 1 && value <= max ? value : bestChoice(s, pi, max)
     dice = [v]; chosen = true
+    for (let k = 1; k < diceCount(fx); k++) dice.push(lo + rint(s, 7 - lo))
   } else {
-    const n = fx.pk ? 2 : diceCount(fx), lo = fx.hv ? heavyMin() : 1
+    const n = fx.pk ? 2 : diceCount(fx)
     dice = []
     for (let k = 0; k < n; k++) dice.push(lo + rint(s, 7 - lo))
   }
@@ -711,7 +726,8 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
     log(s, ev, `${p.n} took the ${dice[picked]}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
   } else {
     ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus, back })
-    log(s, ev, `${p.n} ${chosen ? 'chose' : 'rolled'} ${dice.join(' + ')}${dice.length > 1 && !chosen ? ' = ' + raw : ''}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
+    const what = chosen ? `chose ${dice[0]}${dice.length > 1 ? ', rolled ' + dice.slice(1).join(' + ') : ''}` : `rolled ${dice.join(' + ')}`
+    log(s, ev, `${p.n} ${what}${dice.length > 1 ? ' = ' + raw : ''}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
   }
   // step by step: a swamp on the way stops the move; going back stops on cell 1
   const path = [], waded = []
@@ -1192,9 +1208,13 @@ function expectedNext(s, q, els) {
   if (p.fx.sk) return p.pos
   const scoreOf = l => (l.finished ? 115 : l.pos)
   if (p.fx.gd || p.fx.cf) {
-    const max = choiceMax(p.fx)
+    const max = choiceMax(p.fx), rest = diceSums(p.fx, diceCount(p.fx) - 1)
     let best = 0
-    for (let v = 1; v <= max; v++) best = Math.max(best, scoreOf(landing(s, q, p.pos, slowTotal(p.fx, v), els)))
+    for (let v = 1; v <= max; v++) {
+      let ex = 0
+      for (const [t, pr] of rest) ex += pr * scoreOf(landing(s, q, p.pos, slowTotal(p.fx, v + t), els))
+      best = Math.max(best, ex)
+    }
     return best
   }
   if (p.fx.pk) { // Choose Your Roll: the better of two dice
