@@ -1,11 +1,12 @@
 """Local dev server: serves the project folder with CORS (for the Project 0 dev kit)
-and accepts POST /save/<path> so the in-browser builder can write GLBs into build/."""
+and accepts POST /save/<path> so the in-browser builder can write GLBs into build/
+(and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/)."""
 import http.server
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SAVE_DIRS = ('build/', 'tmp/')
+SAVE_DIRS = ('build/', 'tmp/', 'docs/crazygames/media/')
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Covers</title>
+<!--
+  The CrazyGames covers (tools/cover.js): every composition at every size, shown here and saved as PNGs
+  through tools/server.py's /save/.
+  tools/covers.html?v=climb,slant,close&sizes=1920x1080,800x1200,800x800&out=tmp/covers
+  v: compositions (default: all); sizes (default: the three CrazyGames asks for); out: a folder under tmp/
+  or docs/crazygames/media/ (default tmp/covers; out=0 saves nothing); numbers=1 keeps the cells' numbers.
+  Files: <out>/cover-<v>-<W>x<H>.png. Results: window.results, await window.done.
+-->
+<style>
+  html, body { margin: 0; background: #20232a; color: #ddd; font: 13px system-ui, sans-serif; }
+  #log { white-space: pre-wrap; padding: 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px; align-items: flex-start; }
+  figure { margin: 0; }
+  figure img { display: block; height: 260px; background: #000; }
+  figcaption { padding: 4px 0; color: #aaa; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "../vendor/three/build/three.module.js",
+  "three/addons/": "../vendor/three/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="log"></div>
+<div id="shots"></div>
+<script type="module">
+import { renderCover, VARIANTS } from './cover.js'
+const q = new URLSearchParams(location.search)
+const variants = q.get('v') ? q.get('v').split(',') : Object.keys(VARIANTS)
+const sizes = (q.get('sizes') || '1920x1080,800x1200,800x800').split(',')
+const out = (q.get('out') ?? 'tmp/covers').replace(/^\/+|\/+$/g, '')
+const numbers = q.get('numbers') === '1'
+const logEl = document.getElementById('log'), shots = document.getElementById('shots')
+const log = t => { logEl.textContent += t + '\n'; console.log('[covers]', t) }
+const blobOf = c => new Promise(r => c.toBlob(r, 'image/png'))
+
+window.results = []
+window.done = (async () => {
+  await document.fonts.ready
+  for (const v of variants) {
+    const row = document.createElement('div'); row.className = 'row'; shots.append(row)
+    for (const size of sizes) {
+      const [W, H] = size.split('x').map(Number)
+      const c = renderCover(v, W, H, { numbers })
+      const blob = await blobOf(c)
+      const name = `cover-${v}-${W}x${H}.png`
+      const fig = document.createElement('figure')
+      const img = new Image(); img.src = URL.createObjectURL(blob)
+      fig.append(img, Object.assign(document.createElement('figcaption'), { textContent: name }))
+      row.append(fig)
+      let saved = null
+      if (out !== '0') {
+        const r = await fetch(`/save/${out}/${name}`, { method: 'POST', body: blob, headers: { 'content-type': 'image/png' } })
+        saved = r.ok ? `${out}/${name}` : null
+        if (!r.ok) log(`${name}: save failed (${r.status})`)
+      }
+      window.results.push({ v, size, saved, bytes: blob.size })
+      log(`${name} ${Math.round(blob.size / 1024)} KB${saved ? ' → ' + saved : ''}`)
+    }
+  }
+  log('done')
+  return window.results
+})()
+</script>
+</body>
+</html>

@@ -295,6 +295,8 @@ async function boot() {
     emit('frame', dt, p0.time)
     if (p0.autoRender) getRenderer().render(scene, camera)
   }
+  // ?clock=manual: no frames of its own; whoever drives the page (tools/trailer.html) steps it by dt seconds
+  if (q.get('clock') === 'manual') { globalThis.__cslStep = dt => frame(prev + dt * 1000, 1); return }
   const loop = now => { lastRaf = performance.now(); frame(now, 0.1); requestAnimationFrame(loop) }
   requestAnimationFrame(loop)
   every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5) })

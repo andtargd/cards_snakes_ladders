@@ -6,3 +6,8 @@ graphify-out/
 
 # the CrazyGames build (tools/build_cg.py)
 dist/
+
+# CrazyGames submission media: the videos are heavy, the other cover compositions are made again by tools/covers.html
+docs/crazygames/media/*.mp4
+docs/crazygames/media/*.webm
+docs/crazygames/media/alt/
