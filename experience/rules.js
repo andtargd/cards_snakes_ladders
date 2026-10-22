@@ -875,7 +875,9 @@ function structuralOk(els, blocked, n) {
     if (len < CFG.minLen || len > bc.maxLen || tierOf(from) === tierOf(to)) return false
     if (type === 1 ? to <= from : to >= from) return false
   }
-  return perTier.every(n => n <= CFG.maxEndsPerTier) && !crossingProblems(els)
+  // every rule of boardProblems but the balance, which the finished quake checks: a shift that breaks one
+  // is never kept, or nearly every quake would end on a board that fails and leave the field as it was
+  return perTier.every(n => n <= CFG.maxEndsPerTier) && !twinIn(els) && !crossingProblems(els) && !ladderEndProblems(els)
 }
 
 // ---------- targets ----------
