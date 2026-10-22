@@ -155,7 +155,7 @@ window.done = (async () => {
   const script = findScript(+q.get('script') || SCRIPT)
   log(`script: board ${script.seed}, Juniper on ${script.J}, the player on ${script.Y}, ${script.steps.length} steps`)
   await document.fonts.ready
-  const cover = renderCover(q.get('cover') || 'slant', W, H)
+  const cover = renderCover(q.get('cover') || 'burst-sl', W, H)
   const w = await loadGame()
   // the game's own randomness (the bots' pauses, the confetti) the same in every take
   w.Math.random = R.mulberry32(7)
