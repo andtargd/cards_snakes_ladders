@@ -44,6 +44,7 @@ tools/build_cg.*     (новое) сборка dist/crazygames/ и zip для з
 | 9 | Privacy notice | user consent (WebRTC/IP, имя) | 2 |
 | 10 | Обложки и видео | обязательные материалы подачи | 6, 8 |
 | 11 | Тексты подачи и финальный прогон | описание, управление, чек-лист | всё |
+| 12 | SDK для онлайна (после Basic Launch) | требования CrazyGames к multiplayer | 3, 5 |
 
 Задачи 4, 6 и 7 не зависят от остальных и могут идти параллельно с 1–3.
 
@@ -242,14 +243,22 @@ tools/build_cg.*     (новое) сборка dist/crazygames/ и zip для з
 - [ ] описание, управление, ответы для формы
 - [ ] GitHub Pages и Project 0 работают из того же main
 
-## После Basic Launch: подключение SDK (не сейчас)
+## После Basic Launch: подключение SDK
 
-Всё подключается в web/platform.js через хуки из задачи 1, ядро игры не меняется:
-- скрипт SDK v3 и `SDK.init()` только в сборке crazygames; `SDK.environment` для локального режима;
+Всё подключается в web/platform.js через хуки из задачи 1, ядро игры не меняется.
+
+Сделано (задача 12, multiplayer, <https://docs.crazygames.com/requirements/multiplayer/>):
+- скрипт SDK v3 только в сборке crazygames (tools/build_cg.py; `?platform=crazygames` грузит его сам), `await SDK.init()` до старта игры с таймаутом 10 с; `environment` 'disabled' или SDK не загрузился — игра как на Basic Launch, комнаты по коду;
+- `inviteLink({ roomId })` — кнопка Invite Link копирует ссылку SDK; `getInviteParam('roomId')` — игрок по ссылке сразу входит в комнату;
+- `updateRoom({ roomId, isJoinable, inviteParams })` при входе в комнату и когда меняется, можно ли в неё войти (правило то же, что у net.js при входе: не полна, у quick-стола во время игры бот держит место), `leftRoom()` при выходе; старый SDK без updateRoom — `showInviteButton` / `hideInviteButton`;
+- `isInstantMultiplayer`: без меню и First Match — в комнату из приглашения или в новую свою (режим и поле из настроек Online);
+- `addJoinRoomListener`: выйти из текущей комнаты (соло-партия откладывается и возвращается после комнаты) и войти в новую;
+- rematch в той же комнате, доступность комнаты обновляется после партии.
+
+Осталось (не сейчас):
 - `game.loadingStart/Stop`, `gameplayStart/Stop`, `happytime` (победа) — в уже расставленные хуки;
 - midgame ad в хуке «между партиями», с глобальным mute и блокировкой ввода до `adFinished`/`adError`;
 - rewarded ad — только если появится подходящая награда (например, лишняя карта в соло), не в онлайне;
 - `user`: имя и аватар CrazyGames вместо поля имени (hooks.getUser), автологин;
 - `data`: сохранения (settings, партия) через Data-модуль вместо localStorage, по тому же адаптеру;
-- multiplayer: `inviteLink`, `getInviteParam`, updateRoom (room, isJoinable), instant multiplayer, room join listener, rematch в той же комнате (уже есть);
 - `locale` из system info — когда появятся переводы.

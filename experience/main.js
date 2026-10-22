@@ -605,6 +605,7 @@ class App {
     this.reward = null
     this.ui.logLines = []
     this.ui.selected = -1; this.ui.cancelTarget(); this.ui.hidden = null // (a card hidden as it flew from the last game's hand)
+    this.keptSolo = false // (a game kept for after a room: this one takes its place)
     this.table = new LocalTable(this, { kind: 'solo', ...setup })
     this.tut = setup.first ? new Tutorial(this) : null
     this.confirmSkip = false
@@ -614,11 +615,12 @@ class App {
     this.ui.dirty = true
     this.sfx('draw', 0.4)
   }
-  toMenu() {
+  /** `keep`: a game here against bots stays saved, to come back to (resumeSolo). */
+  toMenu(keep = false) {
     // a Quick Match table is left with its room: the game goes on without me (a bot takes my seat), and
     // no one there waits for a host who is in the menu (onWebRoom brings me here again, out of the room)
     if (this.quick() && this.atTable()) { this.p0.web.leave(); return }
-    if (this.table?.kind === 'solo') clearGame()
+    if (this.table?.kind === 'solo') { if (keep) this.keptSolo = true; else clearGame() }
     if (this.table?.kind === 'shared') {
       if (this.p0.room.isHost) { const lob = this.lobby(); lob.status = 'lobby'; this.pruneSeats(lob); this.p0.room.set('lob', lob) }
       else this.p0.room.sendTo(this.p0.room.host, { t: 'leaveSeat' })
@@ -898,12 +900,14 @@ class App {
     this.status.clear(); this.statusSent = null; this.invite = null
     if (room?.fresh) {
       this.menuOpen = false
-      if (this.screen === 'game') this.toMenu()
+      // a game against bots is kept (a friend's invite through the site took the player from it), and comes back after the room
+      if (this.screen === 'game') this.toMenu(true)
       this.screen = 'menu'
       this.openLobby()
     } else if (!room) {
       if (this.screen === 'lobby' || this.table?.kind === 'shared') this.toMenu()
       if (reason === 'lost') this.ui.say(T.roomLost, 3)
+      if (this.keptSolo && this.screen === 'menu' && !this.p0.web?.status?.busy) { this.keptSolo = false; this.resumeSolo() }
     }
     this.ui.dirty = true
   }

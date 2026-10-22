@@ -2,6 +2,7 @@
 // The game in experience/ never looks at the site itself: it reads the profile and calls the hooks
 // through p0.web (Project 0 has no p0.web, so there every call is skipped). An SDK plugs in here,
 // with provide({ ... }) in place of the no-op hooks, and nothing in the game changes.
+// On CrazyGames the SDK v3 does so for online play: invite links, the room the player is in, instant multiplayer.
 //
 // The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames (to try it
 // locally), else 'pages'. With ?platform=… or ?debug the profile and every hook call go to the console.
@@ -51,8 +52,14 @@ const impl = {
   inviteLink: noLink,
   /** The room code a site's invite link brought the player with (an SDK's invite parameter), or null. */
   inviteRoom: () => null,
-  /** The online room this tab is in ({ code, quick, link, fresh }), or null after leaving it. */
-  roomChanged() {},
+  /** The site sent the player straight to online play (its multiplayer page): into a room at once, no menu. */
+  instantMultiplayer: () => false,
+  /** This tab is in online room `code`; `open`: whether friends can come in now (it is not full, nor a quick table playing). Again whenever `open` changes. */
+  roomOpened() {},
+  /** This tab left its online room. */
+  roomClosed() {},
+  /** onInvite(fn): fn(code) when the site brings the player to a room while the game is open (a friend's invite). */
+  onInvite() {},
   /** The player's language on the site, or null (the game is in English only for now). */
   locale: () => null,
 }
@@ -80,5 +87,58 @@ export function roomLink(code) {
 }
 /** Whether rooms get links at all here (for texts shown before there is a room). */
 export const roomLinks = () => platform.allowLinks || impl.inviteLink !== noLink
+
+// ---------- CrazyGames: the SDK v3 (https://docs.crazygames.com/sdk/game/) ----------
+// The build's index.html loads it before the game (tools/build_cg.py); ?platform=crazygames on a page
+// that is not the build loads it here, to try it. Where it does not load (an ad blocker, offline) or does
+// not run (another domain: environment 'disabled'), nothing changes: rooms go by their code alone.
+// On localhost the SDK runs in its local mode: ?instantJoin=true for instant multiplayer, ?roomId=CODE
+// (or a whole invite link's ?czy_invite=true&roomId=CODE) for an invite.
+const SDK_URL = 'https://sdk.crazygames.com/crazygames-sdk-v3.js'
+const SDK_MS = 10000 // off CrazyGames the SDK itself takes 7 s to find out
+const ROOM = 'roomId' // the invite parameter with the room's code
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script')
+    sc.src = src
+    sc.onload = res
+    sc.onerror = () => { sc.remove(); rej(new Error('it did not load')) }
+    document.head.append(sc)
+  })
+}
+const late = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`no answer in ${ms / 1000} s`)), ms))])
+
+async function crazyGames() {
+  if (!globalThis.CrazyGames?.SDK && !globalThis.CSL_PLATFORM) await loadScript(SDK_URL)
+  const SDK = globalThis.CrazyGames?.SDK
+  if (!SDK) throw new Error('it did not load')
+  await late(SDK.init(), SDK_MS)
+  if (SDK.environment === 'disabled') throw new Error('it is disabled on this domain')
+  const game = SDK.game
+  // updateRoom is the SDK's way now; the invite button is what older ones had
+  const rooms = typeof game.updateRoom === 'function'
+  provide({
+    inviteLink: code => game.inviteLink({ [ROOM]: code }),
+    inviteRoom: () => game.getInviteParam(ROOM),
+    instantMultiplayer: () => !!game.isInstantMultiplayer,
+    roomOpened(code, open) {
+      if (!rooms) { if (open) game.showInviteButton({ [ROOM]: code }); else game.hideInviteButton(); return }
+      game.updateRoom(open ? { roomId: code, isJoinable: true, inviteParams: { [ROOM]: code } } : { roomId: code, isJoinable: false })
+    },
+    roomClosed() { if (rooms) game.leftRoom(); else game.hideInviteButton() },
+    onInvite(fn) { game.addJoinRoomListener?.(p => fn(p?.[ROOM] ?? null)) },
+  })
+  return SDK.environment
+}
+
+/** The site's SDK is ready, or not there (then the hooks stay as they are): the game waits for this before it starts. */
+export const ready = (platform.id === 'crazygames' ? crazyGames() : Promise.resolve(null)).then(env => {
+  if (env) console.info('[platform] CrazyGames SDK:', env)
+  return env
+}, e => {
+  console.warn('[platform] no CrazyGames SDK (rooms go by their code):', e?.message || e)
+  return null
+})
 
 if (platform.debug) console.info('[platform]', platform.id, platform)

@@ -149,6 +149,18 @@ export class Net {
     const t = this.quick ? quickTable(this.code, this.QUICK) : { mode: null, size: null }
     return { code: this.code, quick: this.quick, mode: t.mode, size: t.size, fresh: !!fresh }
   }
+  /** How many may be in the room: a quick table's players, or a room of friends' players and those who watch. */
+  cap() { return this.quick ? 6 : 12 }
+  /** The game in the room is on and a bot there keeps a seat for a player who comes (a quick table's). */
+  seatKept() {
+    const g = this.s.state.g?.s
+    return g?.ph !== 'over' && !!g?.pl?.some?.(p => p && p.f && p.b && !p.d)
+  }
+  /** A new player would be let in now (incoming() asks the same at the door): the site may offer the room to friends. */
+  joinable() {
+    if (this.mode === 'off' || this.roster.size >= this.cap()) return false
+    return !(this.quick && this.s.state.lob?.status === 'playing' && !this.seatKept())
+  }
   /** `q`: the site's quick rooms, so a quick room of another site turns the player away (an old page sends none: GitHub Pages' QM). */
   hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back, q: this.QUICK } }
 
@@ -512,15 +524,14 @@ export class Net {
       if (m.id === this.s.me.id) return deny('taken')
       // a code typed by hand may be another site's quick room: Quick Match players of two sites never meet
       if (this.quick && String(m.q ?? 'QM') !== this.QUICK) return deny('other')
-      if (!known && this.roster.size >= (this.quick ? 6 : 12)) return deny('full')
+      if (!known && this.roster.size >= this.cap()) return deny('full')
       // a player seated at the table may come back to a quick room that is playing: after a reload, or
       // under a new id (the page was closed) to the seat a bot keeps under their name; and a new player
       // comes in while a bot that started the game keeps a seat for one (the game sits them down). A
       // name is checked here too: a client may send anything, and a rude one gets its same stand-in every time
       const name = safeName(m.name), g = this.s.state.g?.s
       const seated = g?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
-      const kept = g?.ph !== 'over' && g?.pl?.some?.(p => p && p.f && p.b && !p.d)
-      if (!known && !seated && !kept && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
+      if (!known && !seated && !this.seatKept() && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
       conn.helloN = m.n
       // the new link first: closing the old one then drops no one

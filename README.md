@@ -33,7 +33,7 @@ python -m http.server 8765
 
 Then visit <http://localhost:8765>.
 
-three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the game imports. PeerJS (1.5.4) is in `vendor/peerjs/` and loads only when a player goes online. Nothing comes from a CDN.
+three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the game imports. PeerJS (1.5.4) is in `vendor/peerjs/` and loads only when a player goes online. Nothing comes from a CDN (only the CrazyGames build loads the portal's SDK from its server).
 
 ## The CrazyGames build
 
@@ -41,9 +41,17 @@ three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the 
 python tools/build_cg.py
 ```
 
-It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `index.html` with `window.CSL_PLATFORM = 'crazygames'` (see `web/platform.js`), `privacy.html`, `web/`, `experience/` and `vendor/` — nothing else. It stops if a page or module loads anything by an absolute path, and prints the number of files and the size against the portal's limits (1500 files, 50 MB). `dist/` is not committed.
+It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `index.html` with `window.CSL_PLATFORM = 'crazygames'` (see `web/platform.js`) and the CrazyGames SDK v3 (`https://sdk.crazygames.com/crazygames-sdk-v3.js`, the one outside URL it allows), `privacy.html`, `web/`, `experience/` and `vendor/` — nothing else. It stops if a page or module loads anything by an absolute path or from another server, and prints the number of files and the size against the portal's limits (1500 files, 50 MB). `dist/` is not committed.
 
-To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build.
+To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build (and loads the SDK itself).
+
+The SDK is used for online play only (`web/platform.js`; the game waits up to 10 s for `SDK.init()` before it starts):
+- **Invite link.** A room's Invite Link button copies `SDK.game.inviteLink({ roomId })`, a link to the game's page on the portal. A player who comes by such a link (`getInviteParam('roomId')`) goes straight into that room.
+- **The room.** While a tab is in a room it tells the site with `updateRoom({ roomId, isJoinable, inviteParams })`, so friends can join from the portal: joinable while a newcomer would be let in (a room of friends until it is full, players watch a game under way; a Quick Match table while a bot keeps a seat for a player), and `leftRoom()` when it leaves. An older SDK without `updateRoom` gets the invite button (`showInviteButton` / `hideInviteButton`). A rematch stays in the same room.
+- **Join room listener.** When the portal brings the player to a room while the game is open, the game leaves the room it is in (or puts a game against bots aside, to come back to after the room) and joins that one.
+- **Instant multiplayer.** With `isInstantMultiplayer` the game skips the menu and the First Match: into the invited room, or a new room of the player's own (the mode and board last chosen on the Online screen).
+
+Where the SDK does not load (an ad blocker, offline) the game runs as before, with rooms by their code only. On `localhost` the SDK runs in its local mode, and these parameters on the build's address (cgframe's `src`) try the rest: `?instantJoin=true` (instant multiplayer), `?roomId=CODE` or a whole invite link's `?czy_invite=true&roomId=CODE` (an invite), `?debug` (every hook call in the console). The local SDK never calls the join room listener: `__cslInvite('CODE')` in the game's console does what it would.
 
 `tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down; `?src=../dist/crazygames/index.html` shoots the build instead of `index.html`). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
 

@@ -7,7 +7,7 @@ import { Net, cleanCode } from './net.js'
 import { safeName } from './names.js'
 import { onlineControl, shareRoom } from './online.js'
 import { editText } from './textfield.js'
-import { platform, hooks, mute, roomLink, roomLinks } from './platform.js'
+import { platform, hooks, mute, roomLink, roomLinks, ready } from './platform.js'
 import { every } from './clock.js'
 
 const q = new URLSearchParams(location.search)
@@ -102,7 +102,7 @@ const session = {
         history.replaceState(null, '', u.pathname + u.search + u.hash)
       } catch { /* fine */ }
     }
-    hooks.roomChanged(info)
+    tellRoom()
     emit('room', info, reason)
   },
   reset() {
@@ -134,6 +134,20 @@ try {
   tabs.postMessage({ id: myId, ask: 1 })
 } catch { /* no BroadcastChannel: the room says 'taken' and net.js takes a new id then */ }
 globalThis.__cslNet = net // for local testing from the console
+// the site hears which room this tab is in and whether friends can come in now (not full, nor a quick
+// table's game with no seat kept for a newcomer): when either changes, and when the tab leaves the room
+let told = null // { code, open } as last told
+function tellRoom() {
+  const code = web.room?.code || null
+  if (!code) { if (told) { told = null; hooks.roomClosed() } return }
+  const open = net.joinable()
+  if (told?.code === code && told.open === open) return
+  told = { code, open }
+  hooks.roomOpened(code, open)
+}
+// (a moment later: a game starting sets the lobby, then the game, and the room is open throughout)
+let tellTimer = 0
+for (const ev of ['join', 'leave', 'state']) on(ev, () => { clearTimeout(tellTimer); tellTimer = setTimeout(tellRoom, 200) })
 const checkSize = (what, v, max) => { const n = new TextEncoder().encode(JSON.stringify(v ?? null)).byteLength; if (n > max) throw new RangeError(`${what}: ${n} bytes; at most ${max}`) }
 const room = {
   id: 1, seed: (Math.random() * 2 ** 32) >>> 0, tick: 0,
@@ -334,24 +348,43 @@ addEventListener('keydown', e => { if (typing(e)) return; if (e.code === 'Tab' |
 addEventListener('keyup', e => { input.keys.delete(e.code); if (!typing(e)) emit('keyup', keyOf(e)) })
 addEventListener('blur', () => input.keys.clear())
 
+/** The site brings the player to room `code` while the game is open (a friend's invite): out of the room or game they are in, into that one. */
+function goToRoom(code) {
+  code = cleanCode(code)
+  if (code.length < 3 || web.room?.code === code) return
+  online.cancel()
+  online.join(code)
+}
+globalThis.__cslInvite = goToRoom // for local testing: the site's local SDK never calls its join room listener
+
 async function boot() {
+  // the game loads while the site's SDK starts (web/platform.js); the site hears of the loading once it can
+  const loaded = import(entry)
+  loaded.catch(() => {}) // (a failure is reported once it is awaited, below)
+  await ready
   hooks.loadingStart()
   // the site's own name for the player, if it has one, stands in for the one they type
   const user = Promise.resolve(hooks.getUser()).catch(() => null)
-  const mod = await import(entry)
+  const mod = await loaded
   await mod.default(p0)
   const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), 3000))])
   if (u?.name && safeName(u.name, '')) me.name = siteName = safeName(u.name, '')
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
-  // the room this tab was in before a reload: back to it; a room's link (or the site's invite): its code on the Online screen
-  const code = cleanCode(q.get('room') || hooks.inviteRoom())
+  // the room this tab was in before a reload: back to it. A room's link: its code on the Online screen;
+  // the site's invite: straight into that room. The site's multiplayer page: a room of one's own at once
+  // (the mode and board last chosen on the Online screen), no menu and no First Match first
+  const invite = cleanCode(hooks.inviteRoom())
+  const code = cleanCode(q.get('room')) || invite
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
   if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
     online.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
-  } else if (code.length >= 3) online.invite(code)
+  } else if (code.length >= 3 && code === invite) online.join(code)
+  else if (code.length >= 3) online.invite(code)
+  else if (hooks.instantMultiplayer()) online.create()
+  hooks.onInvite(goToRoom)
   // animation frames stop in a hidden tab, and in some windows that still count as visible (an
   // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an
   // online table it hosts, going

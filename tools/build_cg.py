@@ -2,7 +2,8 @@
 
     python tools/build_cg.py
 
-Only what the web game loads goes in: index.html (with window.CSL_PLATFORM = 'crazygames'),
+Only what the web game loads goes in: index.html (with window.CSL_PLATFORM = 'crazygames' and the
+CrazyGames SDK v3 before the game's module, for the invite links and rooms in web/platform.js),
 privacy.html (the privacy policy the game links to), web/, experience/ (without experience.json,
 which is Project 0's manifest) and vendor/.
 Every path the pages and modules load must be relative, since the portal serves the game from a
@@ -27,12 +28,15 @@ SKIP_EXT = ('.md', '.docx', '.py', '.pyc', '.map')
 
 MAX_FILES = 1500
 TARGET_MB, MAX_MB = 20, 50
-# loaded from outside the zip on purpose: nothing now (PeerJS is in vendor/peerjs/)
-EXTERNAL_OK = ()
+# the CrazyGames SDK: the portal has it loaded from its own server (web/platform.js copes when it does not load)
+SDK_URL = 'https://sdk.crazygames.com/crazygames-sdk-v3.js'
+# loaded from outside the zip on purpose: the SDK only (PeerJS is in vendor/peerjs/)
+EXTERNAL_OK = (SDK_URL,)
 # servers online play connects to (wss://, the brokers in web/mq.js): listed, not errors
 WSS_URL = re.compile(r'''["'](wss://[^"'\s]+)["']''')
 
 PLATFORM_TAG = "<script>window.CSL_PLATFORM = 'crazygames'</script>\n"
+SDK_TAG = f'<script src="{SDK_URL}"></script>\n'
 
 # src="…" / href="…" in HTML; the values of an importmap; module specifiers in JS
 ATTR = re.compile(r'''\b(?:src|href)\s*=\s*["']([^"']+)["']''', re.I)
@@ -103,8 +107,10 @@ def build():
     html = open(os.path.join(ROOT, 'index.html'), encoding='utf-8').read()
     if 'CSL_PLATFORM' in html:
         sys.exit('index.html already sets CSL_PLATFORM: the build sets it itself')
-    # before the importmap and the game's module, so web/platform.js sees it
-    html, n = re.subn(r'<script\s+type=["\']importmap["\']', lambda m: PLATFORM_TAG + m.group(0), html, count=1)
+    if SDK_URL in html:
+        sys.exit('index.html already loads the CrazyGames SDK: the build adds it itself')
+    # before the importmap and the game's module, so web/platform.js sees both (GitHub Pages has neither)
+    html, n = re.subn(r'<script\s+type=["\']importmap["\']', lambda m: PLATFORM_TAG + SDK_TAG + m.group(0), html, count=1)
     if n != 1:
         sys.exit('index.html: no importmap to put the platform before')
     with open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8', newline='\n') as f:

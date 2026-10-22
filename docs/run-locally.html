@@ -130,7 +130,7 @@
   <ul class="check">
     <li><b>Python 3</b>: на нём работают и сервер, и сборка.</li>
     <li>Любой современный браузер.</li>
-    <li>npm, Node и сборщик не нужны. three.js и PeerJS уже лежат в <code>vendor/</code>, с CDN ничего не грузится.</li>
+    <li>npm, Node и сборщик не нужны. three.js и PeerJS уже лежат в <code>vendor/</code>, с CDN ничего не грузится. Исключение одно: сборка для CrazyGames грузит SDK портала с <code>sdk.crazygames.com</code>.</li>
   </ul>
 
   <h2><span class="num">1</span> Веб-версия (как на GitHub Pages)</h2>
@@ -149,7 +149,7 @@
       <h3>Профиль CrazyGames</h3>
       <p>Добавьте к обычной странице параметр:</p>
       <p><a href="http://localhost:5500/?platform=crazygames"><code>localhost:5500/?platform=crazygames</code></a></p>
-      <p>Подходит, чтобы проверять поведение игры. Изменения в коде видны сразу после перезагрузки.</p>
+      <p>Подходит, чтобы проверять поведение игры. Изменения в коде видны сразу после перезагрузки. SDK CrazyGames страница загрузит сама.</p>
     </div>
     <div class="card">
       <span class="tag cg">Полный · со сборкой</span>
@@ -163,7 +163,10 @@
   <div class="table-wrap"><table>
     <tr><th></th><th>GitHub Pages</th><th>CrazyGames</th></tr>
     <tr><td>Комнаты Quick Match</td><td><code>QM…</code></td><td><code>CG…</code>: игроки двух сайтов не встречаются</td></tr>
-    <tr><td>Ссылки-приглашения</td><td>есть (<code>?room=КОД</code>)</td><td>нет, только код комнаты</td></tr>
+    <tr><td>SDK CrazyGames</td><td>не грузится</td><td>грузится до старта игры (игра ждёт <code>SDK.init()</code> до 10 с)</td></tr>
+    <tr><td>Ссылки-приглашения</td><td>есть (<code>?room=КОД</code>), по ссылке открывается экран Online с кодом</td><td>ссылка SDK на страницу игры на портале, по ней игрок сразу попадает в комнату; без SDK только код комнаты</td></tr>
+    <tr><td>Комната для портала</td><td>—</td><td><code>updateRoom</code>: в какой комнате игрок и можно ли в неё войти; <code>leftRoom</code> при выходе</td></tr>
+    <tr><td>Instant multiplayer</td><td>—</td><td>без меню и First Match: сразу в комнату из приглашения или в новую свою</td></tr>
     <tr><td>Уведомление о приватности</td><td>есть: строка в Play Online, ссылка Privacy в How to Play</td><td>то же</td></tr>
     <tr><td>Лог платформы в консоли (F12)</td><td>с <code>?debug</code></td><td>с <code>?platform=crazygames</code> или <code>?debug</code></td></tr>
   </table></div>
@@ -184,7 +187,7 @@
   <h3>Что лежит в сборке</h3>
   <div class="cmd tree"><pre>dist/
 ├── crazygames/
-│   ├── index.html     ← с window.CSL_PLATFORM = 'crazygames'
+│   ├── index.html     ← с window.CSL_PLATFORM = 'crazygames' и SDK CrazyGames v3
 │   ├── privacy.html   ← политика приватности, на неё ведёт ссылка Privacy
 │   ├── web/
 │   ├── experience/    ← без experience.json (это манифест Project 0)
@@ -237,7 +240,16 @@
   <div class="cmd"><pre>ffmpeg -framerate 30 -i tmp/trailer/1920x1080/f%05d.jpg -c:v libvpx-vp9 -b:v 0 -crf 30 -row-mt 1 -pix_fmt yuv420p -an docs/crazygames/media/trailer-1920x1080.webm</pre><button class="copy" type="button">Копировать</button></div>
   <p>Видео в git не попадают (<code>.gitignore</code>), обложки 3 размеров композиции <code>slant</code> лежат в <code>docs/crazygames/media/</code>. Для трейлера игра понимает <code>?clock=manual</code>: она не крутит кадры сама, их шагает страница записи.</p>
 
-  <div class="note"><b>SDK CrazyGames пока не подключён</b>В <code>web/platform.js</code> для него есть заглушки, работают пока только mute и unmute. Поэтому локально проверяются загрузка, размеры и профиль сайта, но не реклама и не другие функции SDK.</div>
+  <h3>Онлайн с SDK CrazyGames</h3>
+  <p>SDK подключён только для онлайна (<code>web/platform.js</code>): ссылка-приглашение, комната и её доступность для портала, instant multiplayer, приглашение с портала, пока игра открыта. Реклама, gameplayStart/Stop и другие функции SDK пока не подключены. На <code>localhost</code> SDK работает в локальном режиме: ссылка ведёт на заглушку <code>crazygames.com/game/your-game-will-appear-here</code>, а приглашения и instant multiplayer изображаются параметрами в адресе сборки. В cgframe они дописываются к полю <b>build</b>, например <code>../dist/crazygames/index.html?instantJoin=true</code>.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Параметр сборки</th><th>Что изображает</th></tr>
+    <tr><td><code>?instantJoin=true</code></td><td>instant multiplayer: игра сразу открывает свою комнату (режим и поле из экрана Online)</td></tr>
+    <tr><td><code>?roomId=КОД</code> или <code>?czy_invite=true&amp;roomId=КОД</code></td><td>игрок пришёл по ссылке-приглашению: сразу входит в комнату <code>КОД</code> (вместе с <code>instantJoin=true</code> тоже)</td></tr>
+    <tr><td><code>?debug</code></td><td>каждый вызов хука в консоли: <code>roomOpened КОД true/false</code>, <code>roomClosed</code></td></tr>
+  </table></div>
+  <p>Локальный SDK пишет в консоль, что он сделал: «Invite link is …», «Update room (local) with params …», «Left room (local)». Приглашение с портала, пока игра открыта, локальный SDK не присылает: в консоли игры (внутри рамки) его заменяет <code>__cslInvite('КОД')</code>.</p>
+  <div class="note"><b>Если SDK не загрузился</b>(блокировщик рекламы, нет сети) игра работает как раньше: в консоли предупреждение «no CrazyGames SDK», в комнату входят только по коду, под Create a Room написано «Get a room code for friends». Проверить можно копией сборки, где адрес SDK заменён на несуществующий.</div>
 
   <h2><span class="num">3</span> Тестовые страницы</h2>
   <p>Нужен сервер из шага 1.</p>
@@ -261,7 +273,8 @@
   <details><summary>«Address already in use» при запуске сервера</summary><div>Порт занят, например сервером из другого окна. Запустите на другом порту: <code>python tools/server.py 5510</code>.</div></details>
   <details><summary>В cgframe.html ничего не загружается</summary><div>Сборки ещё нет. Сначала выполните <code>python tools/build_cg.py</code>: рамка открывает <code>../dist/crazygames/index.html</code>.</div></details>
   <details><summary>В рамке старая версия игры</summary><div>Пересоберите архив через <code>build_cg.py</code> и нажмите Reload.</div></details>
-  <details><summary>build_cg.py остановился с ошибкой</summary><div>Какая-то страница или модуль грузит файл по абсолютному пути (<code>/…</code> или <code>http…</code>). На портале игра лежит в своей папке на CDN, поэтому все пути должны быть относительными. Скрипт пишет, какой файл и какой путь виноваты.</div></details>
+  <details><summary>build_cg.py остановился с ошибкой</summary><div>Какая-то страница или модуль грузит файл по абсолютному пути (<code>/…</code> или <code>http…</code>). На портале игра лежит в своей папке на CDN, поэтому все пути должны быть относительными; с другого сервера можно грузить только SDK CrazyGames. Скрипт пишет, какой файл и какой путь виноваты.</div></details>
+  <details><summary>В консоли «no CrazyGames SDK»</summary><div>SDK не загрузился или не ответил за 10 с: блокировщик рекламы, нет сети или домен не CrazyGames и не <code>localhost</code>. Игра работает дальше, комнаты только по коду. Локально открывайте сборку через <code>localhost</code> или <code>127.0.0.1</code>.</div></details>
 </main>
 <script>
   for (const b of document.querySelectorAll('.copy')) b.addEventListener('click', async () => {
