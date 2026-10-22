@@ -126,6 +126,7 @@ export class UI {
     this.logScrollF = 0
     this.target = null // { i, card, kind, list, sel }
     this.selected = -1
+    this.fxOpen = null // a player's effects shown as their cards: { gid, p, keys, x, y } (openFx)
     this.helpPage = 0
     this.picker = false // the Shared Table's invite list is open
     this.rows = new Map() // the players panel: where each player's row stands now, sliding to its place
@@ -563,6 +564,7 @@ export class UI {
     g.clearRect(-this.ox, -this.oy, this.FW, this.FH)
     this.hits = []
     this.modal = false // a window is open over the cards: they take no clicks
+    this.fxTip = false // an effect's tip by its icon in the players panel
     this.trayRect = null // the tray on screen
     this.trayDice = null // where the view draws the dice (screen px): the tray, unless it shows End Turn or values to choose
     this.trayMode = null // 'roll', 'end', 'choose', 'pick' (one of two dice) or 'show'
@@ -608,7 +610,7 @@ export class UI {
       this.panel((W - w) / 2, ty, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
       this.text(t.text, W / 2, ty + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
-    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect || this.veiled
+    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect || this.veiled || this.fxTip
     if (used || ov.used) ov.tex.needsUpdate = true
     ov.used = used
     this.g = this.base.g
@@ -1580,14 +1582,23 @@ export class UI {
       P.roundRect(g, hx - 8 * u, cy + rowH / 2 - 11 * u, 16 * u, 22 * u, 3 * u); g.fill()
       this.text(String(p.h.length), hx, cy + rowH / 2 + 1, { size: 12, color: '#ffffff', align: 'center' })
       const fx = Object.keys(p.fx).filter(k => FX[k])
+      // (an effect under the pointer tells what it does, a click shows its card; not while a card waits for its target)
+      const fxHits = []
       if (!this.narrow) fx.slice(0, 5).forEach((k, j) => {
-        const ix = hx - 26 * u - j * 20 * u, iy = cy + rowH * 0.71
+        const ix = hx - 26 * u - j * 20 * u, iy = cy + rowH * 0.71, key = 'fx' + i + k
+        if (this.hover === key) { g.fillStyle = 'rgba(123,92,224,0.16)'; g.beginPath(); g.arc(ix, iy, 11 * u, 0, Math.PI * 2); g.fill() }
         P.drawIcon(g, FX[k].card, ix, iy, 16 * u, P.CAT_COLORS[FX[k].card[0]])
         if (p.fx[k].t) this.text(String(p.fx[k].t), ix + 8 * u, iy - 6 * u, { size: 10 })
+        fxHits.push({ key, x: ix - 10 * u, y: iy - 11 * u, w: 20 * u, h: 22 * u, fx: { p: i, k }, action: () => this.openFx(i, [k], ix, iy) })
       })
-      else if (fx.length) this.text('✦' + fx.length, hx - 22 * u, cy + rowH / 2, { size: 12, color: '#7b5ce0', align: 'center' })
+      else if (fx.length) {
+        // on a phone the count stands for them: a tap shows them all
+        this.text('✦' + fx.length, hx - 22 * u, cy + rowH / 2, { size: 12, color: '#7b5ce0', align: 'center' })
+        fxHits.push({ key: 'fx' + i, x: hx - 36 * u, y: cy, w: 28 * u, h: rowH, action: () => this.openFx(i, fx, hx - 22 * u, cy + rowH / 2) })
+      }
       if (valid) this.hits.push({ key: 'pl' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.chooseTarget(i) })
       else if (this.wardedAt(i)) this.hits.push({ key: 'ward' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.sayWarded(i) })
+      if (!this.target) this.hits.push(...fxHits)
     })
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
     this.panelBottom = panelBottom
@@ -1704,6 +1715,22 @@ export class UI {
   /** The peeked hand stays until the end of the turn; I can put it away sooner, and then the turn ends after the roll as usual. */
   peekKey(s) { return s?.peek ? `${s.gid}:${s.turnNo}:${s.peek.tg}` : null }
   closePeek() { if (this.peekRect) { this.peekClosed = this.peekKey(this.app.view.state); this.dirty = true; this.sendUnpeek(); return true } return false }
+  /** A player's effects (keys of fx) shown as their cards, coming from x, y (the icon clicked) until ✕ or a click beside them. */
+  openFx(p, keys, x, y) {
+    const s = this.app.view.state
+    if (!s || !keys.length) return
+    this.fxOpen = { gid: s.gid, p, keys, x, y }
+    this.app.sfx('draw', 0.3)
+    this.dirty = true
+  }
+  closeFx() { if (this.fxOpen) { this.fxOpen = null; this.dirty = true; return true } return false }
+  /** The effects window on screen: it goes with its game, a hand passed on or the game over; it waits under the menu. */
+  fxShown() {
+    const f = this.fxOpen, app = this.app, s = app.view.state
+    if (!f) return null
+    if (app.screen !== 'game' || !s || s.gid !== f.gid || s.ph === 'over' || app.curtain() >= 0) { this.fxOpen = null; this.dirty = true; return null }
+    return app.menuOpen || app.invite ? null : f
+  }
   /** Tells the rules the peeked hand is put away, once the table is still (it may be busy when the window closes). */
   sendUnpeek() {
     const app = this.app, s = app.view.state, me = app.mySeat()
@@ -1732,6 +1759,12 @@ export class UI {
       this.panel(r.x - 14 * u, r.y - head, r.w + 28 * u, r.h + head + 14 * u, { fill: 'rgba(255,253,248,0.96)', stroke: P.CAT_COLORS.C, lw: 3 })
       this.text(T.chooseCard, r.x + r.w / 2, top + t1 / 2, { size: 17, align: 'center', color: '#2d3a6b' })
       this.text(T.chooseCardHint, r.x + r.w / 2, top + t1 + this.lineH(12, 19) / 2, { size: 12, align: 'center', bold: false, color: '#5b544c', max: r.w + 20 * u })
+    }
+    const fr = this.fxShown() && this.fxRect
+    if (fr) this.drawFxWindow(fr)
+    else if (!this.touch && !app.menuOpen) {
+      const h = this.hits.find(h => h.fx && h.key === this.hover)
+      if (h) this.drawFxTip(h)
     }
     const curtain = app.curtain()
     if (curtain >= 0) this.drawCurtain(s.pl[curtain])
@@ -1764,6 +1797,49 @@ export class UI {
       if (!web) this.button('exitcity', T.exitCity, bx, my + 256 * u, bw, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
       keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * klh, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
     }
+  }
+
+  /** A player's effects as their cards (the cards themselves go over it, see layoutCards): ✕ or a click beside it closes it. */
+  drawFxWindow(r) {
+    const s = this.app.view.state, u = this.u
+    this.modal = true
+    this.hits.push({ key: 'block', x: -this.ox, y: -this.oy, w: this.FW, h: this.FH, action: () => this.closeFx() })
+    this.fillScreen('rgba(30,26,22,0.3)')
+    const x = r.x - 16 * u, y = r.y - r.head, w = r.w + 32 * u, h = r.head + r.h + r.foot
+    this.panel(x, y, w, h, { fill: 'rgba(255,253,248,0.97)', stroke: 'rgba(43,38,34,0.25)' })
+    this.hits.push({ key: 'block', x, y, w, h, action: () => {} }) // (a click on the window itself leaves it open)
+    const cb = 34 * u
+    this.text(T.effectsOf(s.pl[r.p].n, r.notes.length), x + w / 2, y + r.head / 2, { size: 16, align: 'center', max: w - 2 * cb - 16 * u })
+    r.notes.forEach((t, k) => {
+      const cx = r.x + r.pw / 2 + k * r.pw * r.gap
+      let ly = r.y + r.h + 10 * u + r.lh / 2
+      for (const l of t.lines) { this.text(l, cx, ly, { size: 13, align: 'center', bold: false, color: '#5b544c' }); ly += r.lh }
+      if (t.left) this.text(t.left, cx, ly, { size: 13, align: 'center', color: t.gone ? '#9a948a' : '#7b5ce0', max: r.pw * 1.04 })
+    })
+    this.button('fxclose', '✕', x + w - cb - 6 * u, y + 6 * u, cb, cb, () => this.closeFx(), { size: 15 })
+  }
+  /** The effect under the pointer in the players panel: its card's name, what it does to the player, the turns it has left. */
+  drawFxTip(h) {
+    const s = this.app.view.state, u = this.u, { p, k } = h.fx, v = s.pl[p].fx[k]
+    if (!v) return
+    const card = CARD[FX[k].card], pad = 10 * u
+    const tw = Math.min(this.W - 12 * u, 240 * u)
+    const lines = this.wrap(T.fxHint[k](card), 12.5, tw - 2 * pad, false), lh = this.lineH(12.5, 16)
+    const left = v.t && k !== 'gr' ? T.turnsLeft(v.t) : null
+    const th = pad * 2 + this.lineH(14.5, 19) + (lines.length + (left ? 1 : 0)) * lh + this.lineH(11.5, 16) + 4 * u
+    // under the icon, kept on the screen; over it where there is no room under it
+    const tx = THREE.MathUtils.clamp(h.x + h.w / 2 - tw / 2, 6 * u, this.W - tw - 6 * u)
+    const below = h.y + h.h + 4 * u
+    const ty = below + th <= this.H - 6 * u ? below : Math.max(6 * u, h.y - th - 4 * u)
+    this.panel(tx, ty, tw, th, { fill: 'rgba(255,253,248,0.98)', stroke: P.CAT_COLORS[card.id[0]], lw: 2, r: 10 })
+    let y = ty + pad + this.lineH(14.5, 19) / 2
+    P.drawIcon(this.g, card.id, tx + pad + 8 * u, y, 16 * u, P.CAT_COLORS[card.id[0]])
+    this.text(card.name, tx + pad + 22 * u, y, { size: 14.5, max: tw - 2 * pad - 22 * u })
+    y += this.lineH(14.5, 19) / 2 + lh / 2
+    for (const l of lines) { this.text(l, tx + pad, y, { size: 12.5, bold: false, color: P.INK }); y += lh }
+    if (left) { this.text(left, tx + pad, y, { size: 12.5, color: '#7b5ce0' }); y += lh }
+    this.text(T.fxSeeCard, tx + pad, y - lh / 2 + 4 * u + this.lineH(11.5, 16) / 2, { size: 11.5, bold: false, color: '#8a8378' })
+    this.fxTip = true
   }
 
   /** Several players at one computer: the next one takes it before their hand shows. */
@@ -1993,6 +2069,8 @@ export class UI {
     const want = []
     const me = app.mySeat()
     const hide = app.curtain() >= 0 || !!app.invite
+    // a player's effects shown as their cards (openFx): over everything, the peeked hand and the offer wait under it
+    const fxOn = this.fxShown()
     if (app.screen === 'game' && s && me >= 0 && !hide && !(s.mode === 'fool' && s.pl[me].d)) {
       // keyed by card and occurrence, so the rest keep their meshes when one leaves
       const seen = {}
@@ -2003,17 +2081,18 @@ export class UI {
       })
     }
     this.peekRect = null
-    const peeking = app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide && !app.menuOpen && this.peekClosed !== this.peekKey(s)
+    const peeking = app.screen === 'game' && s && s.peek && s.peek.by === me && me >= 0 && s.cur === me && !hide && !app.menuOpen && !fxOn && this.peekClosed !== this.peekKey(s)
     if (peeking) {
       s.pl[s.peek.tg].h.forEach((id, i) => want.push({ id, key: 'p' + i + id, i, kind: 'peek', n: s.pl[s.peek.tg].h.length }))
     }
     // Choose Your Card: the cards offered, in a window over the hand
-    const offering = app.screen === 'game' && s && s.ph === 'take' && s.offer && me >= 0 && s.cur === me && !hide && !app.menuOpen && !(this.took && this.took.seq === s.seq && this.time - this.took.at < 3)
+    const offering = app.screen === 'game' && s && s.ph === 'take' && s.offer && me >= 0 && s.cur === me && !hide && !app.menuOpen && !fxOn && !(this.took && this.took.seq === s.seq && this.time - this.took.at < 3)
     if (offering) s.offer.forEach((id, i) => want.push({ id, key: 'o' + i + id, i, kind: 'offer' }))
     // Echo: the card each player played last, by their row in the players panel
     const echoing = app.screen === 'game' && s && this.target?.echo && !this.target.echo.card && !hide && !app.menuOpen
     if (echoing) s.pl.forEach((p, i) => { if (p.lc && !p.d && this.rowRect[i]) want.push({ id: p.lc, key: 'e' + i + p.lc, i, kind: 'echo' }) })
     if (app.screen === 'help' && this.helpPage === 1) CATALOG.forEach((c, i) => want.push({ id: c.id, key: 'c' + c.id, i, kind: 'catalog' }))
+    if (fxOn) fxOn.keys.forEach((k, i) => want.push({ id: FX[k].card, key: 'f' + i + k, i, kind: 'fx' }))
     // keep meshes whose key stays, add new ones, drop the rest
     const next = []
     for (const w of want) {
@@ -2022,6 +2101,7 @@ export class UI {
         c = { ...w, mesh: this.makeCard(w.id), x: this.W + 80 * this.u, y: this.H - 60 * this.u, s: 0.4 }
         if (w.kind === 'catalog' || w.kind === 'peek' || w.kind === 'offer') { c.x = this.W / 2; c.y = this.H / 2; c.s = 0.2 }
         if (w.kind === 'echo') { const r = this.rowRect[w.i]; c.x = r.x + r.w; c.y = r.y + r.h / 2; c.s = 0.2 }
+        if (w.kind === 'fx') { c.x = fxOn.x; c.y = fxOn.y; c.s = 16 * this.u } // (it grows out of the icon clicked)
         // the card kept from an offer comes down from where it lay
         if (w.kind === 'hand' && this.took && this.took.id === w.id && this.time - this.took.at < 3) { c.x = this.took.x; c.y = this.took.y; c.s = this.took.s; this.took = null }
       }
@@ -2104,9 +2184,30 @@ export class UI {
       c.ty = Math.max(w * 0.7 + 4 * u, r.y + r.h / 2)
       c.ts = w; c.rot = hov ? 0 : 0.05; c.dim = this.target?.list.includes(c.i) ? 0 : 1; c.lift = hov ? 0.6 : 0; c.z = hov ? 30 : 14
     }
+    const fxc = this.cards.filter(c => c.kind === 'fx')
+    this.fxRect = null
+    if (fxc.length) {
+      // big enough to read, side by side as far as the screen lets them; under each, what it does to the player
+      const n = fxc.length, head = 46 * u, lh = this.lineH(13, 17), gap = 1.1
+      const pw = Math.min(Math.max(cw, CARD_READ) * 1.1, (W - 48 * u) / (n * gap), (H - head - 5 * lh - 40 * u) / 1.4)
+      const p = s.pl[fxOn.p]
+      const notes = fxOn.keys.map(k => ({
+        lines: this.wrap(T.fxHint[k](CARD[FX[k].card]), 13, pw * 1.04, false),
+        // (the Grail's ward says itself how long it lasts)
+        left: !p.fx[k] ? T.fxGone : p.fx[k].t && k !== 'gr' ? T.turnsLeft(p.fx[k].t) : null,
+        gone: !p.fx[k],
+      }))
+      const foot = Math.max(...notes.map(t => t.lines.length + (t.left ? 1 : 0))) * lh + 20 * u
+      const top = Math.max(8 * u, (H - head - pw * 1.4 - foot) / 2)
+      const x0 = W / 2 - (n - 1) / 2 * pw * gap, y = top + head + pw * 0.7
+      fxc.forEach((c, k) => { c.tx = x0 + k * pw * gap; c.ty = y; c.ts = pw; c.rot = 0; c.dim = notes[c.i].gone ? 1 : 0; c.lift = 0; c.z = 70 })
+      this.fxRect = { x: x0 - pw / 2, y: y - pw * 0.7, w: (n - 1) * pw * gap + pw, h: pw * 1.4, head, foot, lh, pw, gap, notes, p: fxOn.p }
+    }
     // the window behind the cards is drawn only on a redraw: one when it moves (a resize)
     const offerKey = this.offerRect ? [this.offerRect.x, this.offerRect.y, this.offerRect.w].map(Math.round).join() : ''
     if (offerKey !== this.offerKey) { this.offerKey = offerKey; this.dirty = true }
+    const fxKey = this.fxRect ? [this.fxRect.x, this.fxRect.y, this.fxRect.w, this.fxRect.foot].map(Math.round).join() + this.fxRect.notes.map(t => t.left).join() : ''
+    if (fxKey !== this.fxKey) { this.fxKey = fxKey; this.dirty = true }
     const cat = this.cards.filter(c => c.kind === 'catalog')
     if (cat.length) {
       const pw = Math.min(W - 20 * u, 780 * u), ph = Math.min(H - 20 * u, 600 * u)

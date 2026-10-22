@@ -500,8 +500,8 @@ class App {
   }
   /** A click the tip does not let through: the tip shakes. */
   nudge() { this.ui.kickTip() }
-  /** Back in a game (Escape, Backspace, the right button): a card waiting for its target goes back, else another player's hand closes. */
-  backInGame() { if (this.ui.target) this.ui.cancelTarget(); else this.ui.closePeek() }
+  /** Back in a game (Escape, Backspace, the right button): the effects' cards close, else a card waiting for its target goes back, else another player's hand closes. */
+  backInGame() { if (this.ui.closeFx()) return; if (this.ui.target) this.ui.cancelTarget(); else this.ui.closePeek() }
   /** The game menu's Main Menu: during the First Match it asks first whether to skip the tips. */
   leaveGame() {
     if (this.tut?.active) { this.confirmSkip = true; this.ui.dirty = true; return }
