@@ -2,7 +2,8 @@
 // The game in experience/ never looks at the site itself: it reads the profile and calls the hooks
 // through p0.web (Project 0 has no p0.web, so there every call is skipped). An SDK plugs in here,
 // with provide({ ... }) in place of the no-op hooks, and nothing in the game changes.
-// On CrazyGames the SDK v3 does so for online play: invite links, the room the player is in, instant multiplayer.
+// On CrazyGames the SDK v3 does so: loading, gameplay start and stop, happytime, and online play (invite
+// links, the room the player is in, instant multiplayer). No ads: midgameAd stays as it is.
 //
 // The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames (to try it
 // locally), else 'pages'. With ?platform=… or ?debug the profile and every hook call go to the console.
@@ -119,6 +120,11 @@ async function crazyGames() {
   // updateRoom is the SDK's way now; the invite button is what older ones had
   const rooms = typeof game.updateRoom === 'function'
   provide({
+    loadingStart: () => game.loadingStart(),
+    loadingStop: () => game.loadingStop(),
+    gameplayStart: () => game.gameplayStart(),
+    gameplayStop: () => game.gameplayStop(),
+    happytime: () => game.happytime(),
     inviteLink: code => game.inviteLink({ [ROOM]: code }),
     inviteRoom: () => game.getInviteParam(ROOM),
     instantMultiplayer: () => !!game.isInstantMultiplayer,

@@ -1,6 +1,6 @@
 # CrazyGames submission: Cards, Snakes & Ladders
 
-Texts and form answers for the Basic Launch submission (no ads; since task 12 the build uses the SDK v3 for online play only). The final check run is at the end.
+Texts and form answers for the Basic Launch submission (no ads; since task 12 the build uses the SDK v3: loading, gameplay start and stop, happytime and online play). The final check run is at the end.
 
 Requirements: <https://docs.crazygames.com/requirements/intro/>
 
@@ -85,7 +85,7 @@ Pick the closest ones from the portal's list; "snakes and ladders" itself is a g
 
 | Question | Answer |
 |---|---|
-| Uses the CrazyGames SDK | Yes, v3, for online play only: invite links, the room and whether it can be joined (`updateRoom`), instant multiplayer, the join room listener. No ads, user or data modules. Without the SDK (an ad blocker) rooms go by their code. |
+| Uses the CrazyGames SDK | Yes, v3: loadingStart/Stop, gameplayStart/Stop, happytime; for online play invite links, the room and whether it can be joined (`updateRoom`), instant multiplayer, the join room listener. No ads, user or data modules. Without the SDK (an ad blocker) rooms go by their code. |
 | Multiplayer | Yes: online and local. |
 | Multiplayer type | Real-time turn-based over WebRTC peer-to-peer (PeerJS), with public MQTT brokers as a relay when two players can't connect directly. No game server of our own. |
 | Lobby / room size | A table seats 2 to 6 (players and bots). Quick Match tables: 4 (5 on the 100-cell board); the game starts at once with bots in the empty seats, and players who come later take the bots' seats. A private room takes up to 12 people (6 seated, the rest watch); a Quick Match room up to 6. |
@@ -182,7 +182,7 @@ Driven by a script over the DevTools protocol in headless Edge and Chrome (fresh
 ## Steps in the Developer Portal (by hand)
 
 1. `python tools/build_cg.py` on the commit you submit; take `dist/crazygames.zip`.
-2. Developer Portal (<https://developer.crazygames.com>): sign in, Upload new game, choose **Basic Launch** (the SDK is used for online play only, no ads).
+2. Developer Portal (<https://developer.crazygames.com>): sign in, Upload new game, choose **Basic Launch** (the SDK is used without ads).
 3. Upload the zip; set **HTML5**, the main file `index.html` at the root of the archive.
 4. Open the portal's **preview**: check the game in their iframe (desktop and the mobile preview), the menu, a First Match, Online with a room code. Look at it on a real phone (iOS Safari and Android Chrome) if you can: not checked here.
 5. Fill in the texts from this file: title, short and full description, controls (the short version fits their Controls field).

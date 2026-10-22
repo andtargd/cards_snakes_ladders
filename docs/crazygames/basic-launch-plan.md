@@ -253,10 +253,10 @@ tools/build_cg.*     (новое) сборка dist/crazygames/ и zip для з
 - `updateRoom({ roomId, isJoinable, inviteParams })` при входе в комнату и когда меняется, можно ли в неё войти (правило то же, что у net.js при входе: не полна, у quick-стола во время игры бот держит место), `leftRoom()` при выходе; старый SDK без updateRoom — `showInviteButton` / `hideInviteButton`;
 - `isInstantMultiplayer`: без меню и First Match — в комнату из приглашения или в новую свою (режим и поле из настроек Online);
 - `addJoinRoomListener`: выйти из текущей комнаты (соло-партия откладывается и возвращается после комнаты) и войти в новую;
-- rematch в той же комнате, доступность комнаты обновляется после партии.
+- rematch в той же комнате, доступность комнаты обновляется после партии;
+- `game.loadingStart/Stop`, `gameplayStart/Stop`, `happytime` (победа) — в уже расставленные хуки (их ждёт автоматическая проверка QA «First gameplay start»).
 
 Осталось (не сейчас):
-- `game.loadingStart/Stop`, `gameplayStart/Stop`, `happytime` (победа) — в уже расставленные хуки;
 - midgame ad в хуке «между партиями», с глобальным mute и блокировкой ввода до `adFinished`/`adError`;
 - rewarded ad — только если появится подходящая награда (например, лишняя карта в соло), не в онлайне;
 - `user`: имя и аватар CrazyGames вместо поля имени (hooks.getUser), автологин;
