@@ -1,6 +1,6 @@
 # Cards, Snakes & Ladders
 
-Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck of 25 cards that bend the board, the dice and your rivals. Written in plain JavaScript on top of [three.js](https://threejs.org) — no build step.
+Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck of 32 cards that bend the board, the dice and your rivals. Written in plain JavaScript on top of [three.js](https://threejs.org) — no build step.
 
 **Play:** <https://andtargd.github.io/cards_snakes_ladders/>
 
@@ -45,7 +45,7 @@ It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `in
 
 To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build.
 
-`tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
+`tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down; `?src=../dist/crazygames/index.html` shoots the build instead of `index.html`). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
 
 ## Project structure
 

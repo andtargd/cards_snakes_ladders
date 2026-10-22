@@ -1,5 +1,5 @@
 // Every piece of text the game shows, in one table (English only for now). Card names and texts are in cards.config.js.
-import { CFG } from './rules.js'
+import { CFG, SELF } from './rules.js'
 
 const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th')
 
@@ -91,7 +91,6 @@ export const T = {
   weekTable: "This week's best",
   youHost: 'You host this table',
   hostIs: name => `${name} hosts this table`,
-  you: 'you',
   takeSeat: 'Take a Seat',
   leaveSeat: 'Leave Seat',
   invite: 'Invite',
@@ -145,8 +144,9 @@ export const T = {
   atStart: 'At the start',
   cellTier: c => `Cell ${c} · Tier ${Math.floor((c - 1) / 10) + 1}`,
   cellShort: c => (c <= 0 ? 'Start' : `Cell ${c}`),
-  wins: name => `${name} wins!`,
-  isFool: name => `${name} is the Fool!`,
+  wins: name => (name === SELF ? 'You win!' : `${name} wins!`),
+  isFool: name => (name === SELF ? 'You are the Fool!' : `${name} is the Fool!`),
+  mine: name => (name === SELF ? name : `${name} (you)`), // the name of the player at this screen
   chooseTarget: 'Choose a target',
   chooseTwoCells: 'Choose two free cells, up to your own',
   // the soft message in the middle of the screen while a card waits for its target

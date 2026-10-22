@@ -97,7 +97,7 @@ class LocalTable {
       const seed = (Math.random() * 2 ** 31) >>> 0
       const botNames = shuffle([...BOT_NAMES], seed)
       const players = []
-      for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: names[0] || p0.me.name || 'You', b: 0, id: p0.me.id, c: 0 } : { n: names[i] || T.playerN(i + 1), b: 0, id: null, c: i })
+      for (let i = 0; i < humans; i++) players.push(i === 0 ? { n: names[0] || p0.me.name || R.SELF, b: 0, id: p0.me.id, c: 0 } : { n: names[i] || T.playerN(i + 1), b: 0, id: null, c: i })
       for (let i = 0; i < bots; i++) players.push({ n: botNames[i], b: level, c: players.length })
       this.s = first ? createFirstGame(players) : R.createGame({ seed, mode, players, cells: size })
       this.s.gid = seed // (the First Match's board comes from a few seeds: the game's id is its own)

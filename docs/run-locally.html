@@ -209,12 +209,13 @@
   <p>Нужный размер можно сразу передать в адресе: <a href="http://localhost:5500/tools/cgframe.html?size=800x450"><code>cgframe.html?size=800x450</code></a>.</p>
 
   <h3>Снимки всех экранов на всех размерах</h3>
-  <p><a href="http://localhost:5500/tools/shots.html?sizes=821x462,390x844&amp;screens=menu,game"><code>tools/shots.html</code></a> по очереди открывает игру (<code>index.html</code>, не сборку) в рамке каждого размера при DPR 1, выводит на экран меню, Solo Play, Pass &amp; Play, Online, How to Play, The Cards, партию на 6 игроков на поле 100, руку из 4 карт, выбор цели, лог, конец партии, игровое меню и другие, и сохраняет PNG в <code>tmp/shots/now/</code>. Полный прогон (10 размеров QA и 3 телефонных) идёт около 12 минут.</p>
+  <p><a href="http://localhost:5500/tools/shots.html?sizes=821x462,390x844&amp;screens=menu,game"><code>tools/shots.html</code></a> по очереди открывает игру (по умолчанию <code>index.html</code>; сборку — с <code>src=</code>) в рамке каждого размера при DPR 1, выводит на экран меню, Solo Play, Pass &amp; Play, Online, How to Play, The Cards, партию на 6 игроков на поле 100, руку из 4 карт, выбор цели, лог, конец партии, игровое меню и другие, и сохраняет PNG в <code>tmp/shots/now/</code>. Полный прогон (10 размеров QA и 3 телефонных) идёт около 12 минут.</p>
   <div class="table-wrap"><table>
     <tr><th>Параметр</th><th>Что делает</th></tr>
     <tr><td><code>sizes=821x462,390x844</code></td><td>только эти размеры (по умолчанию все)</td></tr>
     <tr><td><code>screens=menu,game,target</code></td><td>только эти экраны (по умолчанию все; список в начале страницы)</td></tr>
     <tr><td><code>out=tmp/shots/after</code></td><td>куда сохранить</td></tr>
+    <tr><td><code>src=../dist/crazygames/index.html</code></td><td>какую страницу снимать, относительно <code>tools/</code> (по умолчанию <code>../index.html</code>); так снимается собранная версия для CrazyGames</td></tr>
     <tr><td><code>dpr=2</code></td><td>плотность пикселей (по умолчанию 1)</td></tr>
     <tr><td><code>safe=47,0,34,0</code></td><td>изобразить вырез и полоску «домой» телефона: отступы сверху, справа, снизу, слева</td></tr>
   </table></div>

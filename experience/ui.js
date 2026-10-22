@@ -2,7 +2,7 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, CFG, SIZES } from './rules.js'
+import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, CFG, SIZES, SELF } from './rules.js'
 import { T } from './strings.js'
 
 /** The cards page of How to Play: by category, and within one from Common to Legendary. */
@@ -1453,7 +1453,7 @@ export class UI {
       this.text(tag, right - tw / 2, cy + 1, { size: 11.5, align: 'center', color: bot ? '#2d3a6b' : '#1f7a55' })
       right -= tw + 6 * u
     }
-    this.text(s.n + (mine ? ` (${T.you})` : ''), x + 38 * u, cy + 1, { size: 14.5, max: right - x - 38 * u })
+    this.text(mine ? T.mine(s.n) : s.n, x + 38 * u, cy + 1, { size: 14.5, max: right - x - 38 * u })
     if (rm) this.iconButton('rm' + i, x + w - 8 * u - rm, cy - rm / 2, rm, () => this.app.lobbyCmd({ t: 'remove', seat: i }), (mx, my, sz, col) => this.cross(mx, my, sz * 0.55, col))
   }
 
@@ -1568,7 +1568,7 @@ export class UI {
         this.text(sub, nx, cy + rowH * 0.71, { size: 11.5, bold: false, color: '#5b544c', max: colW - rowH - 34 * u })
       } else {
         // (a Quick Match table's bots, keeping their seats for players, sit there as players do)
-        this.text(p.n + (i === me && !hot ? ` (${T.you})` : '') + (p.b && !p.f ? ' · bot' : ''), nx, cy + rowH / 3, { size: 14.5, max: colW - rowH - 50 * u })
+        this.text((i === me && !hot ? T.mine(p.n) : p.n) + (p.b && !p.f ? ' · bot' : ''), nx, cy + rowH / 3, { size: 14.5, max: colW - rowH - 50 * u })
         // the cell and tier, or only the cell where the text (kept big on a small screen) would run into the effects
         const nfx = Math.min(5, Object.keys(p.fx).filter(k => FX[k]).length)
         const room = cx + colW - 26 * u - (nfx ? 34 * u + (nfx - 1) * 20 * u : 12 * u) - 4 * u - nx
@@ -2032,8 +2032,10 @@ export class UI {
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.97)' })
     const champ = s.mode === 'champion'
     const title = champ ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
-    this.text(title, W / 2, y + 34 * u, { size: 24, align: 'center', color: champ ? '#c99400' : '#d64545', max: pw - 30 * u })
-    if (me >= 0) this.text(champ ? (s.res.winner === me ? T.youWon : T.youFinished(s.res.places[me])) : (s.res.fool === me ? T.youAreFool : T.youFinished(s.res.places[me])), W / 2, y + 66 * u, { size: 15, align: 'center', bold: false })
+    // (a title that already speaks to this screen's player, "You win!", needs no line under it: it takes that line's place too)
+    const toMe = me >= 0 && (champ ? s.res.winner : s.res.fool) === me && s.pl[me].n === SELF
+    this.text(title, W / 2, y + (toMe ? 50 : 34) * u, { size: 24, align: 'center', color: champ ? '#c99400' : '#d64545', max: pw - 30 * u })
+    if (me >= 0 && !toMe) this.text(champ ? (s.res.winner === me ? T.youWon : T.youFinished(s.res.places[me])) : (s.res.fool === me ? T.youAreFool : T.youFinished(s.res.places[me])), W / 2, y + 66 * u, { size: 15, align: 'center', bold: false })
     if (s.res.limit) this.text(T.roundLimit, W / 2, y + 88 * u, { size: 12, align: 'center', bold: false, color: '#5b544c' })
     const order = s.pl.map((p, i) => i).sort((a, b) => s.res.places[a] - s.res.places[b])
     order.forEach((i, k) => {
@@ -2042,7 +2044,7 @@ export class UI {
       this.g.beginPath(); this.g.arc(x + 34 * u, ry + 14 * u, 9 * u, 0, Math.PI * 2); this.g.fill()
       const place = !champ && s.res.fool === i ? 'Fool' : `#${s.res.places[i]}`
       this.text(place, x + 54 * u, ry + 14 * u, { size: 15 })
-      this.text(p.n + (i === me ? ` (${T.you})` : ''), x + 110 * u, ry + 14 * u, { size: 15, bold: i === me, max: pw - 220 * u })
+      this.text(i === me ? T.mine(p.n) : p.n, x + 110 * u, ry + 14 * u, { size: 15, bold: i === me, max: pw - 220 * u })
       this.text(p.d && !champ ? T.finished : p.pos >= (s.n || 100) ? String(s.n || 100) : T.cellShort(p.pos), x + pw - 30 * u, ry + 14 * u, { size: 13, align: 'right', bold: false })
     })
     let yy = y + 106 * u + s.pl.length * 34 * u + 6 * u

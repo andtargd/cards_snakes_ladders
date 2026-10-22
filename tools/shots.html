@@ -9,7 +9,8 @@
   the text reads and nothing is cut off or covered. Needs tools/server.py (it saves through /save/).
   tools/shots.html?out=tmp/shots/now&sizes=821x462,390x844&screens=menu,game&dpr=1&safe=0,44,0,44
   sizes, screens: lists (default: all); dpr: the game's pixel ratio (default 1); safe: safe-area insets
-  top,right,bottom,left in px to pretend (a phone's notch). Results: window.results, await window.done.
+  top,right,bottom,left in px to pretend (a phone's notch); src: the page to shoot, relative to this one
+  (default ../index.html; ../dist/crazygames/index.html for the CrazyGames build). Results: window.results, await window.done.
 -->
 <style>
   html, body { margin: 0; background: #20232a; color: #ddd; font: 13px system-ui, sans-serif; }
@@ -113,7 +114,7 @@ async function shoot(size) {
   holder.append(f)
   const p = new URLSearchParams({ dpr })
   if (q.get('safe')) p.set('safe', q.get('safe'))
-  f.src = '../index.html?' + p
+  f.src = (q.get('src') || '../index.html') + '?' + p
   const w = await waitFor(() => f.contentWindow.__csl && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false && f.contentWindow, 40000, size + ' loaded')
   const app = w.__csl
   app.sound.on = false

@@ -431,6 +431,8 @@ function log(s, ev, text) {
   ev.push({ e: 'log', text: addLog(s, text) })
 }
 const nm = (s, i) => s.pl[i].n
+/** The name of the player at this screen who gave none (Solo Play, the First Match): "You win!", not "You wins!". */
+export const SELF = 'You'
 
 /** A rarity by its weight (rarities without cards in the deck left out), then a card of it by the cards' weights. */
 function drawCard(s) {
@@ -555,8 +557,9 @@ function gameOver(s, ev, extra) {
     s.res = { mode: 'fool', fool, order: [...s.fin], places, ...extra }
   }
   ev.push({ e: 'over', res: s.res })
-  if (s.mode === 'champion') log(s, ev, `${nm(s, s.res.winner)} wins!`)
-  else log(s, ev, `${nm(s, s.res.fool)} is the Fool!`)
+  const self = nm(s, s.mode === 'champion' ? s.res.winner : s.res.fool) === SELF
+  if (s.mode === 'champion') log(s, ev, self ? 'You win!' : `${nm(s, s.res.winner)} wins!`)
+  else log(s, ev, self ? 'You are the Fool!' : `${nm(s, s.res.fool)} is the Fool!`)
 }
 
 function endByLimit(s, ev) {
