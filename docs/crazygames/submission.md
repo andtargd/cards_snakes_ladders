@@ -105,7 +105,7 @@ Pick the closest ones from the portal's list; "snakes and ladders" itself is a g
 ## Files to upload
 
 - Game: `dist/crazygames.zip` from `python tools/build_cg.py` (56 files, 2.97 MB unpacked, 0.77 MB zipped; `index.html` at the root).
-- Covers: `docs/crazygames/media/cover-slant-1920x1080.png`, `cover-slant-800x1200.png`, `cover-slant-800x800.png`.
+- Covers: `docs/crazygames/media/cover-burst-sl-1920x1080.png`, `cover-burst-sl-800x1200.png`, `cover-burst-sl-800x800.png`.
 - Videos: `docs/crazygames/media/trailer-1920x1080.mp4` and `trailer-1080x1620.mp4` (not in git; rebuild with `tools/trailer.html`).
 
 ## Final check run
@@ -188,6 +188,6 @@ Driven by a script over the DevTools protocol in headless Edge and Chrome (fresh
 5. Fill in the texts from this file: title, short and full description, controls (the short version fits their Controls field).
 6. Category and tags (above); mobile: yes, orientation: landscape (or both, if the form allows).
 7. Form questions: answers from the table above (multiplayer yes, chat no, UGC names only with a filter, SDK for multiplayer only, no ads or purchases).
-8. Covers: `cover-slant-1920x1080.png`, `cover-slant-800x1200.png`, `cover-slant-800x800.png`; videos: `trailer-1920x1080.mp4`, `trailer-1080x1620.mp4` (all in `docs/crazygames/media/`).
+8. Covers: `cover-burst-sl-1920x1080.png`, `cover-burst-sl-800x1200.png`, `cover-burst-sl-800x800.png`; videos: `trailer-1920x1080.mp4`, `trailer-1080x1620.mp4` (all in `docs/crazygames/media/`).
 9. If the form asks for a privacy policy URL: the policy ships inside the build as `privacy.html`; the GitHub Pages copy is `https://andtargd.github.io/cards_snakes_ladders/privacy.html` (only as a URL in the form, never as a link inside the game).
 10. Submit for QA; answer QA feedback in the portal.

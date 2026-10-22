@@ -7,7 +7,7 @@
 <!--
   The CrazyGames covers (tools/cover.js): every composition at every size, shown here and saved as PNGs
   through tools/server.py's /save/.
-  tools/covers.html?v=climb,slant,close&sizes=1920x1080,800x1200,800x800&out=tmp/covers
+  tools/covers.html?v=climb,slant,close,burst,burst-sl&sizes=1920x1080,800x1200,800x800&out=tmp/covers
   v: compositions (default: all); sizes (default: the three CrazyGames asks for); out: a folder under tmp/
   or docs/crazygames/media/ (default tmp/covers; out=0 saves nothing); numbers=1 keeps the cells' numbers.
   Files: <out>/cover-<v>-<W>x<H>.png. Results: window.results, await window.done.
@@ -33,7 +33,7 @@
 <script type="module">
 import { renderCover, VARIANTS } from './cover.js'
 const q = new URLSearchParams(location.search)
-const variants = q.get('v') ? q.get('v').split(',') : Object.keys(VARIANTS)
+const variants = q.get('v') ? q.get('v').split(',') : [...Object.keys(VARIANTS), 'burst', 'burst-sl']
 const sizes = (q.get('sizes') || '1920x1080,800x1200,800x800').split(',')
 const out = (q.get('out') ?? 'tmp/covers').replace(/^\/+|\/+$/g, '')
 const numbers = q.get('numbers') === '1'
