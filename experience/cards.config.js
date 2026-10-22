@@ -194,6 +194,16 @@ export default {
       popup: { text: 'Shield!', color: '#2b8fd6' }, // over the player when it blocks a snake
       text: 'A player ignores the next snake they land on. Lasts {turns} turns.',
     },
+    P4: {
+      name: 'Holy Grail', rarity: 'L', weight: 1, enabled: true,
+      target: 'current_player',
+      // every effect on the player goes; then, for this many rounds (until their own turn comes again), no
+      // other player can play on them the Hinder cards, Dash, Setback, Swap Places, Rewind, Steal or Swap
+      // Hands (fix the text if you change it)
+      rounds: 1,
+      popup: { text: 'Blessed!', color: '#c99400' }, // over the player as it clears their effects
+      text: 'Clear every effect on you. Until your next turn no one else can hinder, move or rob you.',
+    },
 
     // ---------- Hand ----------
     C1: {

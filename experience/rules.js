@@ -38,14 +38,17 @@ const KINDS = {
   D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
   B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
   H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'], H5: ['H', 'leader'],
-  P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'],
+  P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'], P4: ['P', 'any'],
   C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'], C6: ['C', 'echo'],
 }
 // a card's `target` in cards.config.js, for the cards played on a player
 const TARGETS = { any_player: 'any', not_current_player: 'other', current_player: 'self' }
 // Swap Places and the hand cards make no sense on oneself: they always go to another player
 const NOT_SELF = new Set(['M3', 'C2', 'C3', 'C4'])
-const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3 }
+// what no one else can play on a player under the Holy Grail: the Hinder cards, the cards that move them
+// (Dash, Setback, Swap Places, Rewind) and those that take their cards (Steal, Swap Hands)
+const WARDED = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'M1', 'M2', 'M3', 'M6', 'C3', 'C4'])
+const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3, rounds: 1 }
 /** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
 const ALL = Object.entries(KINDS).map(([id, [cat, kind]]) => {
   const c = { ...DEFAULTS, ...DECK.cards[id] }
@@ -61,7 +64,7 @@ const BY_RARITY = { C: [], U: [], R: [], L: [] }
 for (const c of CARDS) BY_RARITY[c.rar].push(c.id)
 
 // effects shown over a player: key in fx -> label
-export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', pk: 'D5', sl: 'H1', fz: 'H2', sk: 'H3', bk: 'H4', pa: 'P1', bo: 'P2', sh: 'P3', cc: 'C5' })
+export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', pk: 'D5', sl: 'H1', fz: 'H2', sk: 'H3', bk: 'H4', pa: 'P1', bo: 'P2', sh: 'P3', gr: 'P4', cc: 'C5' })
   .map(([k, card]) => [k, { name: CARD[card].name, card }]))
 const TIMED = ['pa', 'bo', 'sh']
 
@@ -459,6 +462,8 @@ function beginTurn(s, ev) {
     // and where the turn before began, for a player who has not moved since this one began
     if (p.st != null) { p.ps = p.st; p.ptr = p.tr || '' }
     p.st = p.pos; p.tr = ''; delete p.up
+    // the Holy Grail's rounds are counted at the start of its player's turns: the others have had theirs
+    if (p.fx.gr && --p.fx.gr.t <= 0) delete p.fx.gr
     s.turnNo++
     s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
     delete s.bonus
@@ -893,8 +898,9 @@ export function targetsFor(s, pi, cardId) {
     }
     case 'echo': return live.filter(i => echoable(s, pi, s.pl[i].lc))
     case 'leader': {
+      // (a leader under the Holy Grail stays the leader: Dethrone goes to no one else)
       const best = Math.max(...live.map(i => s.pl[i].pos))
-      return live.filter(i => s.pl[i].pos === best)
+      return live.filter(i => s.pl[i].pos === best && !warded(s, pi, cardId, i))
     }
     case 'cell': case 'cell2': {
       let free = freeCells(s)
@@ -913,10 +919,14 @@ export function targetsFor(s, pi, cardId) {
 }
 const INSTEAD_OF_ROLL = new Set(['M3', 'M5'])
 
+/** Whether the Holy Grail keeps pi's card off player q. */
+export const warded = (s, pi, cardId, q) => q !== pi && !!s.pl[q].fx.gr && WARDED.has(cardId)
+
 /** Whether a card played by pi on a player works on player q. */
 function fitsPlayer(s, pi, cardId, q) {
   const p = s.pl[q]
   if (NOT_SELF.has(cardId) && q === pi) return false
+  if (warded(s, pi, cardId, q)) return false
   switch (cardId) {
     case 'M5': return tailgateCell(s, q) != null
     case 'M6': return !!rewindOf(p) // Rewind: a player who stands elsewhere than where a turn of theirs began
@@ -975,6 +985,8 @@ export function whyNot(s, pi, cardId) {
   if (!targetsFor(s, pi, cardId).length) {
     if (cardId === 'M5') return 'No one ahead to tailgate'
     if (cardId === 'C6') return s.pl.some(q => q.lc && q.lc !== 'C6') ? 'No card to echo can be played now' : 'No card to echo yet'
+    const held = onBoard(s).find(q => warded(s, pi, cardId, q))
+    if (held != null) return `${nm(s, held)} is protected by ${CARD.P4.name}`
     return 'No valid targets'
   }
   return null
@@ -1159,6 +1171,14 @@ function cardEffect(s, pi, cardId, target, ev) {
     case 'P1': timed('pa'); break
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
+    case 'P4': {
+      // every effect on the player goes, good or bad; the Grail's own ward stays until their turn comes again
+      const gone = Object.keys(who.fx).filter(k => FX[k] && k !== 'gr')
+      who.fx = { gr: { t: Math.max(1, card.rounds | 0) } }
+      ev.push({ e: 'grail', p: target, gone })
+      if (gone.length) log(s, ev, `${who.n}'s effects are gone: ${gone.map(k => FX[k].name).join(', ')}`)
+      break
+    }
     case 'B1':
       s.mk = s.mk.filter(m => !(m.k === 'sw' && m.o === pi))
       s.mk.push({ k: 'sw', c: [target], o: pi, t: card.turns, f: 1 })
@@ -1250,6 +1270,7 @@ function standingValue(s, q, els) {
   if (p.fx.pa) v += 1.5 * (p.fx.pa.t || 1) / 2
   if (p.fx.bo) v += 0.4
   if (p.fx.fz) v -= 0.6
+  if (p.fx.gr) v += 1.5 // the others' attacks kept off for a round
   v += 0.6 * handValue(p.h)
   return v
 }
@@ -1388,13 +1409,14 @@ function sensible(s, pi, i, tg) {
     // more or heavier dice are wasted under Slow Down and take a Moonwalk further back
     case 'D1': case 'D3': return self ? !fx.sl && !fx.bk : !!fx.bk
     case 'M4': return self ? !fx.bk : !!fx.bk
-    case 'D2': case 'D4': case 'D5': case 'P1': case 'P2': case 'P3': return self
+    case 'D2': case 'D4': case 'D5': case 'P1': case 'P2': case 'P3': case 'P4': return self
     case 'H1': case 'H2': case 'H3': case 'H4': return !self
   }
   return true
 }
 
-const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M4'])
+// (the Holy Grail too: it lifts a Slow Down or a Moonwalk off this turn's roll)
+const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M4', 'P4'])
 /** The card a bot keeps of those Choose Your Card offers. */
 function bestOffer(s, pi, level) {
   const offer = s.offer || []

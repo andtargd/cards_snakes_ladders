@@ -460,6 +460,10 @@ export class View {
       }
       case 'swamp': this.tasks.push({ dur: 0, start: () => this.emit('swamp', e) }); this.cardPopup(e.p, 'B1', 'swamp'); break
       case 'shield': this.cardPopup(e.p, 'P3', 'shield'); break
+      case 'grail': // the camera goes to the piece, its effects burst off it
+        this.tasks.push({ dur: 0.35, start: () => this.focusOn(e.p), end: () => this.burst(tok(e.p).group.position, 40) })
+        this.cardPopup(e.p, 'P4', 'shield')
+        break
       case 'skip': this.cardPopup(e.p, 'H3', 'skip'); break
       case 'frozen': this.cardPopup(e.p, 'H2', 'skip'); break
       case 'ladder': case 'snake': {

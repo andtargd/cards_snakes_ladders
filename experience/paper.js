@@ -454,6 +454,30 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.strokeStyle = '#ffffff'; g.lineWidth = w * 0.8
       g.beginPath(); g.moveTo(x - s * 0.12, y); g.lineTo(x - s * 0.02, y + s * 0.1); g.lineTo(x + s * 0.14, y - s * 0.1); g.stroke()
       break
+    case 'P4': { // holy grail: a chalice with rays of light over it
+      const top = y - s * 0.08
+      g.lineWidth = w * 0.7
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI * (0.18 + i * 0.16)
+        g.beginPath(); g.moveTo(x + Math.cos(a) * s * 0.2, top + Math.sin(a) * s * 0.2); g.lineTo(x + Math.cos(a) * s * (i % 2 ? 0.28 : 0.33), top + Math.sin(a) * s * (i % 2 ? 0.28 : 0.33)); g.stroke()
+      }
+      // the bowl, its stem with a knot, the foot
+      g.beginPath()
+      g.moveTo(x - s * 0.27, top); g.lineTo(x + s * 0.27, top)
+      g.bezierCurveTo(x + s * 0.27, top + s * 0.18, x + s * 0.12, top + s * 0.24, x + s * 0.05, top + s * 0.25)
+      g.lineTo(x + s * 0.04, y + s * 0.3); g.quadraticCurveTo(x + s * 0.2, y + s * 0.31, x + s * 0.22, y + s * 0.39)
+      g.lineTo(x - s * 0.22, y + s * 0.39); g.quadraticCurveTo(x - s * 0.2, y + s * 0.31, x - s * 0.04, y + s * 0.3)
+      g.lineTo(x - s * 0.05, top + s * 0.25)
+      g.bezierCurveTo(x - s * 0.12, top + s * 0.24, x - s * 0.27, top + s * 0.18, x - s * 0.27, top)
+      g.closePath(); g.fill()
+      g.beginPath(); g.ellipse(x, y + s * 0.23, s * 0.075, s * 0.035, 0, 0, Math.PI * 2); g.fill()
+      // a light on the bowl, and a star of light over it
+      g.strokeStyle = '#ffffff'; g.lineWidth = w * 0.55; g.globalAlpha = 0.85
+      g.beginPath(); g.moveTo(x - s * 0.19, top + s * 0.05); g.quadraticCurveTo(x - s * 0.17, top + s * 0.15, x - s * 0.08, top + s * 0.19); g.stroke()
+      g.globalAlpha = 1
+      g.fillStyle = '#f3c548'; star(g, x, top - s * 0.04, s * 0.09, s * 0.035, 4); g.fill()
+      break
+    }
     case 'C1': { // redraw: a small stack of cards inside two arrows going round
       const cw = s * 0.2, ch = s * 0.28
       g.save(); g.translate(x - s * 0.035, y + s * 0.01); g.rotate(-0.22)

@@ -2,7 +2,7 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, choiceMax, diceThrown, CFG, SIZES } from './rules.js'
+import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, CFG, SIZES } from './rules.js'
 import { T } from './strings.js'
 
 /** The cards page of How to Play: by category, and within one from Common to Legendary. */
@@ -1587,6 +1587,7 @@ export class UI {
       })
       else if (fx.length) this.text('✦' + fx.length, hx - 22 * u, cy + rowH / 2, { size: 12, color: '#7b5ce0', align: 'center' })
       if (valid) this.hits.push({ key: 'pl' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.chooseTarget(i) })
+      else if (this.wardedAt(i)) this.hits.push({ key: 'ward' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.sayWarded(i) })
     })
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
     this.panelBottom = panelBottom
@@ -2356,6 +2357,13 @@ export class UI {
     const hov = x != null && t.list.includes(x) ? x : null
     if (hov !== t.hov) { t.hov = hov; this.syncHighlight() }
   }
+  /** A player the card being aimed can't go to because the Holy Grail is over them (a click on them says so). */
+  wardedAt(i) {
+    const t = this.target, s = this.app.view.state
+    if (!t || !s || t.kind !== 'player' || (t.echo && !t.echo.card) || t.list.includes(i)) return false
+    return warded(s, t.seat, t.echo?.card || t.card, i)
+  }
+  sayWarded(i) { this.say(T.protectedBy(this.app.view.state.pl[i].n, CARD.P4.name)) }
   cancelTarget() { this.target = null; this.selected = -1; this.syncHighlight(); this.dirty = true }
   /** A card being aimed is put back once it can no longer be played: the turn moved on, the hand changed. */
   checkTarget() {
@@ -2449,6 +2457,8 @@ export class UI {
     if (hit.player != null && t.kind === 'player') {
       // pieces on one cell overlap: take the nearest one the card can go to
       const i = hit.players.find(i => t.list.includes(i))
+      const ward = i == null ? hit.players.find(i => this.wardedAt(i)) : null
+      if (ward != null) { this.sayWarded(ward); return true }
       return i != null && this.chooseTarget(i)
     }
     if (hit.el != null && (t.kind === 'ladder' || t.kind === 'snake')) return this.chooseTarget(hit.el)

@@ -194,6 +194,7 @@ export const T = {
   mainMenu: 'Main Menu',
   skips: name => `${name} skips this turn`,
   noTargets: 'No valid targets',
+  protectedBy: (name, card) => `${name} is protected by ${card}`,
   // Project 0's week's table (the web build has none)
   score: (score, best, place) => `Weekly score ${score}${best != null ? ` · your best ${best}` : ''}${place ? ` · place ${place}` : ''}`,
   scoreSent: score => `Weekly score ${score} sent`,
