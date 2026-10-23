@@ -5,7 +5,8 @@
 // On CrazyGames the SDK v3 does so: loading, gameplay start and stop, happytime, and online play (invite
 // links, the room the player is in, instant multiplayer). No ads: midgameAd stays as it is.
 //
-// On Discord (an Activity in a voice channel) web/discord.js does: the channel's room.
+// On Discord (an Activity in a voice channel) web/discord.js does: the channel's room, which everyone
+// there sits at at once (instantMultiplayer gives its code).
 //
 // The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames or
 // ?platform=discord (to try it locally), else 'pages'. With ?platform=… or ?debug the profile and
@@ -59,7 +60,11 @@ const impl = {
   inviteLink: noLink,
   /** The room code a site's invite link brought the player with (an SDK's invite parameter), or null. */
   inviteRoom: () => null,
-  /** The site sent the player straight to online play (its multiplayer page): into a room at once, no menu. */
+  /**
+   * The site sent the player straight to online play (its multiplayer page): true for a room of their own
+   * at once, no menu; or a room code: the site's own table for them (Discord's channel), the only one they
+   * play at (no menu of rooms), opened by the first one who comes.
+   */
   instantMultiplayer: () => false,
   /** This tab is in online room `code`; `open`: whether friends can come in now (it is not full, nor a quick table playing). Again whenever `open` changes. */
   roomOpened() {},

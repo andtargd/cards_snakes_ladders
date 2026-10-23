@@ -79,6 +79,8 @@ export function onlineControl({ net, me, siteName = () => null, changed = () => 
       if (code.length < 3) { set({ error: messageFor({ type: 'code' }), detail: '', kind: 'join' }); return Promise.resolve(false) }
       return go('join', `Joining room ${code}…`, () => net.join(code))
     },
+    /** The site's own room for the player (Discord's channel): in at once, the first one there opens it. */
+    enter: code => go('channel', 'Taking a seat at the table…', () => net.enter(cleanCode(code))),
     /** Coming back to a room after a reload: shown like any other attempt. */
     resume: (code, fn) => go('resume', `Coming back to room ${cleanCode(code)}…`, fn),
     cancel() { if (!status?.busy) return; net.cancel(); set(null) },

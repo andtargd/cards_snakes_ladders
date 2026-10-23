@@ -207,6 +207,41 @@ export class Net {
       } catch (e) { probe?.destroy(); throw e }
     })
   }
+  /**
+   * The site's own room for this player (Discord's channel: everyone there has its code): join it, or
+   * hold it when no one does, so whoever comes first hosts. Two who come at once: one gets the room's
+   * id, the other finds them on the next try.
+   */
+  enter(code) {
+    return this.run(async gen => {
+      const alive = () => { if (gen !== this.gen) throw fail('cancelled') }
+      this.mq.keep(true)
+      const probe = await this.probe(gen)
+      const t0 = Date.now()
+      try {
+        for (;;) {
+          alive()
+          try {
+            const r = await this.dialRoom(probe, code, false, JOIN_MS, gen)
+            alive()
+            this.attachMember(probe, r.conn, r.msg, true)
+            return code
+          } catch (e) { if (e.type !== 'not-found') throw e }
+          alive()
+          let p = null
+          try { p = await this.openPeer(code) } catch (e) { if (e.type !== 'unavailable-id') throw e }
+          if (p) {
+            if (gen !== this.gen) { p.destroy(); throw fail('cancelled') }
+            probe?.destroy()
+            this.attachRelay(p, code, false, false)
+            return code
+          }
+          if (Date.now() - t0 > JOIN_MS) throw fail('timeout')
+          await sleep(300 + Math.random() * 500)
+        }
+      } catch (e) { probe?.destroy(); throw e }
+    })
+  }
   /** `mode` and `size` (the board's cells): each pair has quick tables of its own. */
   quickMatch(mode = 'champion', size = 100) {
     return this.run(async gen => {

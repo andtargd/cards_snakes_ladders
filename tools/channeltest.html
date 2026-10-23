@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discord channel table: tests</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13.5px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p { margin: 0 0 10px; color: #5b544c; }
+  #frames { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  #frames figure { margin: 0; } #frames figcaption { font-weight: bold; }
+  iframe { width: 400px; height: 250px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
+  table { border-collapse: collapse; width: 100%; max-width: 1240px; background: #fffdf8; }
+  td, th { padding: 5px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<h1>Discord channel table: tests</h1>
+<p>The game as a Discord Activity (docs/discord/launch-plan.md, task 4), each player a whole game in an iframe
+  (<code>index.html?platform=discord&amp;mockInstance=…&amp;sid=…</code>): those with one instance sit at one table with no menu
+  or code, another instance has its own. Through the relay server: <code>?server=ws://127.0.0.1:8787</code> (the default;
+  server/relay, <code>npm run dev</code>) or the deployed one. Results in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
+<div id="frames"></div>
+<table><thead><tr><th>#</th><th>Stage</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+import * as R from '../experience/rules.js'
+
+try { localStorage.removeItem('csl-game') } catch { /* no storage */ }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const ok = (v, what) => { if (!v) throw new Error(what) }
+async function waitFor(fn, ms, what) {
+  const t0 = Date.now()
+  for (;;) {
+    let v = false
+    try { v = fn() } catch { /* not yet */ }
+    if (v) return Date.now() - t0
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    await sleep(100)
+  }
+}
+
+const SERVER = new URLSearchParams(location.search).get('server') || 'ws://127.0.0.1:8787'
+// instances of this run's own, so an earlier run's rooms (or someone else's) are not met
+const RUN = Math.random().toString(36).slice(2, 7)
+const ONE = 'one-' + RUN, TWO = 'two-' + RUN
+const box = document.getElementById('frames')
+const F = {}
+function open(key, name, instance) {
+  const fig = document.createElement('figure'); fig.id = 'fig-' + key
+  fig.innerHTML = `<figcaption>${name} · ${instance}</figcaption>`
+  box.appendChild(fig)
+  const f = document.createElement('iframe')
+  f.src = `../index.html?platform=discord&mockInstance=${instance}&sid=${key}&name=${name}&server=${encodeURIComponent(SERVER)}`
+  fig.appendChild(f)
+  F[key] = f
+  return waitFor(() => f.contentWindow.__csl && f.contentDocument.getElementById('loading')?.classList.contains('done'), 40000, name + ' loaded')
+}
+/** The player closes the activity: the whole page goes (pagehide, as Discord removes its iframe). */
+function close(key) { F[key].remove(); document.getElementById('fig-' + key).remove(); delete F[key] }
+const app = k => F[k].contentWindow.__csl
+const web = k => app(k).p0.web
+const isHost = k => app(k).p0.room.isHost
+const table = k => app(k).shared?.s
+const fast = k => { app(k).speedIdx = 3; app(k).view.speed = 60 }
+const seated = (k, name) => app(k).lobby().seats.some(s => s && !s.b && s.n === name)
+const hit = (k, key) => app(k).ui.hits.find(h => h.key === key)
+async function autoplay(keys, until, ms, what) {
+  const t0 = Date.now()
+  while (!until()) {
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    for (const k of keys) {
+      const a = F[k]?.isConnected && app(k), s = a?.shared?.s
+      if (!s || s.ph === 'over' || a.view.busy || a.waiting > 0) continue
+      const me = a.mySeat()
+      if (me < 0 || s.cur !== me) continue
+      a.act(R.botAction(R.clone(s), me))
+    }
+    await sleep(120)
+  }
+  return Date.now() - t0
+}
+const sig = s => s && JSON.stringify([s.gid, s.seq, s.cur, s.ph, s.pl.map(p => [p.pos, p.b, p.id])])
+const agree = (keys, ms = 8000) => waitFor(() => { const v = keys.map(k => sig(table(k))); return v[0] && v.every(x => x === v[0]) }, ms, 'every screen at the same point: ' + keys.join(', '))
+
+const steps = []
+const step = (title, fn) => steps.push([title, fn])
+
+step('Ann opens the activity: straight to the channel\'s table, as its host', async note => {
+  await open('a', 'Ann', ONE)
+  const ms = await waitFor(() => web('a').room?.channel && app('a').screen === 'lobby' && !web('a').status, 25000, 'Ann in the channel\'s lobby')
+  ok(isHost('a') && seated('a', 'Ann'), 'Ann hosts and sits: ' + JSON.stringify(app('a').lobby().seats))
+  ok(web('a').room.code === web('a').channel && !web('a').room.quick, 'the room: ' + JSON.stringify(web('a').room))
+  ok(!app('a').firstDue() && !hit('a', 'share') && !hit('a', 'back'), 'no First Match, no share or back')
+  note(`room ${web('a').room.code}, by ${app('a').p0.web && F.a.contentWindow.__cslNet.via}, menu never shown`)
+  return ms
+})
+step('Bob opens it in the same channel: he sits at Ann\'s table', async note => {
+  await open('b', 'Bob', ONE)
+  const ms = await waitFor(() => app('b').screen === 'lobby' && seated('a', 'Bob') && !isHost('b'), 25000, 'Bob seated at Ann\'s table')
+  ok(web('b').room.code === web('a').room.code, 'two rooms')
+  note(`joined in ${ms} ms by ${F.b.contentWindow.__cslNet.via}`)
+  return ms
+})
+step('Cid in another channel gets a table of his own', async note => {
+  await open('c', 'Cid', TWO)
+  const ms = await waitFor(() => app('c').screen === 'lobby' && isHost('c') && seated('c', 'Cid'), 25000, 'Cid hosting his own table')
+  ok(web('c').room.code !== web('a').room.code && !seated('a', 'Cid'), 'Cid at Ann\'s table')
+  note(`room ${web('c').room.code} (Ann's is ${web('a').room.code})`)
+  return ms
+})
+step('Lobby: the host sets mode and board, the guest sees them and cannot', async note => {
+  app('b').lobbyCmd({ t: 'size', size: 70 })
+  await sleep(1200)
+  ok(app('a').lobby().size !== 70, 'a guest changed the board')
+  app('a').lobbyCmd({ t: 'mode', mode: 'champion' })
+  app('a').lobbyCmd({ t: 'size', size: 100 })
+  app('a').lobbyCmd({ t: 'bot' })
+  await waitFor(() => app('b').lobby().size === 100 && app('b').lobby().mode === 'champion' && app('b').lobby().seats.filter(Boolean).length === 3, 4000, 'the table on Bob\'s screen')
+  ok(hit('a', 'lstart') && !hit('b', 'lstart'), 'Start only at the host')
+  note('Champion on 100 with a bot, as set by Ann, on Bob\'s screen; Start is Ann\'s')
+})
+step('Cid alone starts: bots make up the players', async note => {
+  fast('c')
+  app('c').lobbyCmd({ t: 'start' })
+  await waitFor(() => app('c').screen === 'game' && table('c'), 6000, 'Cid\'s game')
+  const pl = table('c').pl
+  ok(pl.length >= 2 && pl.filter(p => p.b).every(p => p.f), 'players: ' + JSON.stringify(pl.map(p => [p.n, p.b, p.f])))
+  note(`${pl.length} players: ${pl.map(p => p.n).join(', ')}`)
+})
+step('Ann starts: both at the game', async note => {
+  fast('a'); fast('b')
+  app('a').lobbyCmd({ t: 'start' })
+  const ms = await waitFor(() => ['a', 'b'].every(k => app(k).screen === 'game' && table(k)?.gid === table('a').gid), 8000, 'both at the table')
+  ok(app('a').mySeat() >= 0 && app('b').mySeat() >= 0, 'seats')
+  await autoplay(['a', 'b'], () => table('a').seq >= 10 || table('a').ph === 'over', 60000, 'a few moves')
+  await agree(['a', 'b'])
+  note(`${table('a').pl.length} players, ${table('a').seq} moves agree`)
+  return ms
+})
+step('Dan comes during the game: he takes the bot\'s seat', async note => {
+  await open('d', 'Dan', ONE)
+  fast('d')
+  const ms = await waitFor(() => app('d').screen === 'game' && app('d').mySeat() >= 0 && table('a').pl.some(p => p.n === 'Dan' && !p.b), 25000, 'Dan seated in the game')
+  ok(seated('a', 'Dan'), 'Dan in the lobby\'s seats for the rematch')
+  note(`Dan plays seat ${app('d').mySeat()} in place of the bot`)
+  return ms
+})
+step('Eve comes with no seat to take: she watches, with a word on screen, and has a seat for the next game', async note => {
+  await open('e', 'Eve', ONE)
+  const ms = await waitFor(() => app('e').screen === 'game' && app('e').watching() && seated('a', 'Eve'), 25000, 'Eve watching, seated for the next game')
+  ok(!table('a').pl.some(p => p.n === 'Eve'), 'Eve in this game')
+  await waitFor(() => app('e').ui.dirty === false, 2000, 'Eve\'s screen drawn')
+  note('watching; lobby seats: ' + app('a').lobby().seats.filter(Boolean).map(s => s.n).join(', '))
+  return ms
+})
+step('A guest\'s game menu has no way out; the results wait for the host', async note => {
+  app('b').openGameMenu()
+  await waitFor(() => hit('b', 'resume'), 2000, 'Bob\'s game menu')
+  ok(!hit('b', 'leave'), 'Bob can leave the channel\'s game')
+  app('b').openGameMenu()
+  app('a').openGameMenu()
+  await waitFor(() => hit('a', 'resume'), 2000, 'Ann\'s game menu')
+  ok(hit('a', 'leave'), 'Ann has no End Game')
+  app('a').openGameMenu()
+  note('Bob: Resume, speed, sound; Ann: End Game too')
+})
+step('Ann (the host) closes the activity mid-game: the game goes on, a bot in her seat', async note => {
+  const gid = table('b').gid, ann = table('b').pl.findIndex(p => p.n === 'Ann')
+  close('a')
+  const ms = await waitFor(() => ['b', 'd', 'e'].some(k => isHost(k)) && table('b')?.gid === gid && table('b').pl[ann].b, 45000, 'a new host, a bot in Ann\'s seat')
+  const host = ['b', 'd', 'e'].find(isHost)
+  await autoplay(['b', 'd'], () => table(host).seq >= table('b').seq + 6 || table(host).ph === 'over', 60000, 'moves after the takeover')
+  await agree(['b', 'd', 'e'])
+  note(`${host} hosts after ${ms} ms; the game goes on on every screen`)
+  return ms
+})
+step('Rematch at the channel\'s table: Eve plays in it', async note => {
+  const host = ['b', 'd', 'e'].find(isHost)
+  app(host).rematch()
+  const ms = await waitFor(() => ['b', 'd', 'e'].every(k => app(k).screen === 'game' && app(k).mySeat() >= 0 && table(k).gid === table(host).gid), 10000, 'all three at the new game')
+  ok(!app('e').watching(), 'Eve still watching')
+  note(`new game ${table(host).gid}: ${table(host).pl.map(p => p.n).join(', ')}`)
+  return ms
+})
+step('End Game: everyone back to the channel\'s lobby, no menu', async note => {
+  const host = ['b', 'd', 'e'].find(isHost)
+  app(host).leaveGame()
+  const ms = await waitFor(() => ['b', 'd', 'e'].every(k => app(k).screen === 'lobby' && web(k).room?.channel), 8000, 'all in the lobby')
+  note(`${host} ended it; all three in the lobby`)
+  return ms
+})
+
+const rows = document.getElementById('rows')
+window.results = []
+window.done = (async () => {
+  for (const [i, [title, fn]] of steps.entries()) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${i + 1}</td><td>${title}</td><td class="run">running</td><td></td><td class="note"></td>`
+    rows.appendChild(tr)
+    const notes = [], t0 = Date.now()
+    let res = 'pass', ms
+    try { ms = await fn(n => notes.push(n)) } catch (e) { res = 'fail'; notes.push(String(e?.message || e)) }
+    tr.children[2].className = res; tr.children[2].textContent = res
+    tr.children[3].textContent = ms ?? Date.now() - t0
+    tr.children[4].textContent = notes.join('; ')
+    window.results.push({ step: i + 1, title, res, ms: ms ?? Date.now() - t0, notes })
+    if (res === 'fail') break
+  }
+  return window.results
+})()
+</script>
+</body>
+</html>

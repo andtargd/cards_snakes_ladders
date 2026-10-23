@@ -206,7 +206,7 @@ class SharedTable {
       if (fresh) { this.app.ui.logLines = []; this.app.view.overview() }
       for (const l of (fresh ? s.log : [])) this.app.ui.log(l)
     } else this.app.view.play(ev, R.clone(s), { players: this.p0.players })
-    if (watched && this.mySeat() >= 0 && this.app.quick()) this.app.ui.say(T.quickSeated, 3)
+    if (watched && this.mySeat() >= 0 && (this.app.quick() || this.app.atChannel())) this.app.ui.say(T.quickSeated, 3)
     if (s.ph === 'over') this.app.gameOver(s, this.mySeat())
   }
   mySeat() { return this.s.pl.findIndex(p => !p.b && p.id === this.p0.me.id) }
@@ -303,7 +303,8 @@ class SharedTable {
     if (s.turnNo !== this.turnSeen) { this.turnSeen = s.turnNo; this.turnStart = 0 }
     if (!view.busy) this.turnStart += dt
     // (a Quick Match bot plays as a player would: on the clock, and taking a moment to think)
-    const human = (!s.pl[s.cur].b || s.pl[s.cur].f) && s.ph !== 'over'
+    const disguised = p => !!p.f && this.app.quick()
+    const human = (!s.pl[s.cur].b || disguised(s.pl[s.cur])) && s.ph !== 'over'
     this.app.turnLeft = human ? Math.max(0, TURN_SECONDS - this.turnStart) : null
     if (!this.p0.room.isHost || s.ph === 'over') return
     this.checkAbsent(dt)
@@ -312,7 +313,7 @@ class SharedTable {
     if (p.b) {
       this.wait -= dt * view.speed
       if (this.wait > 0) return
-      this.wait = BOT_DELAY * (p.f ? 1 + Math.random() * 1.4 : 0.75 + Math.random() * 0.5)
+      this.wait = BOT_DELAY * (disguised(p) ? 1 + Math.random() * 1.4 : 0.75 + Math.random() * 0.5)
       const r = R.apply(s, s.cur, R.botAction(s, s.cur))
       if (r.ok) this.publish(r.ev)
       return
@@ -469,7 +470,7 @@ class App {
    * The menu offers the First Match in place of Quick Match: the web build only, until it is done or
    * skipped, and not for a player a room's link brought or who is in an online room.
    */
-  firstDue() { const web = this.p0.web; return !!web && this.first !== 'done' && !web.room && !web.invited }
+  firstDue() { const web = this.p0.web; return !!web && this.first !== 'done' && !web.room && !web.invited && !web.channel }
   /** The First Match's forced tips are done (or skipped): Quick Match is back, a reload carries on with the game as any other. */
   finishFirst() {
     if (this.first === 'done') return
@@ -633,6 +634,8 @@ class App {
     this.ui.cancelTarget(); this.ui.selected = -1
     this.startAttract()
     this.ui.dirty = true
+    // where the site has a table of its own (Discord's channel) there is no menu: back to that table's lobby (or into it again)
+    if (this.channel()) { if (this.atChannel()) this.openLobby(); else this.enterChannel() }
   }
   rematch() {
     this.menuOpen = false
@@ -716,10 +719,8 @@ class App {
     else if (!host) return
     else if (cmd.t === 'mode' && ['champion', 'fool'].includes(cmd.mode)) lob.mode = cmd.mode
     else if (cmd.t === 'size' && R.SIZES.includes(cmd.size)) lob.size = cmd.size
-    else if (cmd.t === 'bot' && free >= 0) {
-      const used = new Set(lob.seats.filter(Boolean).map(s => s.n))
-      lob.seats[free] = { id: null, n: BOT_NAMES.find(n => !used.has(n)) || 'Bot', b: lob.level || 2 }
-    } else if (cmd.t === 'botlvl' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat].b = (lob.seats[cmd.seat].b % 3) + 1
+    else if (cmd.t === 'bot' && free >= 0) this.addBot(lob)
+    else if (cmd.t === 'botlvl' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat].b = (lob.seats[cmd.seat].b % 3) + 1
     // how well every bot at the table plays, and the ones added after
     else if (cmd.t === 'level' && [1, 2, 3].includes(cmd.b)) { lob.level = cmd.b; for (const s of lob.seats) if (s?.b) s.b = cmd.b }
     else if (cmd.t === 'remove' && lob.seats[cmd.seat]?.b) lob.seats[cmd.seat] = null
@@ -727,15 +728,22 @@ class App {
     this.p0.room.set('lob', lob)
     this.ui.dirty = true
   }
+  /** A bot in the first free seat of `lob`, as good as the table's bots are. */
+  addBot(lob) {
+    const used = new Set(lob.seats.filter(Boolean).map(s => s.n)), free = lob.seats.findIndex(s => !s)
+    if (free >= 0) lob.seats[free] = { id: null, n: BOT_NAMES.find(n => !used.has(n)) || 'Bot', b: lob.level || 2 }
+  }
   startShared(lob) {
     this.pruneSeats(lob)
+    // at the channel's table one player may start: bots make up the players the rules ask for
+    if (this.atChannel()) while (lob.seats.filter(Boolean).length < least(lob.mode) && lob.seats.includes(null)) this.addBot(lob)
     const seats = lob.seats.map((s, i) => (s ? { ...s, c: i } : null)).filter(Boolean)
     if (seats.length < 2 || (lob.mode === 'fool' && seats.length < 3)) return
     const seed = (Math.random() * 2 ** 31) >>> 0
     const s = R.createGame({ seed, mode: lob.mode, cells: lob.size || 100, players: seats.map(x => ({ n: x.n, b: x.b, id: x.id, c: x.c })) })
     s.gid = seed
-    // at a Quick Match table every bot keeps its seat for a player who comes during the game (seatNewcomer)
-    if (this.quick()) for (const p of s.pl) if (p.b) p.f = 1
+    // at a Quick Match table (and the channel's) every bot keeps its seat for a player who comes during the game (seatNewcomer)
+    if (this.quick() || this.atChannel()) for (const p of s.pl) if (p.b) p.f = 1
     lob.status = 'playing'; lob.gid = seed
     this.p0.room.set('lob', lob)
     const g = { gid: seed, s: R.pack(s), ev: null }
@@ -961,15 +969,18 @@ class App {
     this.startShared(lob)
   }
   /**
-   * Host: a player who comes to a Quick Match table while its game is on takes a seat a bot keeps
-   * there (the one furthest on), under their own name, and keeps it for the rematch. A player with a
-   * seat of their own here takes it back with Continue Playing instead.
+   * Host: a player who comes to a Quick Match table (or the channel's) while its game is on takes a
+   * seat a bot keeps there (the one furthest on), under their own name, and keeps it for the rematch. A
+   * player with a seat of their own here takes it back with Continue Playing instead. At the channel's
+   * table one with no seat to take watches, and plays in the next game.
    */
   seatNewcomer(id) {
-    const sh = this.shared, s = sh?.s
-    if (!this.quick() || !this.p0.room.isHost || !s || s.ph === 'over' || id === this.p0.me.id || s.pl.some(p => p.id === id)) return
+    const sh = this.shared, s = sh?.s, channel = this.atChannel()
+    if (!(this.quick() || channel) || !this.p0.room.isHost || id === this.p0.me.id) return
+    if (channel && this.lobby().status === 'playing' && (!s || s.ph === 'over')) { this.seatNext(id); return }
+    if (!s || s.ph === 'over' || s.pl.some(p => p.id === id)) return
     const kept = s.pl.map((p, i) => i).filter(i => s.pl[i].f && s.pl[i].b && !s.pl[i].d)
-    if (!kept.length) return
+    if (!kept.length) { if (channel) this.seatNext(id); return }
     const p = s.pl[kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a))], bot = p.n
     p.id = id; p.b = 0; p.n = (this.nameOf(id) || 'Player').slice(0, 14)
     delete p.f
@@ -979,6 +990,30 @@ class App {
     const lob = this.lobby()
     lob.seats[p.c] = { id, n: p.n, b: 0 }
     this.p0.room.set('lob', lob)
+  }
+
+  /** Host: player `id`, watching the channel's table, gets a seat in the next game (a bot's, when none is free). */
+  seatNext(id) {
+    const lob = this.lobby()
+    if (lob.seats.some(s => s && !s.b && s.id === id)) return
+    let i = lob.seats.findIndex(s => !s)
+    if (i < 0) i = lob.seats.findIndex(s => s?.b)
+    if (i < 0) return
+    lob.seats[i] = { id, n: (this.nameOf(id) || 'Player').slice(0, 14), b: 0 }
+    this.p0.room.set('lob', lob)
+  }
+
+  // ----- the site's own table (Discord: everyone in the voice channel; Project 0 and the other sites have none) -----
+  /** The site puts this player at a table of its own: no menu of rooms, no First Match. */
+  channel() { return !!this.p0.web?.channel }
+  /** In the room of the site's own table. */
+  atChannel() { return !!this.p0.web?.room?.channel }
+  /** Into the site's own table (again: after the room was lost, or after a game against bots). */
+  enterChannel() { if (!this.p0.web?.status?.busy) this.p0.web?.enterChannel() }
+  /** At the channel's table, watching its game: no seat of mine there, nor one to take back. */
+  watching() {
+    const s = this.view.state
+    return this.atChannel() && this.screen === 'game' && this.table?.kind === 'shared' && !!s && s.ph !== 'over' && this.mySeat() < 0 && this.seatToTakeBack() < 0
   }
 
   /** Scores for the week's table: wins count, more and harder opponents, a bigger board and fewer rounds count more. */
@@ -1030,7 +1065,8 @@ export default async function start(p0) {
   const app = new App(p0)
   globalThis.__csl = app // for local testing from the console
   p0.loading(0.5, 'setting the table')
-  if (!app.resumeSolo()) app.startAttract()
+  // (where the site puts the player at its own table, it is joined at once: a game against bots is not carried on)
+  if (app.channel() || !app.resumeSolo()) app.startAttract()
 
   // input
   let down = null

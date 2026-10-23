@@ -75,6 +75,8 @@ let host = myId
 // the online room this tab is in and its shared state, for coming back after a reload
 let unloading = false
 const keepRoom = () => { if (!unloading && web.room) ss.set(ROOM_KEY, { code: web.room.code, quick: web.room.quick, state, at: Date.now() }) }
+// the site's own room for this player, where it has one (Discord: the channel's), from hooks.instantMultiplayer
+let channel = null
 
 // the session the network keeps in step: who is here, who hosts, the room's shared state
 const session = {
@@ -92,7 +94,8 @@ const session = {
   message(d, from) { emit('message', d, from) },
   roomChanged(info, reason) {
     if (unloading) return
-    info = info && { ...info, link: roomLink(info.code) } // link: null where only the code is shared
+    // link: null where only the code is shared; channel: this is the site's own room for the player
+    info = info && { ...info, link: roomLink(info.code), channel: !!channel && info.code === channel }
     web.room = info
     if (info) keepRoom(); else ss.set(ROOM_KEY, null)
     // the address bar shows the room's link only where this page's address is one to give
@@ -173,7 +176,11 @@ const web = {
   get safe() { return view.safe }, // the screen's safe area: { top, right, bottom, left } px the game's buttons keep clear of
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
-  room: null, // { code, quick, mode, size, link } while in an online room (mode and size: a quick table's); link is null where only the code is shared
+  room: null, // { code, quick, mode, size, link, channel } while in an online room (mode and size: a quick table's); link is null where only the code is shared
+  // the site puts the player at a table of its own (Discord: everyone in the voice channel), with this code; null elsewhere.
+  // There the game has no menu of rooms: no codes, Quick Match or links, only that table
+  get channel() { return channel },
+  enterChannel() { return channel ? online.enter(channel) : Promise.resolve(false) },
   get links() { return roomLinks() }, // whether rooms get links here (else only codes)
   // the game's Online screen: how an attempt goes (null | { busy } | { error, detail, kind }), and a room's link that brought the player
   get status() { return online.status },
@@ -365,6 +372,9 @@ async function boot() {
   loaded.catch(() => {}) // (a failure is reported once it is awaited, below)
   await ready
   hooks.loadingStart()
+  // a site that puts everyone at its own table says which (a room code), before the game starts: it has no menu then
+  const instant = hooks.instantMultiplayer()
+  if (typeof instant === 'string' && cleanCode(instant).length >= 3) channel = cleanCode(instant)
   // the site's own name for the player, if it has one, stands in for the one they type
   const user = Promise.resolve(hooks.getUser()).catch(() => null)
   const mod = await loaded
@@ -376,16 +386,18 @@ async function boot() {
   setTimeout(() => loadEl.remove(), 600)
   // the room this tab was in before a reload: back to it. A room's link: its code on the Online screen;
   // the site's invite: straight into that room. The site's multiplayer page: a room of one's own at once
-  // (the mode and board last chosen on the Online screen), no menu and no First Match first
-  const invite = cleanCode(hooks.inviteRoom())
-  const code = cleanCode(q.get('room')) || invite
+  // (the mode and board last chosen on the Online screen), no menu and no First Match first; the site's
+  // own table (Discord's channel): straight to it, and the first one there opens it
+  const invite = channel ? '' : cleanCode(hooks.inviteRoom())
+  const code = channel || cleanCode(q.get('room')) || invite
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
   if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
     online.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
-  } else if (code.length >= 3 && code === invite) online.join(code)
+  } else if (channel) online.enter(channel)
+  else if (code.length >= 3 && code === invite) online.join(code)
   else if (code.length >= 3) online.invite(code)
-  else if (hooks.instantMultiplayer()) online.create()
+  else if (instant) online.create()
   hooks.onInvite(goToRoom)
   // animation frames stop in a hidden tab, and in some windows that still count as visible (an
   // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an

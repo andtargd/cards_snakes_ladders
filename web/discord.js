@@ -32,7 +32,12 @@ export let instanceId = null
 /** 'desktop' or 'mobile' (Discord's own word for the client it runs in). */
 export let platform = null
 
-/** A room code (5 letters, as web/net.js has them) that stands for an instance: the same everywhere. */
+/**
+ * A room code (5 letters, as web/net.js has them) that stands for an instance: the same everywhere. The
+ * codes stay as they are (the relay server, the reload's way back and the rooms' ids take them as they
+ * are); 30^5 of them make two channels at one table unlikely (1 in 24 million for a pair), and a quick
+ * room's code (DC1, DCC1…) is never 5 letters long.
+ */
 export function roomCode(id) {
   let h = 0x811c9dc5 // FNV-1a
   for (const c of String(id)) { h ^= c.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0 }
@@ -63,10 +68,10 @@ export async function start(provide) {
   }
   instanceId = sdk.instanceId
   platform = sdk.platform
+  // the channel's table: everyone who opens the activity there sits at it at once, the first one hosts
   const code = roomCode(instanceId)
   provide({
-    inviteRoom: () => code,
-    instantMultiplayer: () => true,
+    instantMultiplayer: () => code,
   })
   console.info('[discord]', sdk.mock ? 'mock' : 'SDK', { instanceId, room: code, platform, channelId: sdk.channelId, guildId: sdk.guildId })
   return sdk.mock ? 'mock' : 'discord'

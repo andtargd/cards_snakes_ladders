@@ -267,6 +267,7 @@
     <tr><td><a href="http://localhost:5500/tools/covers.html?out=0"><code>covers.html</code></a></td><td>Обложки для подачи (см. шаг 2)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/trailer.html?rec=none"><code>trailer.html</code></a></td><td>Ролик для подачи по сценарию (см. шаг 2)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/discordspike.html?room=test"><code>discordspike.html?room=test</code></a></td><td>Спайк Discord: PeerJS, WebRTC, MQTT и WebSocket. Вторая вкладка с тем же <code>room</code> проверяет связь между игроками (см. ниже)</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/channeltest.html"><code>channeltest.html</code></a></td><td>Стол канала Discord в mock: пять игроков в двух каналах, вход без меню, лобби, вход посреди партии, уход хоста, rematch. Нужен relay-сервер (шаг 4, <code>npm run dev</code>) или <code>?server=wss://…</code></td></tr>
   </table></div>
   <p>Онлайн-тесты ходят на настоящие публичные серверы (PeerJS и MQTT-брокеры), поэтому нужен интернет.</p>
 
@@ -276,7 +277,7 @@
   <div class="table-wrap"><table>
     <tr><th>Адрес</th><th>Что будет</th></tr>
     <tr><td><a href="http://localhost:5500/?platform=discord"><code>?platform=discord</code></a></td><td>профиль discord без SDK: в консоли «no Discord SDK», игра работает как на Pages</td></tr>
-    <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC"><code>?platform=discord&amp;mockInstance=ABC</code></a></td><td>SDK подменён объектом с <code>instanceId</code> ABC: в консоли «[discord] mock» и код комнаты, вызовы хуков видны. Два окна с одним <code>mockInstance</code> получают одну комнату</td></tr>
+    <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC"><code>?platform=discord&amp;mockInstance=ABC</code></a></td><td>SDK подменён объектом с <code>instanceId</code> ABC: в консоли «[discord] mock» и код комнаты, вызовы хуков видны. Игра сразу садится за стол канала, без меню (нужен relay-сервер, см. ниже); окна с одним <code>mockInstance</code> садятся за один стол, первое — хост. Для двух окон в одной вкладке браузера добавьте разный <code>&amp;sid=</code></td></tr>
   </table></div>
   <h3>Сборка</h3>
   <div class="cmd"><pre>python tools/build_discord.py</pre><button class="copy" type="button">Копировать</button></div>
@@ -284,7 +285,7 @@
   <div class="cmd"><pre>python tools/server.py 5560 dist/discord</pre><button class="copy" type="button">Копировать</button></div>
   <h3>Сборка в настоящем Discord</h3>
   <div class="cmd"><pre>cloudflared tunnel --url http://localhost:5560</pre><button class="copy" type="button">Копировать</button></div>
-  <p>В Portal → Activities → URL Mappings: корневое сопоставление <code>/</code> → адрес туннеля без <code>https://</code>, плюс строки из <code>MAPPINGS</code>. Запустите активность из голосового канала: игра доходит до меню. Мгновенный вход за стол канала появится в задаче 4 плана (<code>docs/discord/launch-plan.md</code>); пока первый игрок в канале видит «комната не найдена» на экране Online.</p>
+  <p>В Portal → Activities → URL Mappings: корневое сопоставление <code>/</code> → адрес туннеля без <code>https://</code>, плюс строки из <code>MAPPINGS</code>. Запустите активность из голосового канала: игрок сразу садится за стол канала (первый в канале — хост), меню, кодов и Quick Match нет. Если стол недоступен (нет связи с relay-сервером), показывается ошибка с кнопками Try Again и Play vs Bots.</p>
 
   <h3>Relay-сервер комнат</h3>
   <p>В Discord комнаты идут не через PeerJS и брокеры, а через свой сервер <code>server/relay/</code> (Cloudflare Worker, одна комната — один Durable Object). Он только пересылает сообщения, логика комнат прежняя: хост — браузер игрока. Клиент — <code>web/relaypeer.js</code>, для <code>web/net.js</code> он выглядит как PeerJS. Профиль <code>discord</code> включает его сам, на любом другом сайте — параметр <code>?server=ws://127.0.0.1:8787</code>. Для запуска нужен Node.js (только для сервера, игре он не нужен):</p>
