@@ -529,6 +529,19 @@ export class UI {
     g.textBaseline = 'middle'
     if (max) g.fillText(t, x, y, max); else g.fillText(t, x, y)
   }
+  /** Player `id`'s picture on the site (their avatar, the web build's), or null: then the game draws its own. */
+  picture(id) { return id == null ? null : this.p0.web?.picture?.(id) || null }
+  /** A picture in a disc of radius r, in a ring of the player's colour. */
+  pictureDisc(img, x, y, r, color) {
+    const g = this.g
+    g.fillStyle = color
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill()
+    const ir = r - 2 * this.u
+    g.save()
+    g.beginPath(); g.arc(x, y, ir, 0, Math.PI * 2); g.clip()
+    g.drawImage(img, x - ir, y - ir, 2 * ir, 2 * ir)
+    g.restore()
+  }
   /** A name's first letter, or the emoji it starts with, white in its round badge centred at x, y. */
   initial(name, x, y, size) {
     const { ch, emoji } = P.initial(name)
@@ -1469,8 +1482,13 @@ export class UI {
     const g = this.g, u = this.u, mine = s && s.id === this.p0.me.id
     this.panel(x, y, w, h, { fill: s ? '#ffffff' : 'rgba(255,255,255,0.4)', stroke: mine ? 'rgba(232,116,59,0.8)' : 'rgba(43,38,34,0.16)', r: 12, lw: mine ? 2 : 1.5 })
     const cx = x + 20 * u, cy = y + h / 2
-    g.beginPath(); g.arc(cx, cy, 8 * u, 0, Math.PI * 2)
-    if (s) { g.fillStyle = P.PLAYER_COLORS[i]; g.fill() } else { g.strokeStyle = P.PLAYER_COLORS[i]; g.lineWidth = 2 * u; g.setLineDash([3 * u, 3 * u]); g.stroke(); g.setLineDash([]) }
+    // (a player's avatar where the site has one, in their colour)
+    const pic = s && !s.b ? this.picture(s.id) : null
+    if (pic) this.pictureDisc(pic, cx, cy, 13 * u, P.PLAYER_COLORS[i])
+    else {
+      g.beginPath(); g.arc(cx, cy, 8 * u, 0, Math.PI * 2)
+      if (s) { g.fillStyle = P.PLAYER_COLORS[i]; g.fill() } else { g.strokeStyle = P.PLAYER_COLORS[i]; g.lineWidth = 2 * u; g.setLineDash([3 * u, 3 * u]); g.stroke(); g.setLineDash([]) }
+    }
     if (!s) { this.text(quick ? T.waitingSeat : T.openSeat, x + 38 * u, cy, { size: 13.5, bold: false, color: '#9a948a', max: w - 48 * u }); return }
     const bot = s.b && !s.q, host = !s.b && s.id === this.p0.room.host
     const tag = bot ? T.botTag(T.levels[s.b - 1] || '') : host ? T.hostTag : ''
@@ -1588,9 +1606,14 @@ export class UI {
       const g = this.g
       if (i === leader) this.rowHalo(cx, cy, colW, rowH, 'gold')
       else if (i === last) this.rowHalo(cx, cy, colW, rowH, 'gloom')
-      g.fillStyle = P.PLAYER_COLORS[p.c % 6]
-      g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
-      this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
+      // the player's avatar where the site has one (not while a bot plays the seat), else their initial
+      const pic = p.b ? null : this.picture(p.id)
+      if (pic) this.pictureDisc(pic, cx + rowH / 2, cy + rowH / 2, rowH * 0.32, P.PLAYER_COLORS[p.c % 6])
+      else {
+        g.fillStyle = P.PLAYER_COLORS[p.c % 6]
+        g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
+        this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
+      }
       const nx = cx + rowH * 0.95
       const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos)
       if (this.narrow) {

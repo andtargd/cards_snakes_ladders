@@ -14,6 +14,12 @@
 // is not: the host waits for its heartbeats, so the player can come back to their place. When the host's
 // socket goes, every link of the room closes (the players take the room over), and a host silent for
 // STALE_MS gives the room up to the first who claims it.
+//
+//   POST /api/token {code}   Discord's OAuth: the code from authorize() for an access token (task 5)
+//
+// The activity's sign-in (the player's name and avatar): the client secret stays here (a secret of the
+// worker, DISCORD_CLIENT_SECRET), the code is traded for a token and the token goes back to the page.
+// Nothing else is done with it here, and nothing is kept.
 import { DurableObject } from 'cloudflare:workers'
 
 const MAX_BYTES = 64 * 1024 // one frame (a welcome carries the room's state)
@@ -21,11 +27,36 @@ const MAX_LINKS = 16 // players' links to one host: a room of friends holds 12, 
 const RATE = { host: [200, 400], link: [40, 80] } // frames a second, and the burst
 const STALE_MS = 15000 // a host that said nothing this long is gone (web/net.js's DEAD_MS is 20 s)
 const CODE = /\/room\/([A-Z0-9]{2,8})$/
+const TOKEN_URL = 'https://discord.com/api/oauth2/token'
+
+const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+
+/** Discord's OAuth code (from the SDK's authorize) for an access token: { access_token }, or { error } with the status. */
+async function token(req, env) {
+  if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
+  if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({ error: 'no client id or secret on the server' }, 503)
+  let code = null
+  try { code = (await req.json())?.code } catch { /* not JSON */ }
+  if (typeof code !== 'string' || !/^[\w-]{8,128}$/.test(code)) return json({ error: 'no code' }, 400)
+  let r
+  try {
+    r = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code }),
+    })
+  } catch { return json({ error: 'Discord did not answer' }, 502) }
+  const d = await r.json().catch(() => null)
+  if (!r.ok || typeof d?.access_token !== 'string') return json({ error: d?.error || 'no token' }, r.status >= 400 && r.status < 500 ? 401 : 502)
+  return json({ access_token: d.access_token })
+}
 
 export default {
   async fetch(req, env) {
-    const m = CODE.exec(new URL(req.url).pathname)
-    if (!m) return new Response('cards-snakes-ladders relay: /room/<CODE> over a WebSocket', { status: 404 })
+    const path = new URL(req.url).pathname
+    if (path === '/api/token') return token(req, env)
+    const m = CODE.exec(path)
+    if (!m) return new Response('cards-snakes-ladders relay: /room/<CODE> over a WebSocket, POST /api/token', { status: 404 })
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('a WebSocket only', { status: 426 })
     return env.ROOMS.get(env.ROOMS.idFromName(m[1])).fetch(req)
   },

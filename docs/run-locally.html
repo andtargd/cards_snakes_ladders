@@ -268,6 +268,7 @@
     <tr><td><a href="http://localhost:5500/tools/trailer.html?rec=none"><code>trailer.html</code></a></td><td>Ролик для подачи по сценарию (см. шаг 2)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/discordspike.html?room=test"><code>discordspike.html?room=test</code></a></td><td>Спайк Discord: PeerJS, WebRTC, MQTT и WebSocket. Вторая вкладка с тем же <code>room</code> проверяет связь между игроками (см. ниже)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/channeltest.html"><code>channeltest.html</code></a></td><td>Стол канала Discord в mock: пять игроков в двух каналах, вход без меню, лобби, вход посреди партии, уход хоста, rematch. Нужен relay-сервер (шаг 4, <code>npm run dev</code>) или <code>?server=wss://…</code></td></tr>
+    <tr><td><a href="http://localhost:5500/tools/oauthtest.html"><code>oauthtest.html</code></a></td><td>Вход через Discord в mock: имена и аватары, игрок без авторизации — «Player N», грубое имя заменяется, после закрытия активности игрок по своему аккаунту возвращается на своё место. Нужен relay-сервер, как у <code>channeltest.html</code>. Запускайте в новой вкладке: игроки с тем же <code>sid</code> из прошлого теста вернутся в его комнату</td></tr>
   </table></div>
   <p>Онлайн-тесты ходят на настоящие публичные серверы (PeerJS и MQTT-брокеры), поэтому нужен интернет.</p>
 
@@ -278,6 +279,7 @@
     <tr><th>Адрес</th><th>Что будет</th></tr>
     <tr><td><a href="http://localhost:5500/?platform=discord"><code>?platform=discord</code></a></td><td>профиль discord без SDK: в консоли «no Discord SDK», игра работает как на Pages</td></tr>
     <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC"><code>?platform=discord&amp;mockInstance=ABC</code></a></td><td>SDK подменён объектом с <code>instanceId</code> ABC: в консоли «[discord] mock» и код комнаты, вызовы хуков видны. Игра сразу садится за стол канала, без меню (нужен relay-сервер, см. ниже); окна с одним <code>mockInstance</code> садятся за один стол, первое — хост. Для двух окон в одной вкладке браузера добавьте разный <code>&amp;sid=</code></td></tr>
+    <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC&amp;mockUser=Ann"><code>…&amp;mockUser=Ann</code></a></td><td>игрок вошёл через Discord как Ann: имя Ann, аватар — стандартный аватар Discord с <code>cdn.discordapp.com</code>, id игрока выводится из id аккаунта. Без <code>mockUser</code> игрок как будто отказался от авторизации: хост даёт ему имя «Player N»</td></tr>
   </table></div>
   <h3>Сборка</h3>
   <div class="cmd"><pre>python tools/build_discord.py</pre><button class="copy" type="button">Копировать</button></div>
@@ -285,7 +287,7 @@
   <div class="cmd"><pre>python tools/server.py 5560 dist/discord</pre><button class="copy" type="button">Копировать</button></div>
   <h3>Сборка в настоящем Discord</h3>
   <div class="cmd"><pre>cloudflared tunnel --url http://localhost:5560</pre><button class="copy" type="button">Копировать</button></div>
-  <p>В Portal → Activities → URL Mappings: корневое сопоставление <code>/</code> → адрес туннеля без <code>https://</code>, плюс строки из <code>MAPPINGS</code>. Запустите активность из голосового канала: игрок сразу садится за стол канала (первый в канале — хост), меню, кодов и Quick Match нет. Если стол недоступен (нет связи с relay-сервером), показывается ошибка с кнопками Try Again и Play vs Bots.</p>
+  <p>В Portal → Activities → URL Mappings: корневое сопоставление <code>/</code> → адрес туннеля без <code>https://</code>, плюс строки из <code>MAPPINGS</code> (среди них <code>/x/cdn</code> → <code>cdn.discordapp.com</code> для аватаров). Запустите активность из голосового канала: при первом запуске Discord спрашивает разрешение (имя и аватар), игра ждёт ответа до двух минут; дальше игрок сразу садится за стол канала (первый в канале — хост), меню, кодов и Quick Match нет. Если стол недоступен (нет связи с relay-сервером), показывается ошибка с кнопками Try Again и Play vs Bots.</p>
 
   <h3>Relay-сервер комнат</h3>
   <p>В Discord комнаты идут не через PeerJS и брокеры, а через свой сервер <code>server/relay/</code> (Cloudflare Worker, одна комната — один Durable Object). Он только пересылает сообщения, логика комнат прежняя: хост — браузер игрока. Клиент — <code>web/relaypeer.js</code>, для <code>web/net.js</code> он выглядит как PeerJS. Профиль <code>discord</code> включает его сам, на любом другом сайте — параметр <code>?server=ws://127.0.0.1:8787</code>. Для запуска нужен Node.js (только для сервера, игре он не нужен):</p>
@@ -293,6 +295,7 @@
 npm install
 npm run dev</pre><button class="copy" type="button">Копировать</button></div>
   <p>Сервер слушает <code>ws://127.0.0.1:8787</code>. Проверка: <a href="http://localhost:5500/tools/nettest.html?server=ws://127.0.0.1:8787"><code>nettest.html?server=ws://127.0.0.1:8787</code></a> (сценарии про брокеры пропускаются) и <a href="http://localhost:5500/tools/onlinetest.html?server=ws://127.0.0.1:8787"><code>onlinetest.html?server=…</code></a>; mock Discord с сервером: <code>?platform=discord&amp;mockInstance=ABC</code> (адрес сервера по умолчанию — локальный).</p>
+  <p>Вход через Discord: тот же сервер отвечает на <code>POST /api/token</code> (код из <code>authorize()</code> → токен Discord). Client ID записан в <code>wrangler.toml</code> (<code>[vars]</code>), Client Secret — только секрет воркера: <code>npx wrangler secret put DISCORD_CLIENT_SECRET</code> в <code>server/relay</code>; локально — файл <code>server/relay/.env</code> по образцу <code>.env.example</code> (он в <code>.gitignore</code>). Без секрета сервер отвечает 503, игроки играют как «Player N». В mock токен не нужен (<code>mockUser</code>), настоящий обмен проверяется только в Discord.</p>
   <p>Выкладка: <code>npx wrangler login</code> (один раз, в браузере), затем <code>npm run deploy</code> в <code>server/relay</code>. Сейчас сервер выложен на <code>csl-relay.csl-relay.workers.dev</code> (поддомен workers.dev аккаунта — <code>csl-relay</code>): этот адрес записан в <code>RELAY_HOST</code> в <code>web/discord.js</code>, а в Portal нужна строка <code>/x/relay</code> → <code>csl-relay.csl-relay.workers.dev</code>. Если адрес изменится, поменяйте его в обоих местах.</p>
 
   <h3>Спайк Discord в настоящем Discord</h3>

@@ -29,9 +29,10 @@ function detailFor(e) {
 
 /**
  * `siteName()`: the site's own name for the player, or null; with one there is no name to type.
+ * `nameless()`: there is no name to type here (the site's own table): without the site's, the room's host gives one.
  * `changed()`: the status or the invitation changed (the game redraws).
  */
-export function onlineControl({ net, me, siteName = () => null, changed = () => {} }) {
+export function onlineControl({ net, me, siteName = () => null, nameless = () => false, changed = () => {} }) {
   let status = null // null | { busy: text, kind } | { error: text, detail, kind }; kind: quick | create | join | resume
   let invited = null // the code of the room a link brought the player to
   const set = s => { status = s; changed() }
@@ -49,6 +50,7 @@ export function onlineControl({ net, me, siteName = () => null, changed = () => 
   /** Before going online: the site's name, or the one typed, or a random one (kept for next time). */
   function ensureName() {
     if (siteName()) { me.name = siteName(); return }
+    if (nameless()) return
     if (!me.name || !isClean(me.name)) setName(load(NAME_KEY) || me.name)
   }
   async function go(kind, text, fn) {

@@ -15,3 +15,6 @@ docs/crazygames/media/alt/
 # the relay server (server/relay): its packages and wrangler's local state
 server/relay/node_modules/
 server/relay/.wrangler/
+# the relay's local secrets (server/relay/.env.example)
+server/relay/.env
+server/relay/.dev.vars

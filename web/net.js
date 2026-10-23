@@ -18,6 +18,10 @@
 // cells; each site has a prefix of its own, and the other tables a letter after it: QMC1, QMF1, ...):
 // join the first one that is open, or open a free one and wait; someone waiting alone in a higher one
 // moves to a lower one. A quick room whose game is on is open while a bot there keeps a seat for a player.
+//
+// A player signed in on the site (Discord) says hello with their account (uid) and picture: the host
+// keeps both in the room's list of players, and checks them as it checks names (a picture only if the
+// site says it is one of its own). A player with no name at all gets one from the host: "Player N".
 import { Brokers, topic } from './mq.js'
 import { relayPeerClass } from './relaypeer.js'
 import { every } from './clock.js'
@@ -110,9 +114,11 @@ export class Net {
   /** `s` is the session the p0 stand-in keeps: me, players, state, host, and the events it emits. */
   /** `iceRelay`: WebRTC may use relays only, and there are none, so no data channel opens (as behind a strict NAT): ?ice=relay. */
   /** `server`: the relay server's address (web/relaypeer.js): every room goes through it, with no PeerJS, WebRTC or brokers. */
-  constructor(s, { quick = 'QM', iceRelay = false, server = null } = {}) {
+  /** `pictureOk(url)`: whether a player's picture is fine to pass on (the site's own avatars); none are, by default. */
+  constructor(s, { quick = 'QM', iceRelay = false, server = null, pictureOk = () => false } = {}) {
     this.s = s
     this.QUICK = quick
+    this.pictureOk = pictureOk
     this.ice = iceRelay ? { ...ICE, iceTransportPolicy: 'relay' } : ICE
     this.mode = 'off' // off | relay | member | recovering
     this.rtcOff = false // no data channels from this tab, only the brokers (the network tests)
@@ -121,7 +127,7 @@ export class Net {
     this.peer = null
     this.code = null
     this.quick = false
-    this.roster = new Map() // id -> { id, name, color, at }: everyone in the room, `at` is the join order
+    this.roster = new Map() // id -> { id, name, color, at, uid?, pic? }: everyone in the room, `at` is the join order; uid and pic: the site's account and picture
     this.conns = new Map() // relay: player id -> link (a data channel or a broker link)
     this.heard = new Map() // relay: player id -> when they last said anything
     this.pending = new Map() // relay after a takeover: players not back yet -> since when
@@ -169,7 +175,13 @@ export class Net {
     return !(this.quick && this.s.state.lob?.status === 'playing' && !this.seatKept())
   }
   /** `q`: the site's quick rooms, so a quick room of another site turns the player away (an old page sends none: GitHub Pages' QM). */
-  hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back, q: this.QUICK } }
+  hello(back) { const m = this.s.me; return { t: 'hello', v: 1, id: m.id, name: m.name, back: !!back, q: this.QUICK, uid: m.uid || undefined, pic: m.pic || undefined } }
+  /** This tab's own entry in the room's list (a host with no name numbers itself, as it numbers the others). */
+  self(at) {
+    const me = this.s.me
+    if (!me.name) me.name = `Player ${at + 1}`
+    return { id: me.id, name: me.name, color: me.color, at, ...(me.uid && { uid: me.uid }), ...(me.pic && this.pictureOk(me.pic) && { pic: me.pic }) }
+  }
 
   // ---------- what p0.room calls ----------
   send(d, to) {
@@ -492,7 +504,7 @@ export class Net {
       this.seq = Math.max(0, ...[...this.roster.values()].map(p => p.at)) + 1
     } else {
       me.color = COLORS[0]
-      this.roster = new Map([[me.id, { id: me.id, name: me.name, color: me.color, at: 0 }]])
+      this.roster = new Map([[me.id, this.self(0)]])
       this.seq = 1
     }
     peer.on('connection', conn => this.incoming(conn))
@@ -562,8 +574,10 @@ export class Net {
       const prev = this.conns.get(m.id)
       // the same hello by another way (a data channel and a broker): the first one is answered
       if (prev && prev !== conn && m.n && prev.helloN === m.n) { try { conn.close() } catch { /* gone */ } return }
+      const uid = typeof m.uid === 'string' && /^\w{1,32}$/.test(m.uid) ? m.uid : null
       const known = this.roster.get(m.id)
-      if (m.id === this.s.me.id) return deny('taken')
+      // (the same id from another account: two accounts' ids may meet, web/p0web.js; the newcomer takes another)
+      if (m.id === this.s.me.id || (known?.uid && uid && known.uid !== uid)) return deny('taken')
       // a code typed by hand may be another site's quick room: Quick Match players of two sites never meet
       if (this.quick && String(m.q ?? 'QM') !== this.QUICK) return deny('other')
       if (!known && this.roster.size >= this.cap()) return deny('full')
@@ -571,15 +585,17 @@ export class Net {
       // under a new id (the page was closed) to the seat a bot keeps under their name; and a new player
       // comes in while a bot that started the game keeps a seat for one (the game sits them down). A
       // name is checked here too: a client may send anything, and a rude one gets its same stand-in every time
-      const name = safeName(m.name), g = this.s.state.g?.s
-      const seated = g?.pl?.some?.(p => p && (p.id === m.id || (p.rb && p.n === name && !this.roster.has(p.id))))
+      // (no name at all: "Player N", N its place in the room's order, which the player keeps)
+      const name = m.name ? safeName(m.name) : known?.name || `Player ${this.seq + 1}`, g = this.s.state.g?.s
+      const seated = g?.pl?.some?.(p => p && (p.id === m.id || (m.name && p.rb && p.n === name && !this.roster.has(p.id))))
       if (!known && !seated && !this.seatKept() && this.quick && this.s.state.lob?.status === 'playing') return deny('playing')
       id = m.id
       conn.helloN = m.n
       // the new link first: closing the old one then drops no one
       this.conns.set(id, conn); this.heard.set(id, Date.now()); this.pending.delete(id)
       if (prev && prev !== conn) try { prev.close() } catch { /* gone */ }
-      const p = known || { id, name, color: COLORS[this.seq % COLORS.length], at: this.seq++ }
+      const pic = this.pictureOk(m.pic) ? m.pic : null
+      const p = known || { id, name, color: COLORS[this.seq % COLORS.length], at: this.seq++, ...(uid && { uid }), ...(pic && { pic }) }
       this.roster.set(id, p)
       this.welcome(conn, p)
       if (!known) { this.broadcast({ t: 'join', p }, id); this.s.addPlayer(p) }
@@ -653,6 +669,7 @@ export class Net {
     conn.on('close', lost)
     conn.on('error', lost)
     if (msg.you?.color) s.me.color = msg.you.color
+    if (!s.me.name && typeof msg.you?.name === 'string') s.me.name = msg.you.name // the host's "Player N"
     this.roster = new Map(msg.members.filter(p => p && Number.isInteger(p.id)).map(p => [p.id, p]))
     for (const id of [...s.players.keys()]) if (!this.roster.has(id)) s.removePlayer(id)
     for (const p of this.roster.values()) s.addPlayer(p)

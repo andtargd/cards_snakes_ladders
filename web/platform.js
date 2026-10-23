@@ -6,7 +6,7 @@
 // links, the room the player is in, instant multiplayer). No ads: midgameAd stays as it is.
 //
 // On Discord (an Activity in a voice channel) web/discord.js does: the channel's room, which everyone
-// there sits at at once (instantMultiplayer gives its code).
+// there sits at at once (instantMultiplayer gives its code), and the player's name and avatar (getUser).
 //
 // The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames or
 // ?platform=discord (to try it locally), else 'pages'. With ?platform=… or ?debug the profile and
@@ -54,8 +54,14 @@ const impl = {
   midgameAd: async () => {},
   mute() { mute.set('sdk', true) },
   unmute() { mute.set('sdk', false) },
-  /** The player's name (and avatar) on the site: it stands in for the name they type. */
+  /**
+   * The player's account on the site, or null (none, or they would not sign in): { name, id, picture }. The
+   * name stands in for the one they type; id (a string) is the same on every device, so the player keeps
+   * their seat at a table whatever page they come back from; picture is an image's address (an avatar).
+   */
   getUser: async () => null,
+  /** Whether a picture another player's page sent (getUser's) is one of the site's own, fine to show. */
+  pictureOk: () => false,
   /** inviteLink(code): a link to a room that keeps the player on the site, or null for no link of the site's own. */
   inviteLink: noLink,
   /** The room code a site's invite link brought the player with (an SDK's invite parameter), or null. */

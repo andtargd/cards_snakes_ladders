@@ -57,6 +57,7 @@ function getRenderer() {
 
 // this tab keeps its player id through a reload, so an online table gives it its seat back
 // (?sid= keeps several players apart in one tab: the online tests put each in an iframe)
+const USER_MS = 3000, USER_CHANNEL_MS = 120000 // how long the game waits for the site's sign-in (hooks.getUser)
 const NS = q.get('sid') ? ':' + String(q.get('sid')).replace(/\W/g, '').slice(0, 12) : ''
 const ID_KEY = 'csl-id' + NS, ROOM_KEY = 'csl-room' + NS, ROOM_FRESH_MS = 120000
 const newId = () => Math.floor(Math.random() * 90000) + 1000
@@ -68,7 +69,8 @@ let myId = ss.get(ID_KEY)
 if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = newId(); ss.set(ID_KEY, myId) }
 let savedName = ''
 try { savedName = localStorage.getItem('csl-name') || '' } catch { /* private mode */ }
-const me = { id: myId, name: safeName(q.get('name') || savedName, ''), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
+// uid and pic: the player's account and picture on the site (hooks.getUser), when they signed in there
+const me = { id: myId, name: safeName(q.get('name') || savedName, ''), color: '#e94f37', avatar: null, uid: null, pic: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
 const players = new Map([[myId, me]])
 const state = {}
 let host = myId
@@ -84,7 +86,7 @@ const session = {
   get host() { return host },
   addPlayer(p) {
     if (p.id === myId || players.has(p.id)) return
-    const pl = { id: p.id, name: safeName(p.name), color: p.color || '#9a948a', avatar: null, position: new THREE.Vector3(), yaw: 0, isMe: false }
+    const pl = { id: p.id, name: safeName(p.name), color: p.color || '#9a948a', avatar: null, pic: typeof p.pic === 'string' ? p.pic : null, position: new THREE.Vector3(), yaw: 0, isMe: false }
     players.set(p.id, pl)
     emit('join', pl)
   },
@@ -123,10 +125,27 @@ const session = {
     if (host === old) host = myId
     ss.set(ID_KEY, myId)
   },
+  /**
+   * The player signed in on the site: their id comes from their account, the same on every device and
+   * after the page was closed, so a table knows them again and gives them back their seat. (Two accounts
+   * may get one id: the room's host says 'taken' to the second, and it takes another, as a duplicated tab does.)
+   */
+  signedIn(uid, pic) {
+    me.uid = uid; me.pic = pic || null
+    if (net.online) return
+    let h = 0x811c9dc5
+    for (const c of uid) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0
+    const id = 1000 + (h % 99000), old = myId
+    if (id === old) return
+    myId = id
+    players.delete(old); me.id = myId; players.set(myId, me)
+    if (host === old) host = myId
+    ss.set(ID_KEY, myId)
+  },
 }
 // ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round).
 // The relay server where the profile asks for it, or ?server=ws://… on any site (web/relaypeer.js)
-const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay', server: q.get('server') || (platform.server ? relayServer() : null) })
+const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay', server: q.get('server') || (platform.server ? relayServer() : null), pictureOk: url => hooks.pictureOk(url) === true })
 // a duplicated tab asks whether its id is someone's already, and takes a new one if so
 try {
   const tabs = new BroadcastChannel('csl-tabs'), born = Date.now()
@@ -169,7 +188,21 @@ const room = {
 // the site's own name for the player (hooks.getUser), if it has one: then there is no name to type
 let siteName = null
 const watchers = new Set()
-const online = onlineControl({ net, me, siteName: () => siteName, changed: () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } } })
+const changed = () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } }
+// at the site's own table (Discord's) there is no name to type either: one who did not sign in is "Player N" there
+const online = onlineControl({ net, me, siteName: () => siteName, nameless: () => !!channel, changed })
+// the players' pictures (the site's avatars, hooks.pictureOk), each fetched once: url -> an image, or null while it loads (or if it failed)
+const pictures = new Map()
+function picture(id) {
+  const url = players.get(id)?.pic
+  if (!url) return null
+  if (!pictures.has(url)) {
+    pictures.set(url, null)
+    fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() }).then(b => createImageBitmap(b))
+      .then(img => { pictures.set(url, img); changed() }, e => console.warn('[web] no picture:', url, e?.message || e))
+  }
+  return pictures.get(url)
+}
 const web = {
   platform, // the site this runs on (web/platform.js)
   fixedRatio: !!DPR && !q.has('adapt'), // ?dpr= keeps that pixel ratio (the game would lower it on a slow machine), unless ?adapt
@@ -194,6 +227,8 @@ const web = {
   // the name the others see: the site's own, else the one typed here
   get name() { return siteName || me.name },
   get siteName() { return siteName },
+  /** Player `id`'s picture on the site (their avatar) to draw, or null: none, or not here yet (onChange says when it is). */
+  picture,
   setName: v => online.setName(v),
   randomName: () => online.randomName(),
   editText, // a real input over a box the game draws (web/textfield.js)
@@ -375,12 +410,16 @@ async function boot() {
   // a site that puts everyone at its own table says which (a room code), before the game starts: it has no menu then
   const instant = hooks.instantMultiplayer()
   if (typeof instant === 'string' && cleanCode(instant).length >= 3) channel = cleanCode(instant)
-  // the site's own name for the player, if it has one, stands in for the one they type
+  // the site's own name for the player, if it has one, stands in for the one they type. The site's own
+  // table waits for it longer: Discord asks the player the first time, with its own box over the game
   const user = Promise.resolve(hooks.getUser()).catch(() => null)
   const mod = await loaded
   await mod.default(p0)
-  const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), 3000))])
+  const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), channel ? USER_CHANNEL_MS : USER_MS))])
   if (u?.name && safeName(u.name, '')) me.name = siteName = safeName(u.name, '')
+  // (at the site's own table a name saved from the Online screen is not one: the site's, else the host's "Player N")
+  else if (channel) me.name = safeName(q.get('name'), '')
+  if (typeof u?.id === 'string' && u.id) session.signedIn(u.id, typeof u.picture === 'string' ? u.picture : null)
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
@@ -392,7 +431,7 @@ async function boot() {
   const code = channel || cleanCode(q.get('room')) || invite
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
-  if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
+  if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && (me.name || channel)) {
     online.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
   } else if (channel) online.enter(channel)
   else if (code.length >= 3 && code === invite) online.join(code)
