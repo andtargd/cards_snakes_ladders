@@ -212,6 +212,7 @@ function drawTitle(g, W, H, t) {
  * scales it down (smooth edges); `numbers` keeps the cells' numbers; `title`/`fan`: false leaves them off.
  */
 export function renderCover(variant, W, H, { ss = 2, numbers = false, title = true, fan = true } = {}) {
+  if (variant === 'icon') return renderIcon(Math.min(W, H), { ss })
   if (variant === 'burst' || variant === 'burst-sl') return renderBurst(W, H, { ss, pieces: variant === 'burst-sl' })
   const v = VARIANTS[variant] || VARIANTS.climb
   const c = v[shapeOf(W, H)]
@@ -498,5 +499,38 @@ export function renderBurst(W, H, { ss = 2, pieces = false } = {}) {
   const og = out.getContext('2d')
   og.imageSmoothingEnabled = true; og.imageSmoothingQuality = 'high'
   og.drawImage(big, 0, 0, W, H)
+  return out
+}
+
+// ---------- E: icon — the app's square badge (Discord): no name, a ladder and a snake crossed, a big die over them ----------
+// Discord crops it to a circle and shows it small: everything that matters stays in the middle.
+const ICON = {
+  title: { x: 0.5, y: 0.5 }, // the rays' centre
+  ladder: { x: 0.76, y: 0.25, u: 0.21, dir: -45 },
+  snake: { x: 0.28, y: 0.28, u: 0.22, dir: -128 },
+  die: { x: 0.52, y: 0.55, s: 0.4, rot: [-26, 36, 12] },
+}
+
+/** The icon, a canvas S x S. */
+export function renderIcon(S, { ss = 2 } = {}) {
+  const B = S * ss
+  const big = document.createElement('canvas')
+  big.width = big.height = B
+  const g = big.getContext('2d')
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'
+  drawBurstBackground(g, B, B, ICON)
+  drawPiece(g, B, B, 'ladder', ICON.ladder)
+  drawPiece(g, B, B, 'snake', ICON.snake)
+  // the die at rest on the paper: no speed lines, its shadow straight under it
+  const d = ICON.die, ds = d.s * B, px = Math.ceil(ds * 1.6)
+  g.save()
+  g.shadowColor = 'rgba(43,38,34,0.3)'; g.shadowBlur = ds * 0.12; g.shadowOffsetY = ds * 0.08
+  g.drawImage(renderDie(px, d.rot, false), d.x * B - px / 2, d.y * B - px / 2)
+  g.restore()
+  const out = document.createElement('canvas')
+  out.width = out.height = S
+  const og = out.getContext('2d')
+  og.imageSmoothingEnabled = true; og.imageSmoothingQuality = 'high'
+  og.drawImage(big, 0, 0, S, S)
   return out
 }
