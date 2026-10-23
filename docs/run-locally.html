@@ -223,6 +223,7 @@
     <tr><td><code>safe=47,0,34,0</code></td><td>изобразить вырез и полоску «домой» телефона: отступы сверху, справа, снизу, слева</td></tr>
   </table></div>
   <p>Последние два параметра понимает и сама игра: <a href="http://localhost:5500/?dpr=1&amp;safe=0,44,21,44"><code>localhost:5500/?dpr=1&amp;safe=0,44,21,44</code></a>. С <code>?dpr=</code> игра не снижает разрешение на медленной машине; <code>?dpr=2&amp;adapt</code> снижает, как обычно.</p>
+  <p>Громкость звуков кости тоже задаётся в адресе: <a href="http://localhost:5500/?rollvol=0.25&amp;landvol=0.55"><code>?rollvol=0.25&amp;landvol=0.55</code></a>. <code>rollvol</code> — щелчки при броске, <code>landvol</code> — звон, когда выпадает число. Можно от 0 до 2; по умолчанию 0.4 и 0.6. Действует только на страницу с этими параметрами.</p>
 
   <h3>Обложки и видео для подачи</h3>
   <p><a href="http://localhost:5500/tools/covers.html?out=0"><code>tools/covers.html</code></a> рисует обложки из сцены игры (доска, змеи, лестницы, пешки, веер карт и название) в трёх композициях: <code>climb</code>, <code>slant</code>, <code>close</code>, каждую в размерах 1920x1080, 800x1200 и 800x800. Без параметра <code>out</code> файлы ложатся в <code>tmp/covers/</code>; <code>out=docs/crazygames/media</code> сохраняет их рядом с остальными материалами подачи, <code>out=0</code> только показывает. <code>v=slant</code> оставляет одну композицию, <code>numbers=1</code> возвращает номера клеток (по умолчанию их нет: на обложке не должно быть текста, кроме названия).</p>
