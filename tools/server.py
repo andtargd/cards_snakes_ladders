@@ -3,8 +3,9 @@ and accepts POST /save/<path> so the in-browser builder can write GLBs into buil
 (and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/).
 
 A page given after the port is served at / instead of index.html, with the query kept: a Discord
-activity always opens at /, so `python tools/server.py 5500 tools/discordspike.html` behind a tunnel
-opens the spike page there."""
+activity always opens at /, so `python tools/server.py 5550 tools/discordspike.html` behind a tunnel
+opens the spike page there. A folder given there is served as the root instead of the project's:
+`python tools/server.py 5550 dist/discord` serves the Discord build."""
 import http.server
 import os
 import sys
@@ -12,11 +13,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_DIRS = ('build/', 'tmp/', 'docs/crazygames/media/')
 HOME = None  # the page served at /, when one is given
+SERVE = ROOT  # the folder served
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *a, **k):
-        super().__init__(*a, directory=ROOT, **k)
+        super().__init__(*a, directory=SERVE, **k)
 
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -59,5 +61,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5500
-    HOME = sys.argv[2].lstrip('/') if len(sys.argv) > 2 else None
+    arg = sys.argv[2].strip('/') if len(sys.argv) > 2 else None
+    if arg and os.path.isdir(os.path.join(ROOT, arg)):
+        SERVE = os.path.join(ROOT, arg)
+    else:
+        HOME = arg
     http.server.ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()

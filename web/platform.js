@@ -1,18 +1,23 @@
-// The site the web build runs on (GitHub Pages or CrazyGames) and the calls a site's SDK answers.
+// The site the web build runs on (GitHub Pages, CrazyGames or Discord) and the calls a site's SDK answers.
 // The game in experience/ never looks at the site itself: it reads the profile and calls the hooks
 // through p0.web (Project 0 has no p0.web, so there every call is skipped). An SDK plugs in here,
 // with provide({ ... }) in place of the no-op hooks, and nothing in the game changes.
 // On CrazyGames the SDK v3 does so: loading, gameplay start and stop, happytime, and online play (invite
 // links, the room the player is in, instant multiplayer). No ads: midgameAd stays as it is.
 //
-// The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames (to try it
-// locally), else 'pages'. With ?platform=… or ?debug the profile and every hook call go to the console.
+// On Discord (an Activity in a voice channel) web/discord.js does: the channel's room.
+//
+// The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames or
+// ?platform=discord (to try it locally), else 'pages'. With ?platform=… or ?debug the profile and
+// every hook call go to the console.
 
 const PROFILES = {
   // links to rooms are fine; Quick Match keeps the rooms (QM1…) its players already meet in
   pages: { quickPrefix: 'QM', allowLinks: true, privacyNotice: true },
   // the game is played only on the portal: no links to its files; Quick Match rooms of its own
   crazygames: { quickPrefix: 'CG', allowLinks: false, privacyNotice: true },
+  // an Activity in Discord's iframe: no links out of it; Quick Match rooms of its own
+  discord: { quickPrefix: 'DC', allowLinks: false, privacyNotice: true },
 }
 
 const q = new URLSearchParams(globalThis.location?.search || '')
@@ -138,12 +143,21 @@ async function crazyGames() {
   return SDK.environment
 }
 
+// ---------- Discord: web/discord.js, loaded on this profile only ----------
+async function discord() {
+  const { start } = await import('./discord.js')
+  return start(provide)
+}
+
+const SDKS = { crazygames: ['CrazyGames', crazyGames], discord: ['Discord', discord] }
+const [sdkName, startSdk] = SDKS[platform.id] || []
+
 /** The site's SDK is ready, or not there (then the hooks stay as they are): the game waits for this before it starts. */
-export const ready = (platform.id === 'crazygames' ? crazyGames() : Promise.resolve(null)).then(env => {
-  if (env) console.info('[platform] CrazyGames SDK:', env)
+export const ready = (startSdk ? startSdk() : Promise.resolve(null)).then(env => {
+  if (env) console.info(`[platform] ${sdkName} SDK:`, env)
   return env
 }, e => {
-  console.warn('[platform] no CrazyGames SDK (rooms go by their code):', e?.message || e)
+  console.warn(`[platform] no ${sdkName} SDK (rooms go by their code):`, e?.message || e)
   return null
 })
 
