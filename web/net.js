@@ -10,11 +10,16 @@
 // whose data channel does not open in a few seconds says hello there too. The relay answers the
 // first hello it gets and the player stays on that way.
 //
+// Where neither works (Discord's iframe), the room goes through our own relay server instead
+// (server/relay, web/relaypeer.js): it holds the rooms' ids as the signalling server does and carries
+// every link, and web/relaypeer.js makes it look like PeerJS here, so the rooms work the same way.
+//
 // Quick Match uses a few well-known rooms for each mode and board (QM1, QM2, ... for Champion on 100
 // cells; each site has a prefix of its own, and the other tables a letter after it: QMC1, QMF1, ...):
 // join the first one that is open, or open a free one and wait; someone waiting alone in a higher one
 // moves to a lower one. A quick room whose game is on is open while a bot there keeps a seat for a player.
 import { Brokers, topic } from './mq.js'
+import { relayPeerClass } from './relaypeer.js'
 import { every } from './clock.js'
 import { safeName } from './names.js'
 
@@ -104,7 +109,8 @@ class MqLink {
 export class Net {
   /** `s` is the session the p0 stand-in keeps: me, players, state, host, and the events it emits. */
   /** `iceRelay`: WebRTC may use relays only, and there are none, so no data channel opens (as behind a strict NAT): ?ice=relay. */
-  constructor(s, { quick = 'QM', iceRelay = false } = {}) {
+  /** `server`: the relay server's address (web/relaypeer.js): every room goes through it, with no PeerJS, WebRTC or brokers. */
+  constructor(s, { quick = 'QM', iceRelay = false, server = null } = {}) {
     this.s = s
     this.QUICK = quick
     this.ice = iceRelay ? { ...ICE, iceTransportPolicy: 'relay' } : ICE
@@ -125,7 +131,8 @@ export class Net {
     this.lastTick = Date.now()
     this.mergeProbe = null
     this.merging = false
-    this.mq = new Brokers()
+    this.Peer = server ? relayPeerClass(server) : null // PeerJS's Peer, or the relay server's stand-in for it
+    this.mq = new Brokers(server ? [] : undefined)
     this.links = new Map() // broker links of either side: key -> MqLink
     this.served = null // relay: the topic it listens on at the brokers
     this.inbox = null // member: the topic the relay answers on
@@ -142,8 +149,8 @@ export class Net {
     globalThis.addEventListener?.('online', () => this.wake())
   }
   get online() { return this.mode !== 'off' }
-  /** How this tab reaches the room: 'relay' (it holds it), 'rtc', 'mq:<broker>', or null. */
-  get via() { return this.mode === 'relay' ? 'relay' : this.up ? (this.up.kind === 'mq' ? 'mq:' + this.up.broker.name : 'rtc') : null }
+  /** How this tab reaches the room: 'relay' (it holds it), 'rtc', 'mq:<broker>', 'server' (the relay server), or null. */
+  get via() { return this.mode === 'relay' ? 'relay' : this.up ? (this.up.kind === 'mq' ? 'mq:' + this.up.broker.name : this.up.kind === 'server' ? 'server' : 'rtc') : null }
   /** The room, for the game: `mode` and `size` are what a quick room plays (the link is the site's to give, p0web.js). */
   info(fresh) {
     const t = this.quick ? quickTable(this.code, this.QUICK) : { mode: null, size: null }
@@ -323,7 +330,7 @@ export class Net {
 
   // ---------- peers and connections ----------
   async openPeer(code) {
-    const Peer = await loadPeer()
+    const Peer = this.Peer || await loadPeer()
     return new Promise((res, rej) => {
       const opts = { debug: 0, config: this.ice }
       const p = code ? new Peer(PREFIX + code, opts) : new Peer(opts)

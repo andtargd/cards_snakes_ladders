@@ -21,6 +21,7 @@
 <h1>Online game: stage tests</h1>
 <p>Three players, each a whole game in an iframe (<code>index.html?sid=…</code>), through the game's real Online screen,
   lobby and Shared Table, over the real signalling server and brokers. Bob has no direct path (brokers only).
+  <code>?server=ws://127.0.0.1:8787</code>: everyone through the relay server instead (server/relay, <code>npm run dev</code>), as on Discord.
   Results in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
 <div id="frames"></div>
 <table><thead><tr><th>#</th><th>Stage</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
@@ -45,6 +46,8 @@ async function waitFor(fn, ms, what) {
 // ---------- the players ----------
 // ?ice=relay: no player gets a direct connection (a strict NAT everywhere): everything goes through the brokers
 const ICE = new URLSearchParams(location.search).get('ice') === 'relay' ? '&ice=relay' : ''
+// ?server=ws://…: every player through the relay server (web/relaypeer.js), as on Discord
+const SERVER = new URLSearchParams(location.search).get('server')
 const box = document.getElementById('frames')
 const F = {}
 function open(key, name, extra = '') {
@@ -56,7 +59,7 @@ function open(key, name, extra = '') {
   }
   fig.querySelector('iframe')?.remove()
   const f = document.createElement('iframe')
-  f.src = `../index.html?sid=${key}&name=${name}${ICE}${extra}`
+  f.src = `../index.html?sid=${key}&name=${name}${ICE}${SERVER ? '&server=' + encodeURIComponent(SERVER) : ''}${extra}`
   fig.appendChild(f)
   F[key] = f
   return waitFor(() => f.contentWindow.__csl && f.contentWindow.__cslNet && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false, 40000, name + ' loaded')
@@ -124,7 +127,7 @@ step('Ann creates a room on the Online screen', async note => {
   return ms
 })
 step('Bob types the code on a Russian keyboard and joins with no direct path', async note => {
-  net('b').rtcOff = true
+  if (!SERVER) net('b').rtcOff = true
   online('b', 'Bob')
   const input = await codeField('b')
   // a desktop layout: keydown with the key's place
@@ -142,7 +145,7 @@ step('Bob types the code on a Russian keyboard and joins with no direct path', a
   enter(input)
   ok(app('b').ui.joinCode === code && !doc('b').querySelector('input.tf'), 'Enter in the code field: ' + app('b').ui.joinCode)
   const ms = await waitFor(() => app('b').screen === 'lobby' && app('a').lobby().seats.some(s => s?.n === 'Bob'), 25000, 'Bob seated')
-  ok(net('b').via?.startsWith('mq:'), 'Bob came by ' + net('b').via)
+  ok(SERVER ? net('b').via === 'server' : net('b').via?.startsWith('mq:'), 'Bob came by ' + net('b').via)
   note(`joined in ${ms} ms by ${net('b').via}`)
   return ms
 })

@@ -11,3 +11,7 @@ dist/
 docs/crazygames/media/*.mp4
 docs/crazygames/media/*.webm
 docs/crazygames/media/alt/
+
+# the relay server (server/relay): its packages and wrangler's local state
+server/relay/node_modules/
+server/relay/.wrangler/

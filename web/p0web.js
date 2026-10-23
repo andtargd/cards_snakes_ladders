@@ -4,6 +4,7 @@
 // Shared Table works as it does in Project 0. There is no city here.
 import * as THREE from 'three'
 import { Net, cleanCode } from './net.js'
+import { relayServer } from './relaypeer.js'
 import { safeName } from './names.js'
 import { onlineControl, shareRoom } from './online.js'
 import { editText } from './textfield.js'
@@ -120,8 +121,9 @@ const session = {
     ss.set(ID_KEY, myId)
   },
 }
-// ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round)
-const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay' })
+// ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round).
+// The relay server where the profile asks for it, or ?server=ws://… on any site (web/relaypeer.js)
+const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay', server: q.get('server') || (platform.server ? relayServer() : null) })
 // a duplicated tab asks whether its id is someone's already, and takes a new one if so
 try {
   const tabs = new BroadcastChannel('csl-tabs'), born = Date.now()

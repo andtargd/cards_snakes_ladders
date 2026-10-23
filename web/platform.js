@@ -16,8 +16,9 @@ const PROFILES = {
   pages: { quickPrefix: 'QM', allowLinks: true, privacyNotice: true },
   // the game is played only on the portal: no links to its files; Quick Match rooms of its own
   crazygames: { quickPrefix: 'CG', allowLinks: false, privacyNotice: true },
-  // an Activity in Discord's iframe: no links out of it; Quick Match rooms of its own
-  discord: { quickPrefix: 'DC', allowLinks: false, privacyNotice: true },
+  // an Activity in Discord's iframe: no links out of it; Quick Match rooms of its own; rooms through
+  // the relay server (WebRTC and the public brokers do not get through there)
+  discord: { quickPrefix: 'DC', allowLinks: false, privacyNotice: true, server: true },
 }
 
 const q = new URLSearchParams(globalThis.location?.search || '')

@@ -17,13 +17,18 @@
 <body>
 <h1>Online rooms: network tests</h1>
 <p>Real PeerJS signalling and the real public brokers, several players in this one page (web/net.js with stand-in sessions).
-  <code>?only=S1,S5</code> runs some of them. Results are in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
+  <code>?only=S1,S5</code> runs some of them. <code>?server=ws://127.0.0.1:8787</code>: everything through the relay server
+  (server/relay, <code>npm run dev</code>) instead of PeerJS and the brokers; the broker-only scenarios are skipped. Results are in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
 <table><thead><tr><th>#</th><th>Scenario</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
 <script type="module">
 import { Net } from '../web/net.js'
 
 const q = new URLSearchParams(location.search)
 const only = q.get('only') ? new Set(q.get('only').split(',')) : null
+// ?server=ws://…: the rooms go through the relay server (web/relaypeer.js), as on Discord
+const SERVER = q.get('server')
+const SKIP = new Set(SERVER ? ['S2', 'S15'] : []) // about the brokers alone
+const DIRECT = SERVER ? 'server' : 'rtc' // how a player who can comes in
 // quick rooms of this run only, so real players are not met (and not bothered)
 const QP = 'X' + 'ABCDEFGHJKMNPRSTUVWXYZ'[Math.floor(Math.random() * 22)]
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -59,8 +64,8 @@ function player(name, { rtcOff = false, id } = {}) {
     reset() { for (const id of [...this.players.keys()]) this.removePlayer(id); for (const k of Object.keys(this.state)) delete this.state[k]; this.setHost(me.id) },
     renewId() { this.players.delete(me.id); me.id = nextId++; this.players.set(me.id, me); this.host = me.id },
   }
-  const net = new Net(s, { quick: QP })
-  net.rtcOff = rtcOff
+  const net = new Net(s, { quick: QP, server: SERVER })
+  net.rtcOff = SERVER ? false : rtcOff
   const P = { name, s, net, get id() { return me.id } }
   all.add(P)
   return P
@@ -72,6 +77,12 @@ async function timed(p) { const t0 = Date.now(); const v = await p; return [v, D
 function cleanup() { for (const P of all) { try { P.net.unload() } catch { /* gone */ } } all.clear() }
 /** The relay's page stops: no word to anyone, its signalling and broker connections die, nothing it gets is handled. */
 function freeze(P) {
+  if (SERVER) { // its sockets stay open but nothing goes through them: the server waits for STALE_MS
+    const n = P.net, saved = { sendConn: n.sendConn, tick: n.tick }
+    n.sendConn = () => {}; n.tick = () => {}
+    n.peer.frozen = true
+    return () => { Object.assign(n, saved); n.peer.frozen = false; n.wake() }
+  }
   const n = P.net, saved = { sendConn: n.sendConn, tick: n.tick, relayMq: n.relayMq, reconnect: n.peer?.reconnect }
   n.sendConn = () => {}; n.tick = () => {}; n.relayMq = () => {}
   if (n.peer) { n.peer.reconnect = () => {}; n.peer.off('connection'); try { n.peer.socket._socket.close() } catch { /* gone */ } }
@@ -89,7 +100,7 @@ const S = {}
 S.S1 = ['Join directly (WebRTC): state and messages both ways', async note => {
   const A = player('A'), code = await A.net.create()
   const B = player('B'), [, ms] = await timed(B.net.join(code))
-  ok(B.net.via === 'rtc', 'B came by ' + B.net.via)
+  ok(B.net.via === DIRECT, 'B came by ' + B.net.via)
   await waitFor(() => A.s.players.has(B.id) && B.s.players.has(A.id) && B.s.host === A.id, 3000, 'both in the room')
   set(A, 'x', { v: 1 }); set(B, 'y', 2)
   await waitFor(() => B.s.state.x?.v === 1 && A.s.state.y === 2, 3000, 'state both ways')
@@ -145,9 +156,9 @@ S.S5 = ['The relay leaves: the oldest takes the room over, the game state stays'
 }]
 S.S6 = ['A room is gone once its last player leaves', async note => {
   const A = player('A'), code = await A.net.create()
-  await waitFor(() => A.net.mq.anyUp, 6000, 'the relay at a broker')
+  if (!SERVER) await waitFor(() => A.net.mq.anyUp, 6000, 'the relay at a broker')
   A.net.leave()
-  await waitFor(() => A.net.mq.list.every(b => !b.up && !b.subs.size) && !A.net.served, 2000, 'brokers closed and topics forgotten')
+  await waitFor(() => A.net.mq.list.every(b => !b.up && !b.subs.size) && !A.net.served && !A.net.peer, 2000, 'brokers closed and topics forgotten')
   const D = player('D')
   const [, ms] = await timed(rejects(D.net.join(code), 'not-found', 'join after the room closed'))
   note(`not-found ${ms} ms after; no broker connection left`)
@@ -168,6 +179,7 @@ S.S8 = ['A player through a broker who vanishes is dropped after the heartbeat w
   await waitFor(() => A.s.players.has(C.id), 3000, 'C in')
   C.net.relayLost = () => {}; C.net.tick = () => {}
   for (const b of C.net.mq.list) { b.want = false; try { b.ws?.close() } catch { /* gone */ } }
+  if (SERVER) C.net.peer.frozen = true // its link stays open at the server, silent
   const ms = await waitFor(() => !A.s.players.has(C.id), 32000, 'C dropped')
   ok(ms > 12000, 'dropped too soon: ' + ms)
   note(`dropped after ${ms} ms`)
@@ -177,7 +189,7 @@ S.S9 = ['The relay vanishes without a word, then comes back and joins the new re
   const A = player('A'), code = await A.net.create()
   const B = player('B'); await B.net.join(code)
   const C = player('C', { rtcOff: true }); await C.net.join(code)
-  await waitFor(() => A.net.mq.anyUp && C.s.players.has(B.id), 5000, 'all in')
+  await waitFor(() => (SERVER || A.net.mq.anyUp) && C.s.players.has(B.id), 5000, 'all in')
   const t0 = Date.now()
   const back = freeze(A)
   await waitFor(() => B.net.mode === 'relay' && C.net.mode === 'member' && C.s.host === B.id, 45000, 'B took over')
@@ -239,7 +251,8 @@ S.S14 = ['A player\'s broker drops: they reconnect and keep their place', async 
   const up = C.net.up, b = up.broker
   let dropped = false
   const was = A.s.removePlayer.bind(A.s); A.s.removePlayer = id => { if (id === C.id) dropped = true; was(id) }
-  try { b.ws.close() } catch { /* gone */ }
+  // the relay server: C's link drops as a phone's network does (not a clean close: the host is not told)
+  if (SERVER) up.ws.close(4000, 'dropped'); else try { b.ws.close() } catch { /* gone */ }
   const state = n => `${n.s.me.name}: ${n.mode} via ${n.via}, brokers ${n.mq.list.map(x => x.name + (x.up ? '+' : '-') + [...x.acked].length).join(' ')}, links ${n.links.size}`
   const ms = await waitFor(() => C.net.mode === 'member' && C.net.up && C.net.up !== up, 20000, 'C back').catch(e => { throw new Error(e.message + ' — ' + state(C.net) + ' / ' + state(A.net)) })
   ok(!dropped && A.s.players.has(C.id), 'C lost their place')
@@ -275,7 +288,7 @@ S.S16 = ['One hello by two ways gets one welcome', async note => {
 }]
 S.S17 = ['The host\'s page does not answer: the join says so', async note => {
   const A = player('A'), code = await A.net.create()
-  await waitFor(() => A.net.mq.anyUp, 6000, 'relay at a broker')
+  if (!SERVER) await waitFor(() => A.net.mq.anyUp, 6000, 'relay at a broker')
   A.net.peer.off('connection'); A.net.relayMq = () => {}
   const B = player('B')
   const [e, ms] = await timed(rejects(B.net.join(code), 'timeout', 'join to a page that does not answer'))
@@ -306,6 +319,12 @@ window.done = (async () => {
   for (const [key, [title, fn]] of Object.entries(S)) {
     if (only && !only.has(key)) continue
     const tr = document.createElement('tr')
+    if (SKIP.has(key)) {
+      tr.innerHTML = `<td>${key}</td><td>${title}</td><td>skip</td><td></td><td class="note">about the brokers alone (not used with the relay server)</td>`
+      rows.appendChild(tr)
+      window.results.push({ key, title, ok: true, skipped: true })
+      continue
+    }
     tr.innerHTML = `<td>${key}</td><td>${title}</td><td class="run">running</td><td></td><td class="note"></td>`
     rows.appendChild(tr)
     const notes = []
