@@ -16,7 +16,7 @@
 // The rooms go through the relay server (the profile's `server`; web/relaypeer.js dials /x/relay on the
 // page's own domain, so its address is only here and in the Portal); PeerJS and the brokers stay
 // mapped for the spike's comparison and as a way back.
-export const RELAY_HOST = 'csl-relay.andtargd.workers.dev' // the deployed server/relay (wrangler deploy prints it)
+export const RELAY_HOST = 'csl-relay.csl-relay.workers.dev' // the deployed server/relay (npm run deploy prints it)
 export const MAPPINGS = [
   { prefix: '/x/relay', target: RELAY_HOST }, // the relay server (server/relay)
   { prefix: '/x/peerjs', target: '0.peerjs.com' }, // PeerJS signalling (web/net.js)
