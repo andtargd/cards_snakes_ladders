@@ -296,7 +296,9 @@ const p0 = {
         // it ends `sec` from now: full until then, fading out over FADE s before
         const endIn = sec => {
           end = Math.max(start + 0.01, c.currentTime + sec)
+          // (cancelling drops the level set for the start too, and the gain went back to 1 until the fade: set it again)
           gain.gain.cancelScheduledValues(c.currentTime)
+          gain.gain.setValueAtTime(level, Math.max(c.currentTime, start))
           gain.gain.setValueAtTime(level, Math.max(c.currentTime, start, end - FADE)); gain.gain.linearRampToValueAtTime(0, end)
           src.stop(end + 0.01)
         }

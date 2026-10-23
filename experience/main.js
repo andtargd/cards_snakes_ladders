@@ -25,7 +25,16 @@ const MAX_NAME = 14
 // wooden ticks as they are thrown (quicker with the game), `land` the ding as they come to rest showing the number
 const takes = (name, n) => Array.from({ length: n }, (_, i) => `${name}${i + 1}`)
 const ROLL_SOUNDS = { roll: takes('roll', 4), land: takes('land', 3) }
-const ROLL_VOL = { roll: 0.5, land: 0.55 }
+// (the ticks a little under the ding). For trying levels out, the page's address can set them:
+// ?rollvol=0.3&landvol=0.6 (0 to 2; 2 is as loud as a sound goes)
+function urlVol(key, def) {
+  try {
+    const s = new URLSearchParams(globalThis.location?.search || '').get(key)
+    const v = s === null || s === '' ? NaN : Number(s)
+    return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : def
+  } catch { return def }
+}
+const ROLL_VOL = { roll: urlVol('rollvol', 0.4), land: urlVol('landvol', 0.6) }
 
 /** Players at a table the rules allow: Fool needs three. */
 const least = mode => (mode === 'fool' ? 3 : 2)
