@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discord spike: what gets through</title>
+<style>
+  body { margin: 0; padding: 12px; font: 14px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 14px 0 4px; }
+  p { margin: 0 0 8px; color: #5b544c; }
+  table { border-collapse: collapse; width: 100%; max-width: 980px; background: #fffdf8; }
+  td, th { padding: 5px 7px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; word-break: break-word; }
+  #env td:first-child { color: #5b544c; width: 9em; }
+  #log { font: 12px/1.35 ui-monospace, monospace; white-space: pre-wrap; color: #c62828; margin: 0; }
+  textarea { width: 100%; max-width: 980px; height: 160px; font: 12px/1.35 ui-monospace, monospace; box-sizing: border-box; }
+  button { font: inherit; padding: 6px 12px; margin: 6px 6px 0 0; }
+</style>
+</head>
+<body>
+<h1>Discord spike: what gets through the proxy</h1>
+<p>Task 1 of docs/discord/launch-plan.md, not part of the game. Open it as the activity on two devices in one voice
+  channel (a computer and a phone on mobile data). Outside Discord it uses the direct URLs: <code>?room=ABC</code> pairs two tabs.</p>
+<table id="env"><tbody></tbody></table>
+<h2>Tests</h2>
+<table><thead><tr><th>#</th><th>Test</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<h2>Blocked by CSP and errors</h2>
+<pre id="log">none yet</pre>
+<h2>Report</h2>
+<textarea id="report" readonly></textarea>
+<div><button id="copy">Copy report</button><button id="reload">Run again</button></div>
+<script>window.spikeInline = true</script>
+<script type="module" src="/tools/discordspike.js"></script>
+</body>
+</html>

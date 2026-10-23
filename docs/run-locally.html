@@ -265,8 +265,15 @@
     <tr><td><a href="http://localhost:5500/tools/shots.html?sizes=821x462&amp;screens=menu,game"><code>shots.html</code></a></td><td>Снимки экранов на размерах QA и телефонов (см. шаг 2)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/covers.html?out=0"><code>covers.html</code></a></td><td>Обложки для подачи (см. шаг 2)</td></tr>
     <tr><td><a href="http://localhost:5500/tools/trailer.html?rec=none"><code>trailer.html</code></a></td><td>Ролик для подачи по сценарию (см. шаг 2)</td></tr>
+    <tr><td><a href="http://localhost:5500/tools/discordspike.html?room=test"><code>discordspike.html?room=test</code></a></td><td>Спайк Discord: PeerJS, WebRTC, MQTT и WebSocket. Вторая вкладка с тем же <code>room</code> проверяет связь между игроками (см. ниже)</td></tr>
   </table></div>
   <p>Онлайн-тесты ходят на настоящие публичные серверы (PeerJS и MQTT-брокеры), поэтому нужен интернет.</p>
+
+  <h3>Спайк Discord в настоящем Discord</h3>
+  <p>Активность Discord всегда открывается с адреса <code>/</code>. Если после порта указать страницу, сервер отдаёт её на <code>/</code> вместо <code>index.html</code> (в <code>.claude/launch.json</code> это конфиг <code>discord-spike</code>):</p>
+  <div class="cmd"><pre>python tools/server.py 5550 tools/discordspike.html</pre><button class="copy" type="button">Копировать</button></div>
+  <div class="cmd"><pre>cloudflared tunnel --url http://localhost:5550</pre><button class="copy" type="button">Копировать</button></div>
+  <p>В Developer Portal → Activities → URL Mappings: <code>/</code> → адрес туннеля (без <code>https://</code>), а для тестов ещё <code>/x/peerjs</code> → <code>0.peerjs.com</code>, <code>/x/emqx</code> → <code>broker.emqx.io:8084</code>, <code>/x/mosq</code> → <code>test.mosquitto.org:8081</code>, <code>/x/echo</code> → <code>echo.websocket.org</code>. Запустите активность в голосовом канале на компьютере и на телефоне (на мобильном интернете). Client ID страница берёт из адреса <code>&lt;id&gt;.discordsays.com</code>. Внизу страницы — отчёт и кнопка Copy report, в списке «Blocked by CSP» видно, что запретил Discord.</p>
 
   <h2>Если что-то не так</h2>
   <details><summary>Пустая страница или ошибки модулей в консоли</summary><div>Страница открыта через <code>file://</code>. Запустите сервер и откройте адрес <code>http://localhost:…</code>.</div></details>

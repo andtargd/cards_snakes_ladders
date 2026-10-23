@@ -1,12 +1,17 @@
 """Local dev server: serves the project folder with CORS (for the Project 0 dev kit)
 and accepts POST /save/<path> so the in-browser builder can write GLBs into build/
-(and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/)."""
+(and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/).
+
+A page given after the port is served at / instead of index.html, with the query kept: a Discord
+activity always opens at /, so `python tools/server.py 5500 tools/discordspike.html` behind a tunnel
+opens the spike page there."""
 import http.server
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAVE_DIRS = ('build/', 'tmp/', 'docs/crazygames/media/')
+HOME = None  # the page served at /, when one is given
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -20,6 +25,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
+
+    def do_GET(self):
+        if HOME and self.path.split('?')[0] == '/':
+            self.path = '/' + HOME + self.path[1:]
+        super().do_GET()
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -49,4 +59,5 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5500
+    HOME = sys.argv[2].lstrip('/') if len(sys.argv) > 2 else None
     http.server.ThreadingHTTPServer(('127.0.0.1', port), Handler).serve_forever()

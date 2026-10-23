@@ -23,6 +23,7 @@ DIRS = ('web', 'experience', 'vendor')
 # pages beside index.html, copied as they are (the privacy policy the game links to)
 PAGES = ('privacy.html',)
 SKIP_FILES = {'experience/experience.json'}
+SKIP_DIRS = ('vendor/discord/',)  # Discord's SDK: only a Discord build loads it
 SKIP_NAMES = {'__pycache__', '.DS_Store', 'Thumbs.db', '.gitkeep'}
 SKIP_EXT = ('.md', '.docx', '.py', '.pyc', '.map')
 
@@ -53,7 +54,7 @@ def rel(path, base=ROOT):
 def wanted(path):
     r = rel(path)
     name = os.path.basename(path)
-    return r not in SKIP_FILES and name not in SKIP_NAMES and not name.lower().endswith(SKIP_EXT)
+    return r not in SKIP_FILES and not r.startswith(SKIP_DIRS) and name not in SKIP_NAMES and not name.lower().endswith(SKIP_EXT)
 
 
 def strip_js_comments(src):
