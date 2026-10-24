@@ -17,3 +17,6 @@ new_sqlite_classes = ["Room"]
 # the Discord application (its client id is not a secret: it is the activity's own address)
 [vars]
 DISCORD_CLIENT_ID = "1563178748872753223"
+# the development app, whose root mapping is the tunnel (docs/discord/release.md); its secret:
+# npx wrangler secret put DISCORD_DEV_CLIENT_SECRET. Without it the dev app plays with no names.
+# DISCORD_DEV_CLIENT_ID = "<the dev app's client id>"

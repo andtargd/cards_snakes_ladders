@@ -1,0 +1,12 @@
+# The released Discord Activity: dist/discord/ (tools/build_discord.py) as a Cloudflare Worker of static
+# files only, beside the relay server (docs/discord/release.md). The app's root mapping in the Developer
+# Portal points here: / -> csl-activity.csl-relay.workers.dev
+#
+#   cd server/relay && npm run deploy:activity    (builds dist/discord/, then uploads it)
+#
+# A Worker of its own, not the relay's: a new version of the game does not restart the relay's rooms.
+name = "csl-activity"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "../../dist/discord"

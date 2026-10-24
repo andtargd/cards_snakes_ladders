@@ -15,11 +15,14 @@
 // socket goes, every link of the room closes (the players take the room over), and a host silent for
 // STALE_MS gives the room up to the first who claims it.
 //
-//   POST /api/token {code}   Discord's OAuth: the code from authorize() for an access token (task 5)
+//   POST /api/token {code, client_id}   Discord's OAuth: the code from authorize() for an access token (task 5)
 //
 // The activity's sign-in (the player's name and avatar): the client secret stays here (a secret of the
 // worker, DISCORD_CLIENT_SECRET), the code is traded for a token and the token goes back to the page.
-// Nothing else is done with it here, and nothing is kept.
+// Nothing else is done with it here, and nothing is kept. Two Discord apps may sign in (task 7): the
+// released one (DISCORD_CLIENT_ID) and a development one whose root mapping is the tunnel
+// (DISCORD_DEV_CLIENT_ID, its secret DISCORD_DEV_CLIENT_SECRET). The page says which one it is; a page
+// that does not say is the released app's.
 import { DurableObject } from 'cloudflare:workers'
 
 const MAX_BYTES = 64 * 1024 // one frame (a welcome carries the room's state)
@@ -31,19 +34,29 @@ const TOKEN_URL = 'https://discord.com/api/oauth2/token'
 
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
 
+/** The app a sign-in is for, by its client id (none: the released one): { id, secret }, or null for an app not known here. */
+function app(env, id) {
+  const apps = [[env.DISCORD_CLIENT_ID, env.DISCORD_CLIENT_SECRET], [env.DISCORD_DEV_CLIENT_ID, env.DISCORD_DEV_CLIENT_SECRET]]
+  const a = id == null ? apps[0] : apps.find(([i]) => i && i === id)
+  return a ? { id: a[0], secret: a[1] } : null
+}
+
 /** Discord's OAuth code (from the SDK's authorize) for an access token: { access_token }, or { error } with the status. */
 async function token(req, env) {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405)
-  if (!env.DISCORD_CLIENT_ID || !env.DISCORD_CLIENT_SECRET) return json({ error: 'no client id or secret on the server' }, 503)
-  let code = null
-  try { code = (await req.json())?.code } catch { /* not JSON */ }
+  let body = null
+  try { body = await req.json() } catch { /* not JSON */ }
+  const code = body?.code
   if (typeof code !== 'string' || !/^[\w-]{8,128}$/.test(code)) return json({ error: 'no code' }, 400)
+  const a = app(env, body.client_id ?? null)
+  if (!a) return json({ error: 'not an app of this server' }, 400)
+  if (!a.id || !a.secret) return json({ error: 'no client id or secret on the server' }, 503)
   let r
   try {
     r = await fetch(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code }),
+      body: new URLSearchParams({ client_id: a.id, client_secret: a.secret, grant_type: 'authorization_code', code }),
     })
   } catch { return json({ error: 'Discord did not answer' }, 502) }
   const d = await r.json().catch(() => null)

@@ -10,7 +10,8 @@
   p { margin: 0 0 10px; color: #5b544c; }
   #frames { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
   #frames figure { margin: 0; } #frames figcaption { font-weight: bold; }
-  iframe { width: 400px; height: 250px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
+  /* no lower: under 300 tall the game shows the board only (a window too small to play in, experience/ui.js) */
+  iframe { width: 400px; height: 300px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
   table { border-collapse: collapse; width: 100%; max-width: 1240px; background: #fffdf8; }
   td, th { padding: 5px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
   .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }

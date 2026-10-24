@@ -10,7 +10,7 @@
 //
 // The player's name and avatar come with Discord's OAuth (getUser): authorize() asks them (once; Discord
 // remembers the answer) and gives a code, the relay server trades it for a token (POST /api/token: the
-// client secret is the server's only), and authenticate() with the token gives the user. Whoever says no,
+// client secret is the server's only; it knows the released app and the development one, by client id), and authenticate() with the token gives the user. Whoever says no,
 // or when the server is out of reach, plays as "Player N" (the room's host numbers them, web/net.js).
 //
 // Outside Discord (no frame_id in the address) there is no SDK: start() fails and the game goes on as
@@ -91,7 +91,7 @@ function mockUser(name) {
 /** The player signs in (the first time Discord asks them): { name, id, picture }, or it throws (they said no, no server). */
 async function signIn(clientId) {
   const { code } = await sdk.commands.authorize({ client_id: clientId, response_type: 'code', state: '', prompt: 'none', scope: ['identify'] })
-  const r = await late(fetch(`https://${RELAY_HOST}/api/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) }), API_MS, '/api/token')
+  const r = await late(fetch(`https://${RELAY_HOST}/api/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, client_id: clientId }) }), API_MS, '/api/token')
   const d = await r.json().catch(() => null)
   if (!r.ok || !d?.access_token) throw new Error(`/api/token: ${r.status} ${d?.error || ''}`)
   const { user } = await late(sdk.commands.authenticate({ access_token: d.access_token }), API_MS, 'authenticate()')
