@@ -431,7 +431,7 @@ export class View {
       case 'play': {
         // Echo shows the card it plays again (its card turns over) before that card's target lights up
         const id = e.echo || e.card, tg = e.echo ? e.etg : e.tg
-        const aim = () => { if (typeof tg === 'number' && ['any', 'other', 'leader'].includes(CARD[id].tgt)) { this.focusOn(tg); this.pointAt(tg, 1.6); this.sfx('target', 0.5) } }
+        const aim = () => { if (typeof tg === 'number' && ['any', 'other', 'leader'].includes(CARD[id].tgt)) { this.focusOn(tg); this.pointAt(tg, 1.6); this.sfx('target') } }
         if (!e.echo) { this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); aim() } }); break }
         this.tasks.push({ dur: 1.0, start: () => this.emit('play', e) })
         this.tasks.push({ dur: 1.0, start: aim })
@@ -448,8 +448,8 @@ export class View {
           this.tasks.push({
             dur: 0.24,
             start: () => {
-              const t = tok(e.p); t.anim = true; a = t.group.position.clone(); b = G.cellPos(c); this.sfx('hop', 0.3)
-              if (e.boots?.includes(c)) this.cardPopupNow(b, 'P2', 'swamp')
+              const t = tok(e.p); t.anim = true; a = t.group.position.clone(); b = G.cellPos(c); this.sfx('hop')
+              if (e.boots?.includes(c)) this.cardPopupNow(b, 'P2', 'boots')
             },
             update: k2 => { const t = tok(e.p); const up = b.y > a.y + 0.1 ? 0.55 : 0.32; t.group.position.lerpVectors(a, b, ease(k2)); t.group.position.y += Math.sin(k2 * Math.PI) * up; this.follow(t.group.position) },
             end: () => { const t = tok(e.p); t.pos = c },
@@ -479,7 +479,7 @@ export class View {
               path.push(G.cellPos(e.to))
             }
             if (e.para) this.cardPopupNow(t.group.position, 'P1')
-            this.sfx(e.e, 0.5)
+            this.sfx(e.e)
             this.emit(e.e, e)
           },
           update: k => {
@@ -494,14 +494,14 @@ export class View {
         break
       }
       case 'tramp': case 'jump':
-        if (e.why === 'leap') { this.arcTask(e.p, e.from, e.to, null, 'jump'); this.cardPopup(e.p, 'M5', 'select'); break }
+        if (e.why === 'leap') { this.arcTask(e.p, e.from, e.to, null, 'jump'); this.cardPopup(e.p, 'M5', 'leap'); break }
         this.arcTask(e.p, e.from, e.to, e.e === 'tramp' ? 1.2 : 0.7, e.e === 'tramp' ? 'tramp' : 'jump'); break
-      case 'rewind': this.cardPopup(e.p, 'M6', 'fold'); this.rewindTask(e); break
+      case 'rewind': this.cardPopup(e.p, 'M6', 'rewound'); this.rewindTask(e); break
       case 'portal': this.teleportTask([[e.p, e.to]]); break
       case 'swap': this.teleportTask([[e.a, null, e.b], [e.b, null, e.a]]); break
       case 'finish': this.tasks.push({
         dur: 1.4,
-        start: () => { const t = tok(e.p); t.pos = G.B.cells; this.burst(G.cellPos(G.B.cells), 120); this.sfx('win', 0.6); this.focusOn(e.p) },
+        start: () => { const t = tok(e.p); t.pos = G.B.cells; this.burst(G.cellPos(G.B.cells), 120); this.sfx('win'); this.focusOn(e.p) },
         update: k => { const t = tok(e.p); t.group.rotation.y = k * Math.PI * 4; t.group.position.y = G.cellPos(G.B.cells).y + Math.abs(Math.sin(k * Math.PI * 3)) * 0.5 * (1 - k) },
         end: () => { const t = tok(e.p); t.group.rotation.y = 0; if (s().mode === 'fool') t.group.visible = false; this.layoutTokens() },
       }); break
@@ -520,10 +520,10 @@ export class View {
   cardPopupNow(pos, cardId, sound) {
     const c = CARD[cardId], pop = c.popup || {}
     this.popup(pos, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat])
-    if (sound) this.sfx(sound, 0.4)
+    if (sound) this.sfx(sound)
   }
   popupTask(p, text, color, sound) {
-    this.tasks.push({ dur: 0.7, start: () => { this.popup(this.tokens[p].group.position, text, color); this.sfx(sound, 0.5) } })
+    this.tasks.push({ dur: 0.7, start: () => { this.popup(this.tokens[p].group.position, text, color); if (sound) this.sfx(sound) } })
   }
   /** A piece flies in an arc; with no height given (a long leap) the arc rises with the distance. */
   arcTask(p, from, to, h, sound) {
@@ -533,7 +533,7 @@ export class View {
       start: () => {
         const t = this.tokens[p]; t.anim = true; a = t.group.position.clone(); b = G.cellPos(to)
         if (h == null) h = THREE.MathUtils.clamp(a.distanceTo(b) * 0.3, 0.8, 2.4)
-        this.focusOn(p); this.sfx(sound, 0.5)
+        this.focusOn(p); this.sfx(sound)
       },
       update: k => { const t = this.tokens[p]; t.group.position.lerpVectors(a, b, ease(k)); t.group.position.y += Math.sin(k * Math.PI) * h; this.follow(t.group.position) },
       end: () => { const t = this.tokens[p]; t.pos = to; t.anim = null; this.layoutTokens() },
@@ -557,7 +557,7 @@ export class View {
         clock = this.makeClock()
         segs = this.rewindPath(e)
         total = segs.reduce((a, s) => a + s.dur, 0)
-        this.focusOn(e.p); this.sfx('portal', 0.4)
+        this.focusOn(e.p); this.sfx('rewind')
       },
       update: k => { this.ghostToken(t, 1 - 0.7 * k); place(t.group.position, k); clock.hand.material.rotation = k * Math.PI },
     })
@@ -677,7 +677,7 @@ export class View {
       start: () => {
         targets = list.map(([p, c, o]) => (c != null ? c : this.tokens[o].pos))
         list.forEach(([p]) => { this.tokens[p].anim = true; this.burst(this.tokens[p].group.position, 30) })
-        this.sfx('portal', 0.5)
+        this.sfx('portal')
       },
       update: k => list.forEach(([p]) => this.tokens[p].group.scale.setScalar(1 - k)),
       end: () => list.forEach(([p], i) => { const t = this.tokens[p]; t.pos = targets[i]; t.group.position.copy(G.cellPos(targets[i])); this.burst(t.group.position, 30) }),
@@ -700,7 +700,7 @@ export class View {
         if (e.why === 'flip') changed = [this.elMeshes[e.flip]]
         else if (quake) changed = [...this.elMeshes]
         else changed = this.mkMeshes.filter(m => !e.mk.some(k => k[0] === m.userData.mk && k[1].includes(m.userData.cell)))
-        this.sfx(quake ? 'quake' : 'fold', 0.5)
+        this.sfx(quake ? 'quake' : 'boardChange')
         if (quake) this.shake = 0.9
       },
       update: k => { for (const m of changed) if (m) m.scale.set(1, Math.max(0.02, 1 - k), 1) },
@@ -758,7 +758,7 @@ export class View {
         })
         for (let i = n; i < this.trayDice.length; i++) this.trayDice[i].visible = false
         // the sounds go on a timeline from here: when the dice land is known now
-        if (e.chosen) this.sfx('fold', 0.7)
+        if (e.chosen) this.sfx('faceChosen')
         if (!allSet) this.emit('rollsound', ROLL_LAND * ROLL_DUR / this.speed)
         this.emit('roll', e)
       },
@@ -809,7 +809,7 @@ export class View {
         // (another player's bonus roll: the dice may not lie in the tray yet)
         if (!a.visible) { a.visible = true; a.position.copy(trayRest(e.i, e.dice.length)); a.quaternion.copy(P.dieQuaternion(e.dice[e.i], 0)) }
         from = a.position.clone()
-        this.sfx('select', 0.5)
+        this.sfx('dieChosen')
       },
       update: k => {
         a.position.lerpVectors(from, new THREE.Vector3(0, 0.23, 0), easeOut(k))
@@ -846,7 +846,7 @@ export class View {
       this.bits.push({ p: pos.clone().add(new THREE.Vector3(0, 0.4, 0)), v: new THREE.Vector3(Math.cos(a) * v * 0.6, 2 + Math.random() * 3, Math.sin(a) * v * 0.6), r: new THREE.Euler(Math.random() * 6, Math.random() * 6, 0), life: 1.2 + Math.random() * 0.8 })
     }
   }
-  sfx(name, volume) { this.emit('sfx', name, volume) }
+  sfx(name) { this.emit('sfx', name) }
 
   // ---------- camera ----------
   focusOn(i) {

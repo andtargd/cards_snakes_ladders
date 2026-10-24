@@ -206,6 +206,7 @@ function picture(id) {
 const web = {
   platform, // the site this runs on (web/platform.js)
   fixedRatio: !!DPR && !q.has('adapt'), // ?dpr= keeps that pixel ratio (the game would lower it on a slow machine), unless ?adapt
+  unseen: false, // this frame is the steady timer's: no animation frames come, the page is not drawn on screen now
   get safe() { return view.safe }, // the screen's safe area: { top, right, bottom, left } px the game's buttons keep clear of
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
@@ -270,6 +271,10 @@ const p0 = {
   sound: {
     play(path, o = {}) {
       if (mute.on && !o.loop) return 0
+      // through Web Audio once it runs, as the dice's sounds go (sound.cue): one way for all of them, so they
+      // keep their levels on a phone too (iOS plays an <audio> at full volume, whatever its volume says)
+      const src = !o.loop && (o.rate ?? 1) === 1 && played(path, o.volume)
+      if (src) return src
       try {
         const a = new Audio(p0.asset(path)); a.volume = Math.min(1, (o.volume ?? 1) * 0.5); a.loop = !!o.loop; a.playbackRate = o.rate ?? 1; a.muted = mute.on
         sounding.add(a); a.addEventListener('ended', () => sounding.delete(a))
@@ -318,7 +323,7 @@ const p0 = {
         }
       } catch { return null }
     },
-    stop(a) { try { a.pause(); sounding.delete(a) } catch {} }, stopAll() {},
+    stop(a) { try { if (a.pause) a.pause(); else a.stop(); sounding.delete(a) } catch {} }, stopAll() {},
   },
   music: { play() {}, stop() {}, volume() {}, seek() {}, time: 0, playing: false, duration: 0 },
   exit() {},
@@ -352,16 +357,31 @@ function decoded(path) {
   }
   return e.buf
 }
+/** Sound `path` through Web Audio now, if it can be (the page touched, the sound decoded): its source, else null. */
+function played(path, volume = 1) {
+  const buf = decoded(path)
+  if (!actx || !buf || actx.state !== 'running') return null
+  try {
+    const gain = actx.createGain(), src = actx.createBufferSource()
+    gain.gain.value = Math.min(1, volume * 0.5)
+    src.buffer = buf; src.connect(gain); gain.connect(master)
+    src.onended = () => { try { gain.disconnect() } catch {} }
+    src.start()
+    return src
+  } catch { return null }
+}
 function wakeAudio() {
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext
+  // iOS: Web Audio plays as media does (an <audio> does), not as the ringer's sounds, which the silent switch turns off
+  try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback' } catch { /* older iOS */ }
   if (!actx && AC) {
     try { actx = new AC(); master = actx.createGain(); master.gain.value = mute.on ? 0 : 1; master.connect(actx.destination) } catch { actx = null; return }
     for (const url of buffers.keys()) decoded(url)
   }
   if (actx && actx.state !== 'running') actx.resume().catch(() => {})
 }
-addEventListener('pointerdown', wakeAudio, true)
-addEventListener('keydown', wakeAudio, true)
+// (a touch lets the page play sound as it ends, not as it starts: pointerup and touchend too)
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'keydown']) addEventListener(ev, wakeAudio, true)
 
 function resize() {
   view.width = innerWidth; view.height = innerHeight; view.dpr = pixelRatio(); view.safe = safeArea()
@@ -444,8 +464,9 @@ async function boot() {
   // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an
   // online table it hosts, going
   let prev = performance.now(), lastRaf = prev
-  const frame = (now, cap) => {
+  const frame = (now, cap, seen = true) => {
     const dt = Math.min(cap, Math.max(0, (now - prev) / 1000)); prev = now
+    web.unseen = !seen
     p0.time += dt
     emit('frame', dt, p0.time)
     if (p0.autoRender) getRenderer().render(scene, camera)
@@ -454,7 +475,7 @@ async function boot() {
   if (q.get('clock') === 'manual') { globalThis.__cslStep = dt => frame(prev + dt * 1000, 1); return }
   const loop = now => { lastRaf = performance.now(); frame(now, 0.1); requestAnimationFrame(loop) }
   requestAnimationFrame(loop)
-  every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5) })
+  every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5, false) })
 }
 boot().catch(e => {
   console.error(e)

@@ -360,7 +360,7 @@ export class UI {
   }
   /** A click the tip did not let through: the bubble shakes. */
   kickTip() {
-    if (this.time - this.tip.kick > 0.3) this.app.playSound('tick', 0.35)
+    if (this.time - this.tip.kick > 0.3) this.app.playSound('tip')
     this.tip.kick = this.time
   }
   /** The bubble's picture for a tip: its line, and Skip tutorial quietly under it. */
@@ -802,7 +802,7 @@ export class UI {
   }
   /** Champion and Fool side by side for `c.mode`; `set(fn)` runs fn and keeps the change. */
   modeCards(c, S, set) {
-    const pick = m => set(() => { if (c.mode !== m) this.app.playSound('select', 0.35); c.mode = m })
+    const pick = m => set(() => { if (c.mode !== m) this.app.playSound('option'); c.mode = m })
     this.modeCard('champion', S.x, S.top, S.cardW, S.cardH, c.mode === 'champion', pick('champion'))
     this.modeCard('fool', S.x + S.cardW + 14 * this.u, S.top, S.cardW, S.cardH, c.mode === 'fool', pick('fool'))
   }
@@ -1351,7 +1351,7 @@ export class UI {
     const kx = x + w * v, hov = this.hover === key || this.drag?.key === key
     g.fillStyle = '#ffffff'; g.strokeStyle = hov ? '#e8743b' : 'rgba(43,38,34,0.35)'; g.lineWidth = 1.5 * u
     g.beginPath(); g.arc(kx, cy, (hov ? 9 : 8) * u, 0, Math.PI * 2); g.fill(); g.stroke()
-    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - this.ox - x) / w), end: () => { app.saveSettings(); app.playSound('select', 0.5) } })
+    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - this.ox - x) / w), end: () => { app.saveSettings(); app.playSound('soundOn') } })
   }
   /** The title screens' corner: the slider, then the speaker. */
   soundControl() {
@@ -1435,7 +1435,7 @@ export class UI {
     const top = y
     // the mode: the host picks it; a quick table plays the one it was found for
     const cw = (mw - 14 * u) / 2
-    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('select', 0.35); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
+    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('option'); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
     this.modeCard('champion', x, y, cw, modeH, lob.mode === 'champion', pick('champion'))
     this.modeCard('fool', x + cw + 14 * u, y, cw, modeH, lob.mode === 'fool', pick('fool'))
     y += modeH + 16 * u
@@ -1786,7 +1786,7 @@ export class UI {
     const s = this.app.view.state
     if (!s || !keys.length) return
     this.fxOpen = { gid: s.gid, p, keys, x, y }
-    this.app.sfx('draw', 0.3)
+    this.app.sfx('effects')
     this.dirty = true
   }
   closeFx() { if (this.fxOpen) { this.fxOpen = null; this.dirty = true; return true } return false }
@@ -2380,13 +2380,13 @@ export class UI {
     const mesh = this.makeCard('back')
     const s0 = (this.narrow ? 38 : 52) * u
     this.flyers.push({ mesh, burn: true, t: 0, x0: r ? r.x + r.w + s0 * 0.7 : this.W / 2, y0: r ? r.y + r.h / 2 : this.H * 0.3, s0, rot: -0.12, card: 'back' })
-    this.app.sfx('fold', 0.3)
+    this.app.sfx('burn')
   }
   /** A die of Choose Your Roll ('pick') or a card that Choose Your Card offers ('take'): the others burn. */
   choose(kind, i) {
     const app = this.app, s = app.view.state
     if (!s || app.view.busy || app.waiting > 0 || s.ph !== kind) return
-    if (kind === 'pick') { if (s.pick && i < s.pick.d.length) { app.sfx('select', 0.45); app.act({ t: 'pick', i }) } return }
+    if (kind === 'pick') { if (s.pick && i < s.pick.d.length) { app.sfx('take'); app.act({ t: 'pick', i }) } return }
     const offer = this.cards.filter(c => c.kind === 'offer'), c = offer.find(k => k.i === i)
     if (!c) return
     if (app.act({ t: 'take', i }) === false) return
@@ -2396,7 +2396,7 @@ export class UI {
       if (k === c) this.dropCard(k.mesh)
       else this.flyers.push({ mesh: k.mesh, burn: true, t: 0, x0: k.x, y0: k.y, s0: k.s, rot: 0, card: k.id })
     }
-    app.sfx('select', 0.45)
+    app.sfx('take')
     this.dirty = true
   }
   /** A card of my hand leaves it and burns where it is. */
@@ -2407,7 +2407,7 @@ export class UI {
     c.mesh.material.uniforms.dim.value = 0
     const fl = { mesh: c.mesh, burn: true, t: 0, x0: c.x, y0: c.y, s0: c.s, rot: c.mesh.rotation.z, card: c.id }
     this.flyers.push(fl)
-    this.app.sfx('fold', 0.4)
+    this.app.sfx('discard')
     return fl
   }
 
@@ -2451,7 +2451,7 @@ export class UI {
     // Echo: first the player whose last card it plays again (shown by their names), then that card's target
     this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null, echo: def.tgt === 'echo' ? {} : null }
     this.selected = c.i
-    app.sfx('draw', 0.3)
+    app.sfx('aim')
     this.syncHighlight()
     this.dirty = true
   }
@@ -2474,7 +2474,7 @@ export class UI {
     this.syncHighlight()
     const at = echo ? tg[1] : tg
     if (onPlayer && typeof at === 'number') app.view.pointAt(at, 1.8)
-    app.sfx('select', 0.45)
+    app.sfx('play')
     if (app.act({ t: 'play', i, tg }) === false) {
       this.hidden = null
       if (fl) { this.dropCard(fl.mesh); this.flyers = this.flyers.filter(f => f !== fl) }
@@ -2499,7 +2499,7 @@ export class UI {
       if (t.sel.includes(x)) t.sel = t.sel.filter(c => c !== x)
       else t.sel.push(x)
       if (t.sel.length === 2) { send([...t.sel]); return true }
-      this.app.sfx('select', 0.35)
+      this.app.sfx('firstCell')
       this.syncHighlight()
       this.dirty = true
       return true
@@ -2517,7 +2517,7 @@ export class UI {
     const kind = kindOf(def.tgt)
     this.target = { ...t, kind, list, sel: kind === 'cell2' ? [] : null, hov: null, echo: { src, card: id } }
     app.view.pointAt(null)
-    app.sfx('draw', 0.3)
+    app.sfx('aim')
     this.syncHighlight()
     this.dirty = true
     return true
@@ -2604,7 +2604,7 @@ export class UI {
     if (h.drag || h.key === 'snd' || h.key === 'block') return
     if (app.screen === 'game' && !this.modal && h.key !== 'menu') return // the game's own buttons have their sounds
     const name = /back|leave|mainmenu|resume|cancel|close|invno|stand|exit/i.test(h.key) ? 'back' : h.go ? 'menu' : 'tick'
-    app.playSound(name, 0.45)
+    app.playSound(name)
   }
   /** A click: true when the UI used it. A long press on a card only shows it bigger. */
   click(x, y, long = false) {

@@ -8,6 +8,7 @@ import { View } from './view.js'
 import { UI } from './ui.js'
 import { T } from './strings.js'
 import { Tutorial, createFirstGame, FIRST } from './tutorial.js'
+import SOUNDS from './sounds.config.js'
 
 const BOT_NAMES = ['Pip', 'Juniper', 'Mossy', 'Bramble', 'Clover', 'Fennel', 'Quill', 'Basil', 'Tansy', 'Wren', 'Sorrel', 'Nutmeg']
 const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
@@ -25,16 +26,30 @@ const MAX_NAME = 14
 // wooden ticks as they are thrown (quicker with the game), `land` the ding as they come to rest showing the number
 const takes = (name, n) => Array.from({ length: n }, (_, i) => `${name}${i + 1}`)
 const ROLL_SOUNDS = { roll: takes('roll', 4), land: takes('land', 3) }
-// (the ticks a little under the ding). For trying levels out, the page's address can set them:
-// ?rollvol=0.3&landvol=0.6 (0 to 2; 2 is as loud as a sound goes)
-function urlVol(key, def) {
+/**
+ * Each moment's sound and how loud it plays (sounds.config.js): name -> { file, volume }, the volume 0 to 2.
+ * For trying levels out, the page's address can set some: ?sfx=roll:0.3,land:0.8
+ */
+const SOUND = (() => {
+  const out = {}, vol = v => Math.max(0, Math.min(2, v))
+  for (const [name, c] of Object.entries(SOUNDS)) {
+    const o = typeof c === 'number' ? { volume: c } : c || {}
+    out[name] = { file: String(o.sound || name), volume: Number.isFinite(o.volume) ? vol(o.volume) : 0.5 }
+  }
   try {
-    const s = new URLSearchParams(globalThis.location?.search || '').get(key)
-    const v = s === null || s === '' ? NaN : Number(s)
-    return Number.isFinite(v) ? Math.max(0, Math.min(2, v)) : def
-  } catch { return def }
+    for (const part of (new URLSearchParams(globalThis.location?.search || '').get('sfx') || '').split(',')) {
+      const [name, s] = part.split(':'), v = s ? Number(s) : NaN
+      if (out[name] && Number.isFinite(v)) out[name].volume = vol(v)
+    }
+  } catch { /* no address here */ }
+  return out
+})()
+const unknownSounds = new Set()
+function soundOf(name) {
+  if (SOUND[name]) return SOUND[name]
+  if (!unknownSounds.has(name)) { unknownSounds.add(name); console.warn(`[sound] "${name}" is not in sounds.config.js: it plays at 0.5`) }
+  return { file: name, volume: 0.5 }
 }
-const ROLL_VOL = { roll: urlVol('rollvol', 0.4), land: urlVol('landvol', 0.6) }
 
 /** Players at a table the rules allow: Fool needs three. */
 const least = mode => (mode === 'fool' ? 3 : 2)
@@ -339,36 +354,53 @@ class SharedTable {
 
 /**
  * The drawing resolution: it steps down when the frames are slow for a few seconds running and back up
- * when they are quick again. A single long frame (a hitch, a tab in the background, a window being
- * moved) does not count: only the average over a window of visible frames does.
+ * when they are quick again. It goes by the typical frame (the median over a window of visible frames),
+ * so hitches do not count: a tab in the background, a window being moved, the page busy with something
+ * besides drawing (a phone stalls again and again as Quick Match sets up its connections). A window made
+ * mostly of frames that long says nothing either, unless it goes on and on: a machine that can't draw this.
  */
 function resolution(renderer, p0) {
-  const WINDOW = 2, SLOW = 1 / 24, FAST = 1 / 50, MIN = 0.5
+  const WINDOW = 2, SLOW = 1 / 24, FAST = 1 / 50, MIN = 0.5, HITCH = 0.1, STUCK = 5
   const top = () => Math.min(p0.pixelRatio || 1, 2)
-  let max = top(), ratio = max, sum = 0, n = 0, slowRuns = 0, fastRuns = 0, settle = 1, upBlocked = 0
+  const clock = () => (globalThis.performance?.now?.() ?? NaN) / 1000
+  let max = top(), ratio = max, times = [], span = 0, long = 0, slowRuns = 0, fastRuns = 0, stuckRuns = 0, settle = 1, upBlocked = 0, last = NaN
   renderer.setPixelRatio(ratio)
-  const set = r => { ratio = r; renderer.setPixelRatio(r); sum = 0; n = 0; slowRuns = 0; fastRuns = 0; settle = 1 }
+  const restart = () => { times = []; span = 0; long = 0 }
+  const set = r => { ratio = r; renderer.setPixelRatio(r); restart(); slowRuns = 0; fastRuns = 0; stuckRuns = 0; settle = 1 }
+  const down = () => {
+    // stepping down right after a step up: the higher one was too much, stay here a while
+    if (upBlocked > 0) upBlocked = 120
+    set(Math.max(MIN, ratio * 0.8))
+  }
   return {
     get ratio() { return ratio },
     frame(dt) {
+      // the real time since the last frame (the game's dt is cut short after a hitch)
+      const now = clock(), gap = Number.isFinite(now - last) ? Math.max(dt, now - last) : dt
+      last = now
       // the screen changed (another monitor, the browser's zoom): start from its full resolution
       if (top() !== max) { max = top(); set(max); upBlocked = 0; return }
       if (p0.web?.fixedRatio) return // (a test of how it looks at one pixel ratio)
       upBlocked = Math.max(0, upBlocked - dt)
-      // hidden, or just shown again: these frames say nothing about the machine
-      if (globalThis.document?.hidden || dt > 0.25) { settle = 1; sum = 0; n = 0; return }
-      if (settle > 0) { settle -= dt; return }
-      sum += dt; n++
-      if (sum < WINDOW) return
-      const avg = sum / n
-      sum = 0; n = 0
-      slowRuns = avg > SLOW ? slowRuns + 1 : 0
-      fastRuns = avg < FAST ? fastRuns + 1 : 0
-      if (slowRuns >= 2 && ratio > MIN) {
-        // stepping down right after a step up: the higher one was too much, stay here a while
-        if (upBlocked > 0) upBlocked = 120
-        set(Math.max(MIN, ratio * 0.8))
-      } else if (fastRuns >= 3 && ratio < max && upBlocked <= 0) {
+      // hidden, not drawn on screen (the web build's steady timer runs the game then), going online, or
+      // just shown again: these frames say nothing about the machine
+      if (globalThis.document?.hidden || p0.web?.unseen || p0.web?.status?.busy || gap > 0.25) { settle = 1; restart(); return }
+      if (settle > 0) { settle -= gap; return }
+      span += gap
+      if (gap > HITCH) long++; else times.push(gap)
+      if (span < WINDOW) return
+      if (long > times.length) {
+        restart(); fastRuns = 0
+        if (++stuckRuns >= STUCK && ratio > MIN) down()
+        return
+      }
+      times.sort((a, b) => a - b)
+      const typical = times[times.length >> 1]
+      restart(); stuckRuns = 0
+      slowRuns = typical > SLOW ? slowRuns + 1 : 0
+      fastRuns = typical < FAST ? fastRuns + 1 : 0
+      if (slowRuns >= 2 && ratio > MIN) down()
+      else if (fastRuns >= 3 && ratio < max && upBlocked <= 0) {
         set(Math.min(max, ratio * 1.25))
         upBlocked = 20
       }
@@ -412,20 +444,20 @@ class App {
     this.invite = null // an invitation to the Shared Table I got: { from, t }
     this.invSent = new Map() // id -> when I last invited them
     const v = this.view
-    v.on('draw', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.4); this.ui.dirty = true })
-    v.on('offer', e => { if (e.p === this.mySeat()) this.sfx('draw', 0.5); this.ui.dirty = true })
+    v.on('draw', e => { if (e.p === this.mySeat()) this.sfx('draw'); this.ui.dirty = true })
+    v.on('offer', e => { if (e.p === this.mySeat()) this.sfx('offer'); this.ui.dirty = true })
     for (const name of ['turn', 'mustdisc', 'roll', 'redraw', 'steal', 'swaphands', 'peek', 'settled']) v.on(name, () => { this.ui.dirty = true })
     v.on('discard', e => { this.ui.burnDiscard(e); this.ui.dirty = true })
     v.on('log', text => this.ui.log(text))
-    v.on('play', e => { this.ui.showPlayed(e); this.sfx('card', 0.6); this.ui.dirty = true })
+    v.on('play', e => { this.ui.showPlayed(e); this.sfx('card'); this.ui.dirty = true })
     v.on('over', () => { this.ui.dirty = true })
     // the log has caught up with the game: keep it with the saved game
     v.on('settled', () => { if (this.table?.kind === 'solo') this.table.save() })
-    v.on('sfx', (name, vol) => this.sfx(name, vol))
+    v.on('sfx', name => this.sfx(name))
     // the dice's sounds on a timeline from the throw (rollSound); the landing moves with the frames if they lag
     v.on('rollsound', landIn => this.rollSound(landIn))
     v.on('rollwhen', landIn => { this.diceCue?.land?.move(landIn); this.diceCue?.roll?.until(landIn) })
-    v.on('rolland', () => { if (this.diceCue && !this.diceCue.land) this.playSound(this.diceCue.landName, ROLL_VOL.land) })
+    v.on('rolland', () => { if (this.diceCue && !this.diceCue.land) this.playFile(this.diceCue.landName, SOUND.land.volume) })
     this.lastTake = {}
     this.diceCue = null
     // the dice's sounds ready before the first roll: the one as they land must not wait to be fetched
@@ -435,11 +467,12 @@ class App {
     // the web build's online play: how an attempt goes, and a room's link that brought the player
     p0.web?.onChange?.(() => this.onWebStatus())
   }
-  sfx(name, volume = 0.5) {
+  /** The sound of a moment in the game (sounds.config.js), not again within a moment of the last, nor at the menu's idle table. */
+  sfx(name) {
     const now = this.p0.time
     if (this.table?.kind === 'idle' || now - (this.lastSfx[name] || -9) < 0.09) return
     this.lastSfx[name] = now
-    this.playSound(name, volume)
+    this.playSound(name)
   }
   /** A take of the dice's sound `part` (ROLL_SOUNDS), other than the last one. */
   take(part) {
@@ -461,14 +494,20 @@ class App {
     const roll = this.take('roll'), land = this.take('land'), vol = this.sound.vol
     const cue = (name, o) => { try { return this.p0.sound.cue?.(`sfx/${name}.mp3`, o) || null } catch { return null } }
     // (at the Skip speed they land at once: the ding alone)
-    const ticks = landIn > 0.15 ? cue(roll, { volume: ROLL_VOL.roll * vol, until: landIn }) : null
-    if (!ticks && landIn > 0.15) this.playSound(roll, ROLL_VOL.roll, Math.min(4, this.view.speed))
-    this.diceCue = { roll: ticks, land: cue(land, { volume: ROLL_VOL.land * vol, at: landIn }), landName: land }
+    const ticks = landIn > 0.15 ? cue(roll, { volume: SOUND.roll.volume * vol, until: landIn }) : null
+    if (!ticks && landIn > 0.15) this.playFile(roll, SOUND.roll.volume, Math.min(4, this.view.speed))
+    this.diceCue = { roll: ticks, land: cue(land, { volume: SOUND.land.volume * vol, at: landIn }), landName: land }
   }
-  playSound(name, volume = 0.5, rate = 1) {
+  /** The sound of moment `name` (sounds.config.js), played at once. */
+  playSound(name, rate = 1) {
+    const s = soundOf(name)
+    this.playFile(s.file, s.volume, rate)
+  }
+  /** Sound file sfx/`file`.mp3 at `volume` (0 to 2), under the player's own volume. */
+  playFile(file, volume = 0.5, rate = 1) {
     const v = this.sound.on ? volume * this.sound.vol : 0
     if (v < 0.005 || this.p0.web?.muted) return
-    try { this.p0.sound.play(`sfx/${name}.mp3`, rate === 1 ? { volume: v } : { volume: v, rate }) } catch { /* sound is optional */ }
+    try { this.p0.sound.play(`sfx/${file}.mp3`, rate === 1 ? { volume: v } : { volume: v, rate }) } catch { /* sound is optional */ }
   }
   saveSettings() {
     try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first })) } catch { /* no storage here */ }
@@ -562,7 +601,7 @@ class App {
     snd.on = !(snd.on && snd.vol > 0.02)
     if (snd.on && snd.vol < 0.05) snd.vol = 0.6
     this.saveSettings()
-    if (snd.on) this.playSound('select', 0.5)
+    if (snd.on) this.playSound('soundOn')
     this.ui.dirty = true
   }
   /** The volume slider: 0 to 1; moving it up turns the sound on. */
@@ -576,7 +615,7 @@ class App {
   hotseat() { return this.table?.kind === 'solo' && this.table.humans > 1 }
   /** The player who should take the computer before their hand is shown, or -1. */
   curtain() { return this.screen === 'game' && this.table?.curtain ? this.table.curtain() : -1 }
-  reveal() { this.table?.reveal?.(); this.sfx('draw', 0.4); this.ui.dirty = true }
+  reveal() { this.table?.reveal?.(); this.sfx('start'); this.ui.dirty = true }
   sessionCount() { return this.p0.players.size }
   nameOf(id) { return this.p0.players.get(id)?.name || 'someone' }
   speedLabel() { return SPEEDS[this.speedIdx][1] }
@@ -623,7 +662,7 @@ class App {
     this.view.speed = SPEEDS[this.speedIdx][0]
     this.screen = 'game'
     this.ui.dirty = true
-    this.sfx('draw', 0.4)
+    this.sfx('start')
   }
   /** `keep`: a game here against bots stays saved, to come back to (resumeSolo). */
   toMenu(keep = false) {
@@ -844,7 +883,7 @@ class App {
       const atTable = this.screen === 'lobby' || this.table?.kind === 'shared'
       if (atTable) { try { this.p0.room.sendTo(from, { t: 'invr', r: 'here' }) } catch { /* fine */ } return }
       this.invite = { from, t: INVITE_SECONDS }
-      this.sfx('target', 0.5)
+      this.sfx('invite')
       this.ui.dirty = true
       return
     }
