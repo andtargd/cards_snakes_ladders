@@ -1437,6 +1437,8 @@ export class UI {
     const bw = Math.min(150 * u, L.w * 0.32)
     this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : channel ? T.channelTable : room ? T.onlineRoom : T.sharedTable, room && !channel ? T.roomHead(room.code, hostLine) : hostLine, channel ? null : () => app.leaveLobby())
     if (room && !quick && !channel) this.button('share', room.link ? T.shareLink : T.shareCode, x + L.w - bw, y + 4 * u, bw, 38 * u, () => this.shareRoom(), { primary: true, color: '#2d3a6b', size: 14 })
+    // the channel's table is where its players stay: the rules (and the policies beside them) from here
+    else if (channel) this.ghostButton('help', T.howToPlay, x + L.w - bw, y + 4 * u, bw, 38 * u, () => { app.toScreen('help'); this.helpPage = 0 })
     else if (!room) {
       const others = app.notSeated().length
       this.button('invite', T.invite + (others ? ` (${others})` : ''), x + L.w - bw, y + 4 * u, bw, 38 * u, () => { this.picker = true; this.dirty = true }, { size: 14, primary: others > 0, color: '#2d3a6b' })

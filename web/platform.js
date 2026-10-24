@@ -29,7 +29,8 @@ const pick = v => (Object.hasOwn(PROFILES, v) ? v : null)
 const id = pick(globalThis.CSL_PLATFORM) || pick(q.get('platform')) || 'pages'
 // ?quick=XY: Quick Match rooms of a test run's own (tools/quicktest.html), so real players are not met
 const quick = /^[A-Z]{2,3}$/.test(q.get('quick') || '') ? { quickPrefix: q.get('quick') } : null
-export const platform = Object.freeze({ id, ...PROFILES[id], ...quick, debug: q.has('platform') || q.has('debug') })
+// (Discord's own address has ?platform=desktop or mobile: no debug for that)
+export const platform = Object.freeze({ id, ...PROFILES[id], ...quick, debug: !!pick(q.get('platform')) || q.has('debug') })
 
 /** All sound off while anyone asks for it (an ad, say); the player's own sound setting is not touched. */
 const muters = new Set()
