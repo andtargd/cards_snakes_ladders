@@ -4,6 +4,9 @@ import { CFG, SELF } from './rules.js'
 const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th')
 
 export const T = {
+  title: 'Cards, Snakes & Ladders',
+  // a window too small to play in (Discord's picture-in-picture): the board and this under the game's line
+  expandToPlay: 'Make the window bigger to play',
   tagline: 'Roll, play a card, climb the paper tiers to the last cell.',
   // the main menu: Quick Match, then Solo Play, Pass & Play and Online
   quickMatchSub: (mode, size) => `${mode} · ${size} cells · find players online`,
@@ -61,6 +64,7 @@ export const T = {
   invitedRoom: code => `You are invited to room ${code}`,
   onlinePrivacy: 'Online play connects you directly to other players (they can see your IP address).',
   privacy: 'Privacy',
+  terms: 'Terms',
   ok: 'OK',
   playBots: 'Play vs Bots',
   champion: 'Champion',

@@ -190,6 +190,7 @@
 ├── crazygames/
 │   ├── index.html     ← с window.CSL_PLATFORM = 'crazygames' и SDK CrazyGames v3
 │   ├── privacy.html   ← политика приватности, на неё ведёт ссылка Privacy
+│   ├── terms.html     ← условия использования (ссылка Terms в How to Play)
 │   ├── web/
 │   ├── experience/    ← без experience.json (это манифест Project 0)
 │   └── vendor/        ← three.js, PeerJS
@@ -281,6 +282,7 @@
     <tr><td><a href="http://localhost:5500/?platform=discord"><code>?platform=discord</code></a></td><td>профиль discord без SDK: в консоли «no Discord SDK», игра работает как на Pages</td></tr>
     <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC"><code>?platform=discord&amp;mockInstance=ABC</code></a></td><td>SDK подменён объектом с <code>instanceId</code> ABC: в консоли «[discord] mock» и код комнаты, вызовы хуков видны. Игра сразу садится за стол канала, без меню (нужен relay-сервер, см. ниже); окна с одним <code>mockInstance</code> садятся за один стол, первое — хост. Для двух окон в одной вкладке браузера добавьте разный <code>&amp;sid=</code></td></tr>
     <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC&amp;mockUser=Ann"><code>…&amp;mockUser=Ann</code></a></td><td>игрок вошёл через Discord как Ann: имя Ann, аватар — стандартный аватар Discord с <code>cdn.discordapp.com</code>, id игрока выводится из id аккаунта. Без <code>mockUser</code> игрок как будто отказался от авторизации: хост даёт ему имя «Player N»</td></tr>
+    <tr><td><a href="http://localhost:5500/?platform=discord&amp;mockInstance=ABC&amp;mockUser=Ann&amp;server=wss://csl-relay.csl-relay.workers.dev"><code>…&amp;server=wss://csl-relay.csl-relay.workers.dev</code></a></td><td>mock через задеплоенный relay-сервер, если локальный (<code>npm run dev</code>) не запущен</td></tr>
   </table></div>
   <h3>Сборка</h3>
   <div class="cmd"><pre>python tools/build_discord.py</pre><button class="copy" type="button">Копировать</button></div>
@@ -289,6 +291,15 @@
   <h3>Сборка в настоящем Discord</h3>
   <div class="cmd"><pre>cloudflared tunnel --url http://localhost:5560</pre><button class="copy" type="button">Копировать</button></div>
   <p>В Portal → Activities → URL Mappings: корневое сопоставление <code>/</code> → адрес туннеля без <code>https://</code>, плюс строки из <code>MAPPINGS</code> (среди них <code>/x/cdn</code> → <code>cdn.discordapp.com</code> для аватаров). Запустите активность из голосового канала: при первом запуске Discord спрашивает разрешение (имя и аватар), игра ждёт ответа до двух минут; дальше игрок сразу садится за стол канала (первый в канале — хост), меню, кодов и Quick Match нет. Если стол недоступен (нет связи с relay-сервером), показывается ошибка с кнопками Try Again и Play vs Bots.</p>
+
+  <h3>Размеры окна, ссылки и звук</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Окно</th><th>Что видно</th></tr>
+    <tr><td>уже 360 или ниже 300 px (PiP Discord, свёрнутая активность)</td><td>только доска, плашка со статусом партии («Your turn», «Waiting for Pip») или названием стола и подписью «Make the window bigger to play», кнопка звука. Карты, лоток кубиков и окна вернутся, когда окно станет больше</td></tr>
+    <tr><td>ниже 480 px, альбом (640×360, телефон на боку)</td><td>меню, лобби и настройки слева, доска справа — как на широком экране, всё помещается без прокрутки</td></tr>
+    <tr><td>телефон вертикально (375×812), 1280×720</td><td>как раньше</td></tr>
+  </table></div>
+  <p>Проверить без Discord: mock-адрес выше и размеры 400×225, 640×360, 1280×720, 375×812 (вьюпорт браузера или DevTools). Ссылки Privacy и Terms (How to Play) на Discord ведут на копии на GitHub Pages (<code>home</code> в профиле) и открываются через <code>openExternalLink</code> — Discord спрашивает игрока и открывает браузер; в mock это строка «[discord] mock openExternalLink» в консоли и новая вкладка. Звук на Discord по умолчанию 0.35 вместо 0.8 (люди говорят в голосовом канале), пока игрок сам не подвинет громкость.</p>
 
   <h3>Relay-сервер комнат</h3>
   <p>В Discord комнаты идут не через PeerJS и брокеры, а через свой сервер <code>server/relay/</code> (Cloudflare Worker, одна комната — один Durable Object). Он только пересылает сообщения, логика комнат прежняя: хост — браузер игрока. Клиент — <code>web/relaypeer.js</code>, для <code>web/net.js</code> он выглядит как PeerJS. Профиль <code>discord</code> включает его сам, на любом другом сайте — параметр <code>?server=ws://127.0.0.1:8787</code>. Для запуска нужен Node.js (только для сервера, игре он не нужен):</p>

@@ -155,6 +155,8 @@ export class UI {
     this.dpr = Math.min(this.p0.pixelRatio || 1, 2)
     // a phone held upright (a small screen on its side keeps the wide layout, only smaller)
     this.narrow = W < 720 && H > W
+    // too small to play in (Discord's picture-in-picture, a docked window): the board and a word about it only
+    this.tiny = W < 360 || H < 300
     // and it gets the menus' bigger unit: the board is under the panels there, not beside them
     this.u = this.narrow ? THREE.MathUtils.clamp(Math.min(W / 440, H / 760), 0.58, 1.2) : THREE.MathUtils.clamp(Math.min(W / 1100, H / 680), 0.58, 1.6)
     this.cam.left = -this.ox; this.cam.right = FW - this.ox; this.cam.top = H + this.oy; this.cam.bottom = H + this.oy - FH
@@ -585,11 +587,13 @@ export class UI {
     const app = this.app
     // the board stands in the middle, unless a title screen moves it aside
     app.view.aside.side = 0; app.view.aside.scale = 1
-    // the title screens stand beside the board when the screen is wide; on a phone they fill it, in bigger type
+    // the title screens stand beside the board when the screen is wide, or low and wide (a docked activity,
+    // a small phone on its side: one above the other they would not fit); on a phone they fill it, in bigger type
     const u0 = this.u
-    this.menuWide = W >= 720 && W / u0 >= 980
+    this.menuWide = (W >= 720 || H < 480) && W / u0 >= 980
     this.fields = new Set() // the text fields on screen
-    if (['menu', 'solo', 'pass', 'online', 'lobby'].includes(app.screen)) {
+    if (this.tiny) this.drawTiny()
+    else if (['menu', 'solo', 'pass', 'online', 'lobby'].includes(app.screen)) {
       if (!this.menuWide) this.u = Math.max(u0, Math.min(W / 440, H / 760, 1.2))
       if (app.screen === 'menu') this.drawMenu()
       else if (app.screen === 'solo') this.drawSolo()
@@ -608,13 +612,13 @@ export class UI {
     g = this.g = ov.g
     g.setTransform(this.dpr, 0, 0, this.dpr, this.ox * this.dpr, this.oy * this.dpr)
     if (ov.used) g.clearRect(-this.ox, -this.oy, this.FW, this.FH)
-    if (app.screen === 'game') this.drawGameWindows()
-    this.drawTip()
-    if (this.picker) this.drawPicker()
-    if (app.invite) this.drawInvite()
+    if (app.screen === 'game' && !this.tiny) this.drawGameWindows()
+    if (!this.tiny) this.drawTip()
+    if (this.picker && !this.tiny) this.drawPicker()
+    if (app.invite && !this.tiny) this.drawInvite()
     const st = this.p0.web?.status
-    if (st) this.drawOnlineStatus(st)
-    if (this.toast) {
+    if (st && !this.tiny) this.drawOnlineStatus(st)
+    if (this.toast && !this.tiny) {
       const t = this.toast
       g.font = this.font(16 * this.u)
       const w = g.measureText(t.text).width + 40 * this.u
@@ -1226,7 +1230,9 @@ export class UI {
       // the line under the name goes on two when it is long
       const tw = x + w - tx - 10 * u
       g.font = this.font(11.5 * u, false)
-      const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, tw).slice(0, 2), two = lines.length > 1
+      // (two lines at most: one cut short ends in an ellipsis)
+      const all = P.wrapText(g, champ ? T.championDesc : T.foolDesc, tw), lines = all.slice(0, 2), two = lines.length > 1
+      if (all.length > 2) lines[1] = lines[1].trimEnd() + '…'
       this.text(champ ? T.champion : T.fool, tx, y + h * (two ? 0.3 : 0.38), { size: Math.min(19, h / u / 3.4), color: champ ? '#9a6b00' : '#3a2a4c', max: tw })
       lines.forEach((l, i) => this.text(l, tx, y + h * (two ? 0.58 + i * 0.22 : 0.68), { size: 11.5, bold: false, color: '#5b544c', max: tw }))
       g.restore()
@@ -1235,7 +1241,8 @@ export class UI {
     }
     // (the line under the name, kept big on a small screen, may go on three: the picture and the name go up for it)
     g.font = this.font(12.5 * u, false)
-    const lines = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u).slice(0, 3), three = lines.length > 2
+    const all = P.wrapText(g, champ ? T.championDesc : T.foolDesc, w - 36 * u), lines = all.slice(0, 3), three = lines.length > 2
+    if (all.length > 3) lines[2] = lines[2].trimEnd() + '…'
     const s = Math.min(w * 0.42, h * (three ? 0.3 : 0.36)), lh = this.lineH(12.5, 17)
     if (champ) this.crown(x + w / 2, y + h * (three ? 0.25 : 0.31), s)
     else this.jesterCap(x + w / 2, y + h * (three ? 0.25 : 0.31), s)
@@ -1376,8 +1383,11 @@ export class UI {
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.96)' })
     this.text(this.helpPage === 0 ? T.howToPlay : T.theCards, W / 2, y + 30 * u, { size: 22, align: 'center' })
-    // the web build's privacy policy, quietly in the corner (it opens in a new tab)
-    if (this.helpPage === 0 && this.p0.web?.privacy) this.link('privacy', T.privacy, x + pw - 24 * u, y + 30 * u, () => this.p0.web.openPrivacy(), { size: 12, align: 'right' })
+    // the web build's privacy policy and terms, quietly in the corner (they open in a new tab)
+    if (this.helpPage === 0 && this.p0.web?.privacy) {
+      const lw = this.link('privacy', T.privacy, x + pw - 24 * u, y + 30 * u, () => this.p0.web.openPrivacy(), { size: 12, align: 'right' })
+      if (this.p0.web.terms) this.link('terms', T.terms, x + pw - 40 * u - lw, y + 30 * u, () => this.p0.web.openTerms(), { size: 12, align: 'right' })
+    }
     // the web build: the First Match again, tips and all, between the buttons or (a narrow screen) over them
     const replay = this.helpPage === 0 && !!this.p0.web, rw = Math.min(180 * u, pw - 390 * u), beside = rw > 90 * u
     if (this.helpPage === 0) {
@@ -1564,6 +1574,43 @@ export class UI {
   }
 
   // ---------- the game screen ----------
+  /** The game's line at the top: whose turn it is and what they are to do, or how it ended. */
+  gameStatus(s) {
+    const app = this.app, me = app.mySeat(), curtain = app.curtain(), hot = app.hotseat()
+    const myTurn = me >= 0 && s.cur === me && s.ph !== 'over'
+    let status
+    if (s.ph === 'over') status = s.mode === 'champion' ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
+    else if (curtain >= 0) status = T.passTo(s.pl[curtain].n)
+    else if (this.target) status = this.target.kind === 'cell2' ? T.chooseTwoCells : T.chooseTarget
+    else if (myTurn && s.ph === 'disc') status = T.chooseDiscard
+    else if (myTurn && s.ph === 'pick') status = T.chooseDie
+    else if (myTurn && s.ph === 'take') status = T.chooseCard
+    else if (myTurn && s.frozen && !s.rolled) status = T.cantPlay
+    else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(s.pl[me].n) : T.yourTurn
+    else status = T.waitingFor(s.pl[s.cur].n)
+    return status
+  }
+
+  /**
+   * A window too small to play in (this.tiny: Discord's picture-in-picture, say): the board, the game's
+   * line or the table's name on a slip of paper at the foot with a word to make the window bigger, and
+   * the sound button. The cards, the tray and the windows wait for a bigger screen.
+   */
+  drawTiny() {
+    const W = this.W, H = this.H, app = this.app, u0 = this.u
+    const u = this.u = THREE.MathUtils.clamp(Math.min(W / 400, H / 225), 0.5, 1)
+    const s = app.view.state
+    const head = app.screen === 'game' && s ? this.gameStatus(s) : app.channel() ? T.channelTable : T.title
+    const w = Math.min(W - 16 * u, Math.max(this.measure(head, 16), this.measure(T.expandToPlay, 12)) + 36 * u), h = 54 * u
+    const x = (W - w) / 2, y = H - h - 10 * u
+    this.panel(x, y, w, h, { fill: 'rgba(255,253,248,0.95)' })
+    this.text(head, W / 2, y + 19 * u, { size: 16, align: 'center', max: w - 16 * u })
+    this.text(T.expandToPlay, W / 2, y + 38 * u, { size: 12, align: 'center', bold: false, color: '#5b544c', max: w - 16 * u })
+    const sb = 32 * u
+    this.soundButton('snd', W - sb - 8 * u, 8 * u, sb)
+    this.u = u0
+  }
+
   drawGame() {
     const app = this.app, view = app.view
     const s = view.state
@@ -1656,17 +1703,7 @@ export class UI {
     const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
     this.panelBottom = panelBottom
     this.gameLeft = this.narrow ? 0 : px + pw + 10 * u // the messages at the top keep clear of the players
-    // status
-    let status
-    if (s.ph === 'over') status = s.mode === 'champion' ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
-    else if (curtain >= 0) status = T.passTo(s.pl[curtain].n)
-    else if (this.target) status = this.target.kind === 'cell2' ? T.chooseTwoCells : T.chooseTarget
-    else if (myTurn && s.ph === 'disc') status = T.chooseDiscard
-    else if (myTurn && s.ph === 'pick') status = T.chooseDie
-    else if (myTurn && s.ph === 'take') status = T.chooseCard
-    else if (myTurn && s.frozen && !s.rolled) status = T.cantPlay
-    else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(s.pl[me].n) : T.yourTurn
-    else status = T.waitingFor(s.pl[s.cur].n)
+    const status = this.gameStatus(s)
     const sw = this.narrow ? cornerX - 20 * u : Math.min(W - 20 * u, Math.max(260 * u, this.measure(status, 17) + 60 * u))
     const sy = 10 * u
     const sx = this.narrow ? 10 * u : Math.max(pw + 20 * u, (W - sw) / 2)
@@ -2145,7 +2182,7 @@ export class UI {
     const app = this.app, s = app.view.state
     const want = []
     const me = app.mySeat()
-    const hide = app.curtain() >= 0 || !!app.invite
+    const hide = app.curtain() >= 0 || !!app.invite || this.tiny
     // a player's effects shown as their cards (openFx): over everything, the peeked hand and the offer wait under it
     const fxOn = this.fxShown()
     if (app.screen === 'game' && s && me >= 0 && !hide && !(s.mode === 'fool' && s.pl[me].d)) {

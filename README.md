@@ -41,7 +41,7 @@ three.js (0.186.0) is kept in `vendor/three/`: only the core and the addons the 
 python tools/build_cg.py
 ```
 
-It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `index.html` with `window.CSL_PLATFORM = 'crazygames'` (see `web/platform.js`) and the CrazyGames SDK v3 (`https://sdk.crazygames.com/crazygames-sdk-v3.js`, the one outside URL it allows), `privacy.html`, `web/`, `experience/` and `vendor/` — nothing else. It stops if a page or module loads anything by an absolute path or from another server, and prints the number of files and the size against the portal's limits (1500 files, 50 MB). `dist/` is not committed.
+It writes `dist/crazygames/` and `dist/crazygames.zip` (the file to upload): `index.html` with `window.CSL_PLATFORM = 'crazygames'` (see `web/platform.js`) and the CrazyGames SDK v3 (`https://sdk.crazygames.com/crazygames-sdk-v3.js`, the one outside URL it allows), `privacy.html`, `terms.html`, `web/`, `experience/` and `vendor/` — nothing else. It stops if a page or module loads anything by an absolute path or from another server, and prints the number of files and the size against the portal's limits (1500 files, 50 MB). `dist/` is not committed.
 
 To try the build the way the portal shows it, serve the project folder (`python tools/server.py 5500`) and open <http://localhost:5500/tools/cgframe.html>: the game in an iframe of each size CrazyGames tests at, with the time it takes to reach the menu. `?platform=crazygames` on the plain page gives the same profile without a build (and loads the SDK itself).
 
@@ -60,6 +60,7 @@ Where the SDK does not load (an ad blocker, offline) the game runs as before, wi
 ```
 index.html          the web page (GitHub Pages entry)
 privacy.html        the privacy policy (linked from the Online screen and How to Play)
+terms.html          the terms of service (linked from How to Play)
 web/p0web.js        browser stand-in for the Project 0 runtime the game is written for
 web/net.js          online rooms: WebRTC through PeerJS, one player relays, host handover
 web/mq.js           the way round when WebRTC cannot connect: a small MQTT client for public brokers

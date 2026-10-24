@@ -17,6 +17,9 @@
 // on GitHub Pages. ?mockInstance=ABC stands in for Discord there: a simple object instead of the SDK,
 // with that instance, so two windows with the same one get the same room. ?mockUser=Ann signs in as Ann
 // (an id of her name's, a default avatar from Discord's CDN); without it the player said no.
+//
+// Links out of the game (the privacy policy, the terms) go through openExternalLink: the activity's
+// sandbox opens no windows of its own.
 
 // The outside servers and the paths they are mapped to. Each one needs the same mapping in the Portal.
 // The rooms go through the relay server (the profile's `server`; web/relaypeer.js dials /x/relay on the
@@ -72,7 +75,9 @@ export const pictureOk = url => typeof url === 'string' && PICTURE.test(url)
 const late = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what}: no answer in ${ms / 1000} s`)), ms))])
 
 function mock(id) {
-  return { instanceId: id, platform: 'desktop', channelId: null, guildId: null, mock: true, ready: async () => {}, commands: {} }
+  // its links say where they go in the console, and open in a new tab as Discord would in the player's browser
+  const openExternalLink = async ({ url }) => { console.info('[discord] mock openExternalLink', url); const w = open(url, '_blank'); if (w) w.opener = null; return { opened: true } }
+  return { instanceId: id, platform: 'desktop', channelId: null, guildId: null, mock: true, ready: async () => {}, commands: { openExternalLink } }
 }
 
 /** The mock's user (?mockUser=Ann): an id of the name's own (as Discord's are: digits), Discord's default avatar for it. */
@@ -121,6 +126,8 @@ export async function start(provide) {
     instantMultiplayer: () => code,
     getUser: () => (signedIn ||= user().catch(e => { console.warn('[discord] no sign-in, playing without a name:', e?.message || e); return null })),
     pictureOk,
+    // the iframe's sandbox opens no windows: Discord asks the player and opens the page in their browser
+    openLink: url => { sdk.commands.openExternalLink({ url }).catch(e => console.warn('[discord] the link did not open:', url, e?.message || e)) },
   })
   console.info('[discord]', sdk.mock ? 'mock' : 'SDK', { instanceId, room: code, platform, channelId: sdk.channelId, guildId: sdk.guildId })
   return sdk.mock ? 'mock' : 'discord'
