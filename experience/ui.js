@@ -754,8 +754,8 @@ export class UI {
   }
 
   /**
-   * The menu where the site has a table of its own (Discord's channel), seen only while out of its room
-   * (it could not be reached, or a game against bots ended): the way back to it, the bots, the rules.
+   * The menu where the site has a table of its own (Discord's channel), seen after Back at its table or
+   * while out of its room (it could not be reached): the way back to it, the bots, the rules.
    */
   drawChannelMenu() {
     const H = this.H, u = this.u, app = this.app
@@ -765,7 +765,7 @@ export class UI {
     this.drawLogo(cx, y, Math.min(1, w / (440 * u)))
     this.text(T.tagline, cx, y + (LOGO_H + 18) * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
     y += headH * u
-    this.heroButton('quick', T.joinTable, T.channelSub, x, y, w, heroH, () => app.enterChannel())
+    this.heroButton('quick', T.joinTable, T.channelSub, x, y, w, heroH, () => (app.atChannel() ? app.openLobby() : app.enterChannel()))
     this.heroRect = { x, y, w, h: heroH }
     y += heroH + 14 * u
     this.button('solo', T.playBots, x, y, w, 46 * u, () => app.startSolo(), { size: 16 })
@@ -1412,7 +1412,7 @@ export class UI {
    * A table's lobby: an online room, a Quick Match table or Project 0's Shared Table. The mode and the
    * seats on the left with Start under them; the table's settings (board, bots) beside them. The host
    * sets the table up. A Quick Match table plays as it was found and is here only for a moment: its
-   * game starts at once. The channel's table (Discord) is the only one there is: no code, link or Back.
+   * game starts at once. The channel's table (Discord) has no code or link; its Back goes to the channel's menu.
    */
   drawLobby() {
     const H = this.H, u = this.u, app = this.app, me = this.p0.me.id
@@ -1435,7 +1435,7 @@ export class UI {
     // the table's name, its room and host; on the right the way to bring friends
     const hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
     const bw = Math.min(150 * u, L.w * 0.32)
-    this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : channel ? T.channelTable : room ? T.onlineRoom : T.sharedTable, room && !channel ? T.roomHead(room.code, hostLine) : hostLine, channel ? null : () => app.leaveLobby())
+    this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : channel ? T.channelTable : room ? T.onlineRoom : T.sharedTable, room && !channel ? T.roomHead(room.code, hostLine) : hostLine, () => app.leaveLobby())
     if (room && !quick && !channel) this.button('share', room.link ? T.shareLink : T.shareCode, x + L.w - bw, y + 4 * u, bw, 38 * u, () => this.shareRoom(), { primary: true, color: '#2d3a6b', size: 14 })
     // the channel's table is where its players stay: the rules (and the policies beside them) from here
     else if (channel) this.ghostButton('help', T.howToPlay, x + L.w - bw, y + 4 * u, bw, 38 * u, () => { app.toScreen('help'); this.helpPage = 0 })

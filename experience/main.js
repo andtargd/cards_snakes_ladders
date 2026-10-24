@@ -683,7 +683,7 @@ class App {
     this.ui.cancelTarget(); this.ui.selected = -1
     this.startAttract()
     this.ui.dirty = true
-    // where the site has a table of its own (Discord's channel) there is no menu: back to that table's lobby (or into it again)
+    // where the site has a table of its own (Discord's channel) a game ends at that table's lobby (or goes into it again); its Back leads to the menu
     if (this.channel()) { if (this.atChannel()) this.openLobby(); else this.enterChannel() }
   }
   rematch() {
