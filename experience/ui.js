@@ -768,7 +768,7 @@ export class UI {
     this.heroButton('quick', T.joinTable, T.channelSub, x, y, w, heroH, () => (app.atChannel() ? app.openLobby() : app.enterChannel()))
     this.heroRect = { x, y, w, h: heroH }
     y += heroH + 14 * u
-    this.button('solo', T.playBots, x, y, w, 46 * u, () => app.startSolo(), { size: 16 })
+    this.button('solo', T.playBots, x, y, w, 46 * u, () => app.toScreen('solo'), { size: 16 })
     y += 46 * u + 14 * u
     this.ghostButton('help', T.howToPlay, cx - 168 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 0 })
     this.ghostButton('cards', T.theCards, cx + 8 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 1 })
@@ -970,7 +970,7 @@ export class UI {
     if (st.kind === 'channel') {
       const bw = (pw - 52 * u) / 2
       this.button('olretry', T.tryAgain, x + 20 * u, by, bw, 42 * u, () => { web.dismiss(); this.app.enterChannel() }, { primary: true, size: 15 })
-      this.button('olbots', T.playBots, x + 32 * u + bw, by, bw, 42 * u, () => { web.dismiss(); this.app.startSolo() }, { size: 15 })
+      this.button('olbots', T.playBots, x + 32 * u + bw, by, bw, 42 * u, () => { web.dismiss(); this.app.toScreen('solo') }, { size: 15 })
     // Quick Match found no one to play: the bots are always there
     } else if (st.kind === 'quick') {
       const bw = (pw - 52 * u) / 2
