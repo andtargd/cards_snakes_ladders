@@ -1,7 +1,7 @@
 """What the site builds share (tools/build_cg.py, tools/build_discord.py): the web game's files copied
 into dist/<site>/ with the site's tags put in index.html, and a check of the paths they load.
 
-Only what the web game loads goes in: index.html, privacy.html (the privacy policy the game links to),
+Only what the web game loads goes in: index.html, privacy.html and terms.html (the pages the game links to),
 web/, experience/ (without experience.json, which is Project 0's manifest) and vendor/. Every path the
 pages and modules load must be relative, since a site serves the game from a folder of its own.
 No dependencies beyond Python 3.
@@ -14,19 +14,23 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DIRS = ('web', 'experience', 'vendor')
-# pages beside index.html, copied as they are (the privacy policy the game links to)
-PAGES = ('privacy.html',)
+# pages beside index.html, copied as they are (the privacy policy and the terms the game links to)
+PAGES = ('privacy.html', 'terms.html')
 SKIP_FILES = {'experience/experience.json'}
 SKIP_NAMES = {'__pycache__', '.DS_Store', 'Thumbs.db', '.gitkeep'}
 SKIP_EXT = ('.md', '.docx', '.py', '.pyc', '.map')
 
 # the CrazyGames SDK: the portal has it loaded from its own server (web/platform.js copes when it does not load)
 CG_SDK_URL = 'https://sdk.crazygames.com/crazygames-sdk-v3.js'
+# pages the game opens as links, never loads: the policies' public copies (web/platform.js, Discord's profile)
+LINKS = ('https://andtargd.github.io/cards_snakes_ladders/',)
 # servers online play connects to (wss://, the brokers in web/mq.js): listed, not errors
 WSS_URL = re.compile(r'''["'](wss://[^"'\s]+)["']''')
 
-# src="…" / href="…" in HTML; the values of an importmap; module specifiers in JS
+# src="…" / href="…" in HTML (not a link's href in <a>: it goes to a page, nothing is loaded); the values
+# of an importmap; module specifiers in JS
 ATTR = re.compile(r'''\b(?:src|href)\s*=\s*["']([^"']+)["']''', re.I)
+A_TAG = re.compile(r'<a\s[^>]*>', re.I)
 IMPORTMAP = re.compile(r'<script\s+type=["\']importmap["\']\s*>(.*?)</script>', re.S | re.I)
 MAP_VALUE = re.compile(r''':\s*["']([^"']+)["']''')
 JS_SPEC = re.compile(r'''(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|new\s+URL\(\s*)(["'])([^"'\n]+)\1''')
@@ -55,7 +59,7 @@ def check_paths(base, files, external_ok=()):
 
     def look(where, value):
         v = value.strip()
-        if v.startswith(('data:', 'blob:', '#', 'mailto:')) or v in ('', '.'):
+        if v.startswith(('data:', 'blob:', '#', 'mailto:') + LINKS) or v in ('', '.'):
             return
         if v.startswith(('http://', 'https://')):
             if external_ok and v.startswith(tuple(external_ok)):
@@ -68,7 +72,7 @@ def check_paths(base, files, external_ok=()):
     for path in files:
         r = rel(path, base)
         if r.endswith('.html'):
-            text = open(path, encoding='utf-8').read()
+            text = A_TAG.sub('', open(path, encoding='utf-8').read())
             for m in ATTR.finditer(text):
                 look(r, m.group(1))
             for block in IMPORTMAP.findall(text):

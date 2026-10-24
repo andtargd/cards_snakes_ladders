@@ -18,8 +18,10 @@ const PROFILES = {
   // the game is played only on the portal: no links to its files; Quick Match rooms of its own
   crazygames: { quickPrefix: 'CG', allowLinks: false, privacyNotice: true },
   // an Activity in Discord's iframe: no links out of it; Quick Match rooms of its own; rooms through
-  // the relay server (WebRTC and the public brokers do not get through there)
-  discord: { quickPrefix: 'DC', allowLinks: false, privacyNotice: true, server: true },
+  // the relay server (WebRTC and the public brokers do not get through there); the sound starts quieter
+  // (the players talk in the voice channel). Links open in the player's browser, outside Discord: the
+  // policies there are the public copies on GitHub Pages (`home`), not the activity's own files
+  discord: { quickPrefix: 'DC', allowLinks: false, privacyNotice: true, server: true, volume: 0.35, home: 'https://andtargd.github.io/cards_snakes_ladders/' },
 }
 
 const q = new URLSearchParams(globalThis.location?.search || '')
@@ -27,7 +29,8 @@ const pick = v => (Object.hasOwn(PROFILES, v) ? v : null)
 const id = pick(globalThis.CSL_PLATFORM) || pick(q.get('platform')) || 'pages'
 // ?quick=XY: Quick Match rooms of a test run's own (tools/quicktest.html), so real players are not met
 const quick = /^[A-Z]{2,3}$/.test(q.get('quick') || '') ? { quickPrefix: q.get('quick') } : null
-export const platform = Object.freeze({ id, ...PROFILES[id], ...quick, debug: q.has('platform') || q.has('debug') })
+// (Discord's own address has ?platform=desktop or mobile: no debug for that)
+export const platform = Object.freeze({ id, ...PROFILES[id], ...quick, debug: !!pick(q.get('platform')) || q.has('debug') })
 
 /** All sound off while anyone asks for it (an ad, say); the player's own sound setting is not touched. */
 const muters = new Set()
@@ -80,6 +83,11 @@ const impl = {
   onInvite() {},
   /** The player's language on the site, or null (the game is in English only for now). */
   locale: () => null,
+  /** Opens a page (the privacy policy, the terms) beside the game: a new tab here, the player's browser in Discord. */
+  openLink(url) {
+    const w = open(url, '_blank')
+    if (w) w.opener = null
+  },
 }
 
 /** An SDK's own versions of some of the hooks. */

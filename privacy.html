@@ -41,13 +41,14 @@
   <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
   <h1>Privacy</h1>
   <p class="game">Cards, Snakes &amp; Ladders</p>
-  <p class="date">Last updated: 21 October 2026</p>
+  <p class="date">Last updated: 24 October 2026</p>
 
   <div class="short">
     <ul>
       <li>There are no accounts, no analytics, no ads and no tracking in this version of the game.</li>
       <li>Your settings and your game in progress stay in your browser.</li>
       <li>Online play connects you directly to the other players at your table, so they can see your IP address, and so can the servers that help the connection.</li>
+      <li>In Discord, if you allow it, the game gets your Discord user ID, name and avatar and shows them to the players at your table. Nothing is kept after the game.</li>
     </ul>
   </div>
 
@@ -69,7 +70,19 @@
     <li><b>Google's and Cloudflare's STUN servers</b> tell your browser its public address so that a direct connection can be made. They see your IP address.</li>
     <li><b>Public relay servers.</b> When two browsers cannot reach each other directly (some mobile and office networks), the table's messages go through public MQTT test servers instead: <code>broker.emqx.io</code> (EMQ) and <code>test.mosquitto.org</code> (Eclipse Mosquitto). They see your IP address and the table's messages (names and moves). These servers are open to anyone, so treat what goes through them as public.</li>
   </ul>
-  <p>The game has no chat. Nothing from a game is stored on any server of ours: there are none. The services above work under their own privacy terms.</p>
+  <p>The game has no chat. Nothing from a game is stored on any server: outside Discord there is no server of ours, and in Discord our relay server keeps nothing (see below). The services above work under their own privacy terms.</p>
+
+  <h2>Playing in Discord</h2>
+  <p>In Discord the game runs as an Activity in a voice channel, and everyone who starts it there plays at one table.</p>
+  <ul>
+    <li><b>What Discord gives the game.</b> The ID of the activity's session in your channel (it picks the table), and whether you play on a computer or a phone. When you allow it (Discord asks you once), also your <b>Discord user ID, username, display name and avatar</b> (the <code>identify</code> permission: no email, no friends list, no servers, no messages).</li>
+    <li><b>What the others at your table see.</b> Your display name, your avatar and your moves. Your user ID goes along (it is part of your avatar's address), and the player who holds the table uses it only to give you your own seat back if your connection drops.</li>
+    <li><b>Our relay server.</b> In Discord the table's messages go through a small server of ours on Cloudflare Workers (<code>csl-relay.csl-relay.workers.dev</code>) instead of direct connections or the public servers above. It passes each message on to the other players and keeps nothing: no names, IDs, moves or logs of its own. A table on it is gone once the last player leaves. Cloudflare sees your IP address and may keep its own request records under its privacy policy.</li>
+    <li><b>Signing in.</b> To read your name, your device sends Discord's one-time code to the relay server, which trades it with Discord for an access token and hands the token straight back. The server does not keep the token or use it for anything else.</li>
+    <li><b>Avatars</b> are loaded from Discord's own image server (<code>cdn.discordapp.com</code>) through Discord.</li>
+    <li><b>If you say no</b> to Discord's question, you play as "Player 2" (or another number) and the game gets nothing about your account.</li>
+  </ul>
+  <p>How long we keep it: we don't. Your name, ID and avatar live only in the browsers of the players at your table while you play. Links in the game (this page, the terms) open in your browser, outside Discord. Discord itself works under <a href="https://discord.com/privacy">Discord's privacy policy</a>.</p>
 
   <h2>Names</h2>
   <p>Online, you get a random name such as "Paper Fox" unless you type your own. Please don't use your real name. Names with rude words are replaced with a random one, both on your device and when they reach the player who holds the room.</p>
@@ -78,7 +91,7 @@
   <p>The website that hosts the game may collect information of its own, such as visits, under its own privacy policy. This page only covers the game itself.</p>
 
   <h2>Children</h2>
-  <p>The game asks for no personal information. The only thing you type is an optional name for online play.</p>
+  <p>The game asks for no personal information. The only thing you type is an optional name for online play. In Discord you need to be old enough for Discord itself (13 or older, more in some countries).</p>
 
   <h2>Changes and contact</h2>
   <p>If the game starts collecting anything else (for example when it gets accounts or ads), this page will say so first. Questions: <a href="mailto:andtargd@gmail.com">andtargd@gmail.com</a>.</p>

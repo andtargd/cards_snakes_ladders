@@ -62,11 +62,12 @@ const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f
  * (a first game is short and easy to win: Champion on the 50-cell board against two Easy bots), Pass
  * & Play (the names typed for its players; '' is "Player n"), the mode and board for online play, and
  * whether the First Match is still due ('due' | 'done'; a browser that kept settings from before it played already).
+ * `vol` is the volume the sound starts at, before the player moves it (the site's: quieter in a voice channel).
  */
-function loadSettings() {
+function loadSettings(vol = 0.8) {
   const solo = { mode: 'champion', bots: 2, level: 1, size: 50 }
   const pass = { mode: 'champion', names: ['', ''], bots: 0, level: 2, size: 50 }
-  const online = { mode: 'champion', size: 50 }, sound = { on: true, vol: 0.8 }
+  const online = { mode: 'champion', size: 50 }, sound = { on: true, vol }
   let saved = null
   try { saved = JSON.parse(globalThis.localStorage?.getItem(SETTINGS_KEY) || 'null') } catch { /* no storage here */ }
   const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi
@@ -420,7 +421,7 @@ class App {
   constructor(p0) {
     this.p0 = p0
     this.screen = 'menu' // menu | solo | pass | online | lobby | help | game
-    const saved = loadSettings()
+    const saved = loadSettings(p0.web?.platform?.volume)
     this.solo = saved.solo // Solo Play: { mode, bots, level, size }
     this.pass = saved.pass // Pass & Play: { mode, names, bots, level, size }
     this.online = saved.online // online play: { mode, size } for Quick Match and a new room

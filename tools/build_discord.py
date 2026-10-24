@@ -4,7 +4,7 @@
 
 Only what the web game loads goes in (tools/webbuild.py): index.html with window.CSL_PLATFORM =
 'discord' before the game's module (web/platform.js then loads web/discord.js and Discord's SDK from
-vendor/discord/), privacy.html, web/, experience/ and vendor/. Discord's CSP lets the page reach its
+vendor/discord/), privacy.html, terms.html, web/, experience/ and vendor/. Discord's CSP lets the page reach its
 own domain only, so nothing is loaded from outside: every path is relative, and the servers online play
 talks to go through the app's URL Mappings (web/discord.js). No dependencies beyond Python 3.
 """

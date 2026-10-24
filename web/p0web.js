@@ -203,6 +203,9 @@ function picture(id) {
   }
   return pictures.get(url)
 }
+function policy(file) {
+  return platform.privacyNotice ? new URL(file, platform.home || new URL('..', import.meta.url)).href : null
+}
 const web = {
   platform, // the site this runs on (web/platform.js)
   fixedRatio: !!DPR && !q.has('adapt'), // ?dpr= keeps that pixel ratio (the game would lower it on a slow machine), unless ?adapt
@@ -235,14 +238,13 @@ const web = {
   editText, // a real input over a box the game draws (web/textfield.js)
   share() { return shareRoom(web.room) },
   leave() { net.leave() },
-  // the privacy policy (privacy.html beside index.html), where the site's profile asks for a word about it; null elsewhere
-  privacy: platform.privacyNotice ? new URL('../privacy.html', import.meta.url).href : null,
-  /** Opens the privacy policy in a new tab (the game stays as it is in this one). */
-  openPrivacy() {
-    if (!web.privacy) return
-    const w = open(web.privacy, '_blank')
-    if (w) w.opener = null
-  },
+  // the privacy policy and the terms (privacy.html and terms.html beside index.html, or the site's public copies:
+  // the profile's `home`), where the site's profile asks for a word about them; null elsewhere
+  privacy: policy('privacy.html'),
+  terms: policy('terms.html'),
+  /** Opens the privacy policy beside the game (a new tab; Discord: the player's browser); the game stays as it is. */
+  openPrivacy() { if (web.privacy) hooks.openLink(web.privacy) },
+  openTerms() { if (web.terms) hooks.openLink(web.terms) },
 }
 addEventListener('pagehide', () => {
   // a reload: the room is kept (with the time it was left) to come back to it
