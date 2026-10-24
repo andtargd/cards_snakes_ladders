@@ -73,6 +73,8 @@ npm run deploy              # релей: нужен один раз после 
 
 ## 3. Шаги в Developer Portal (руками)
 
+Пошагово, вместе с командами и тем, что делаю я, — [launch-guide.html](launch-guide.html): по нему и запускать. Ниже — то же коротко.
+
 **Продакшен-приложение** (<https://discord.com/developers/applications/1563178748872753223>):
 
 1. Сначала выложить (раздел 1): `npm run deploy:activity` и `npm run deploy` в `server/relay`; открыть `https://csl-activity.csl-relay.workers.dev` — должна открыться игра.

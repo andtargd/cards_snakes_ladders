@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Запуск в Discord</title>
+<style>
+  :root {
+    --bg: #f7f5f0; --card: #ffffff; --ink: #1f2328; --muted: #5f6670; --line: #e2ded5;
+    --accent: #2f6fdb; --accent-soft: #e6eefc; --dc: #5865f2; --dc-soft: #eceefe;
+    --ok: #1f8a4c; --ok-soft: #e3f4ea; --warn: #a36100; --warn-soft: #fdf1dc;
+    --claude: #c15f3c; --claude-soft: #fbece5; --term: #24292f; --term-soft: #eceae4;
+    --code-bg: #f1efe9; --code-ink: #24292f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181c; --card: #1f2227; --ink: #e8e6e1; --muted: #9aa1aa; --line: #33373e;
+      --accent: #6ea0ff; --accent-soft: #1f2b44; --dc: #8f98ff; --dc-soft: #262a4a;
+      --ok: #5fcf8f; --ok-soft: #1b3326; --warn: #f0b552; --warn-soft: #3a2d16;
+      --claude: #ee9b78; --claude-soft: #3a2519; --term: #dfe3e8; --term-soft: #2a2d33;
+      --code-bg: #121417; --code-ink: #dfe3e8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c; --card: #1f2227; --ink: #e8e6e1; --muted: #9aa1aa; --line: #33373e;
+    --accent: #6ea0ff; --accent-soft: #1f2b44; --dc: #8f98ff; --dc-soft: #262a4a;
+    --ok: #5fcf8f; --ok-soft: #1b3326; --warn: #f0b552; --warn-soft: #3a2d16;
+    --claude: #ee9b78; --claude-soft: #3a2519; --term: #dfe3e8; --term-soft: #2a2d33;
+    --code-bg: #121417; --code-ink: #dfe3e8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; }
+  h2 { font-size: 1.3rem; margin: 44px 0 6px; display: flex; align-items: center; gap: 10px; }
+  h2 .time { margin-left: auto; font-size: .82rem; font-weight: 500; color: var(--muted); }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); margin-bottom: 16px; }
+  a { color: var(--accent); word-break: break-word; }
+  .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--dc); color: #fff; display: inline-grid; place-items: center; font-size: .95rem; }
+  code { font: .9em ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--code-bg); color: var(--code-ink); padding: 1px 5px; border-radius: 4px; word-break: break-word; }
+  .cmd { position: relative; background: var(--code-bg); border: 1px solid var(--line); border-radius: 10px; margin: 10px 0; }
+  .cmd pre { margin: 0; padding: 14px 104px 14px 16px; overflow-x: auto; font: .92rem/1.5 ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--code-ink); white-space: pre-wrap; }
+  .cmd.text pre { font: .95rem/1.55 system-ui, sans-serif; }
+  .copy { position: absolute; top: 8px; right: 8px; font: 600 .8rem system-ui, sans-serif; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  .copy.done { color: var(--ok); border-color: var(--ok); }
+  .note { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; }
+  .note.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .note.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .note.claude { border-color: var(--claude); background: var(--claude-soft); }
+  .note b:first-child { display: block; margin-bottom: 2px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .who { display: inline-block; font-size: .76rem; padding: 1px 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; vertical-align: 2px; }
+  .who.portal { background: var(--dc-soft); color: var(--dc); }
+  .who.discord { background: var(--accent-soft); color: var(--accent); }
+  .who.term { background: var(--term-soft); color: var(--term); }
+  .who.claude { background: var(--claude-soft); color: var(--claude); }
+  .who.friends { background: var(--ok-soft); color: var(--ok); }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 10px 0; transition: opacity .2s; }
+  .step > label { display: flex; gap: 10px; align-items: baseline; cursor: pointer; font-weight: 600; }
+  .step > label input { width: 18px; height: 18px; flex: none; transform: translateY(3px); accent-color: var(--ok); }
+  .step > label .id { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .step > label .tags { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .step > div { padding-left: 28px; }
+  .step.done { opacity: .55; }
+  .step.done > label .title { text-decoration: line-through; }
+  .step ol, .step ul { margin: 6px 0; padding-left: 22px; }
+  .step li { margin: 3px 0; }
+  .progress { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+  .bar { flex: 1; height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .2s; }
+  .progress span { font-size: .9rem; color: var(--muted); white-space: nowrap; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 10px 0; font-size: .92rem; }
+  .theme { position: fixed; top: 12px; right: 12px; z-index: 3; font: 600 .8rem system-ui, sans-serif; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; }
+  summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+  details > div { padding: 0 16px 12px; }
+  @media (max-width: 560px) {
+    .step > div { padding-left: 0; }
+    .step > label { flex-wrap: wrap; }
+    .step > label .tags { margin-left: 28px; justify-content: flex-start; }
+    .cmd pre { padding-right: 16px; padding-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<button class="theme" id="theme" type="button">Тема</button>
+<main>
+<h1>Запуск в Discord — пошагово</h1>
+<p class="lead">От «игра выложена» до «друзья играют в голосовом канале». Шаги идут по порядку; у каждого написано, где он делается и кто его делает. Галочки запоминаются в этом браузере. Около часа своей работы, плюс сам прогон с друзьями.</p>
+
+<div class="legend">
+  <span><span class="who portal">Portal</span> discord.com/developers, в браузере</span>
+  <span><span class="who discord">Discord</span> приложение Discord (компьютер или телефон)</span>
+  <span><span class="who term">Терминал</span> PowerShell в папке <code>D:\Claude Projects\cards_snakes_ladders</code></span>
+  <span><span class="who claude">Claude</span> написать в чат Claude Code — сделаю я</span>
+  <span><span class="who friends">Друзья</span> делают тестировщики</span>
+</div>
+
+<div class="note ok"><b>Уже готово (проверено 24.10.2026)</b>
+Игра выложена на <code>csl-activity.csl-relay.workers.dev</code>, сервер комнат — на <code>csl-relay.csl-relay.workers.dev</code>, политика и условия — на GitHub Pages. В Portal уже заполнены: значок, название, описание, теги, ссылки на Terms и Privacy, установка (на сервер и пользователю), настройки активности (включена, Web + iOS + Android, ориентация не заблокирована, до 6 участников), сопоставления <code>/x/…</code>. Осталось то, что ниже.</div>
+
+<div class="progress"><div class="bar"><i id="bar"></i></div><span id="count"></span><button class="copy" id="reset" type="button" style="position:static">Сбросить</button></div>
+
+<!-- ───────────────────────────── 1 ───────────────────────────── -->
+<h2><span class="num">1</span> Влить ветку в main <span class="time">2 мин</span></h2>
+<p>Код, с которого собрана выложенная игра, лежит в ветке <code>dc/release</code>. Дальше всё выкладываем из <code>main</code>.</p>
+
+<div class="step" data-id="1.1">
+  <label><input type="checkbox"><span class="id">1.1</span><span class="title">Смёржить <code>dc/release</code> в <code>main</code> и запушить</span><span class="tags"><span class="who claude">Claude</span><span class="who term">или Терминал</span></span></label>
+  <div>
+    <p>Напиши мне: <b>«смёржи dc/release в main и запушь»</b>. Или сам:</p>
+    <div class="cmd"><pre>git checkout main
+git merge dc/release
+git push</pre><button class="copy" type="button">Копировать</button></div>
+    <p>GitHub Pages пересоберётся за минуту; сама игра на Pages не меняется (в ветке — серверы, документы и тестовые страницы).</p>
+  </div>
+</div>
+
+<!-- ───────────────────────────── 2 ───────────────────────────── -->
+<h2><span class="num">2</span> Переключить активность на продакшен <span class="time">5 мин</span></h2>
+<p>Сейчас Discord открывает игру со старого туннеля, которого уже нет, поэтому активность не загрузится, пока не сделан этот шаг.</p>
+
+<div class="step" data-id="2.1">
+  <label><input type="checkbox"><span class="id">2.1</span><span class="title">Корневое сопоставление → <code>csl-activity.csl-relay.workers.dev</code></span><span class="tags"><span class="who portal">Portal</span></span></label>
+  <div>
+    <ol>
+      <li>Открой <a href="https://discord.com/developers/applications/1563178748872753223/embedded/url-mappings">Активности → Сопоставления URL-адресов</a>.</li>
+      <li>Блок <b>Корневое сопоставление</b>, поле <b>Цель</b>: сейчас там <code>hydrogen-martin-brad-hansen.trycloudflare.com</code>. Сотри и вставь (без <code>https://</code>):
+        <div class="cmd"><pre>csl-activity.csl-relay.workers.dev</pre><button class="copy" type="button">Копировать</button></div></li>
+      <li>Если внизу появилась панель «Сохранить изменения» — нажми <b>Сохранить</b>. Потом обнови страницу (F5) и убедись, что в поле новый адрес.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="step" data-id="2.2">
+  <label><input type="checkbox"><span class="id">2.2</span><span class="title">Проверить сопоставления путей, убрать лишнее</span><span class="tags"><span class="who portal">Portal</span></span></label>
+  <div>
+    <p>На той же странице, блок <b>Сопоставление путей прокси</b>, должно быть ровно это (сейчас так и есть):</p>
+    <div class="table-wrap"><table>
+      <tr><th>Префикс</th><th>Цель</th><th>Зачем</th></tr>
+      <tr><td><code>/x/relay</code></td><td><code>csl-relay.csl-relay.workers.dev</code></td><td>комнаты и вход через Discord — <b>главное</b></td></tr>
+      <tr><td><code>/x/cdn</code></td><td><code>cdn.discordapp.com</code></td><td>аватары</td></tr>
+      <tr><td><code>/x/peerjs</code></td><td><code>0.peerjs.com</code></td><td>запасной путь</td></tr>
+      <tr><td><code>/x/emqx</code></td><td><code>broker.emqx.io:8084</code></td><td>запасной путь</td></tr>
+      <tr><td><code>/x/mosq</code></td><td><code>test.mosquitto.org:8081</code></td><td>запасной путь</td></tr>
+    </table></div>
+    <p>Строка <code>/x/echo</code> → <code>echo.websocket.org</code> осталась от спайка (задача 1): её можно удалить (корзина справа от строки) и сохранить. Не обязательно.</p>
+  </div>
+</div>
+
+<div class="step" data-id="2.3">
+  <label><input type="checkbox"><span class="id">2.3</span><span class="title">Туннель больше не нужен</span><span class="tags"><span class="who term">Терминал</span></span></label>
+  <div><p>Если где-то ещё запущен <code>cloudflared</code> — закрой (Ctrl+C). Продакшен от твоего компьютера больше не зависит: можно выключить ПК, игра продолжит работать.</p></div>
+</div>
+
+<!-- ───────────────────────────── 3 ───────────────────────────── -->
+<h2><span class="num">3</span> Картинки для полки активностей <span class="time">3 мин</span></h2>
+<p>Без них в списке активностей будет пустая плитка. Файлы уже подготовлены.</p>
+
+<div class="step" data-id="3.1">
+  <label><input type="checkbox"><span class="id">3.1</span><span class="title">Загрузить обложку и видео</span><span class="tags"><span class="who portal">Portal</span></span></label>
+  <div>
+    <ol>
+      <li>Открой <a href="https://discord.com/developers/applications/1563178748872753223/embedded/assets">Активности → Графические ассеты</a>.</li>
+      <li><b>Обложка</b> — перетащи файл
+        <div class="cmd"><pre>D:\Claude Projects\cards_snakes_ladders\docs\discord\media\cover-1024x576.png</pre><button class="copy" type="button">Копировать</button></div></li>
+      <li><b>Предпросмотр видео</b> — файл (10 с, 394 КБ, из трейлера)
+        <div class="cmd"><pre>D:\Claude Projects\cards_snakes_ladders\docs\discord\media\preview-640x360.mp4</pre><button class="copy" type="button">Копировать</button></div></li>
+      <li><b>Фон</b> — пропусти (нужен только для вида «таблицей»). Если Portal не даёт сохранить без него — напиши мне, сделаю картинку без названия.</li>
+      <li>Сохрани. Discord предупреждает: новые картинки появляются с задержкой (кэш).</li>
+    </ol>
+  </div>
+</div>
+
+<!-- ───────────────────────────── 4 ───────────────────────────── -->
+<h2><span class="num">4</span> Проверить самому <span class="time">10–15 мин</span></h2>
+<p>До друзей — убедиться, что продакшен открывается в настоящем Discord. Нужны компьютер и телефон (или я вторым игроком).</p>
+
+<div class="step" data-id="4.1">
+  <label><input type="checkbox"><span class="id">4.1</span><span class="title">Приложение установлено на сервер CSL</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div>
+    <p>Если раньше ты запускал активность на этом сервере, шаг уже сделан — пропусти. Если активности нет в списке (шаг 4.2): открой ссылку установки, выбери <b>Добавить на сервер</b> → сервер CSL → <b>Авторизовать</b>.</p>
+    <div class="cmd"><pre>https://discord.com/oauth2/authorize?client_id=1563178748872753223</pre><button class="copy" type="button">Копировать</button></div>
+  </div>
+</div>
+
+<div class="step" data-id="4.2">
+  <label><input type="checkbox"><span class="id">4.2</span><span class="title">Запустить с компьютера</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div>
+    <ol>
+      <li>Зайди в голосовой канал <b>«Игры»</b>.</li>
+      <li>Внизу панели звонка — кнопка <b>Активности</b> (ракета) → <b>Cards, snakes and ladders</b> → <b>Начать активность</b>.</li>
+      <li>Discord спросит разрешение на имя и аватар → <b>Авторизовать</b> (спрашивает один раз).</li>
+    </ol>
+    <p><b>Должно быть:</b> сразу экран <b>Channel Table</b> (без меню и кодов), ты — хост, слева твоё имя из Discord и аватар.</p>
+  </div>
+</div>
+
+<div class="step" data-id="4.3">
+  <label><input type="checkbox"><span class="id">4.3</span><span class="title">Второй игрок: телефон (или я)</span><span class="tags"><span class="who discord">Discord</span><span class="who claude">или Claude</span></span></label>
+  <div>
+    <p><b>С телефона:</b> тот же сервер → канал «Игры» → войти → нажать на идущую активность → <b>Присоединиться</b>. На телефоне должно быть то же лобби, и оба должны видеть друг друга.</p>
+    <p><b>Или я:</b> напиши <b>«зайди в активность в Discord»</b> — я открою её во встроенном браузере (там ты уже вошёл в discord.com) и сяду за твой стол как второй игрок, то есть проверю ещё и браузерную версию Discord.</p>
+  </div>
+</div>
+
+<div class="step" data-id="4.4">
+  <label><input type="checkbox"><span class="id">4.4</span><span class="title">Короткая партия и уход хоста</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div>
+    <ol>
+      <li>На компьютере (хост) — <b>Start Game</b>, сделайте по паре ходов.</li>
+      <li>Закрой активность на компьютере (крестик / выйти из активности). <b>Должно быть:</b> на телефоне игра идёт дальше, на твоём месте бот.</li>
+      <li>Зайди снова — ты за тем же столом.</li>
+      <li>Переключись в текстовый канал: активность станет маленьким окошком, в нём поле и «Make the window bigger to play».</li>
+    </ol>
+    <p>Если что-то не так — раздел <a href="#trouble">«Если не работает»</a> внизу, или пришли мне скриншот.</p>
+  </div>
+</div>
+
+<!-- ───────────────────────────── 5 ───────────────────────────── -->
+<h2><span class="num">5</span> Позвать друзей <span class="time">10 мин + ожидание</span></h2>
+
+<div class="step" data-id="5.1">
+  <label><input type="checkbox"><span class="id">5.1</span><span class="title">Сервер: меньше 25 участников и канал #баги</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div>
+    <p>Пока приложение не верифицировано, Discord запускает активность только на серверах <b>меньше 25 участников</b> — на сервере CSL так и есть, просто не зови больше.</p>
+    <p>Создай текстовый канал <b>#баги</b> (правый клик по категории → Создать канал): туда друзья пишут о проблемах.</p>
+  </div>
+</div>
+
+<div class="step" data-id="5.2">
+  <label><input type="checkbox"><span class="id">5.2</span><span class="title">Пригласить друзей на сервер</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div><p>Правый клик по серверу CSL → <b>Пригласить людей</b> → скопировать ссылку → отправить 3–5 друзьям.</p></div>
+</div>
+
+<div class="step" data-id="5.3">
+  <label><input type="checkbox"><span class="id">5.3</span><span class="title">Сделать их тестировщиками</span><span class="tags"><span class="who portal">Portal</span><span class="who friends">Друзья</span></span></label>
+  <div>
+    <ol>
+      <li>Открой <a href="https://discord.com/developers/applications/1563178748872753223/testers">Тестировщики приложений</a>.</li>
+      <li>Для каждого друга: его имя пользователя в Discord (не отображаемое имя, а <code>username</code>) → <b>Пригласить</b>. До 50 человек.</li>
+      <li>Каждому придёт <b>письмо на почту</b> от Discord — он должен нажать в нём <b>Accept</b>. Пока не принял, активности он не увидит. В списке на этой странице видно, кто принял.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="step" data-id="5.4">
+  <label><input type="checkbox"><span class="id">5.4</span><span class="title">Отправить друзьям инструкцию и назначить время</span><span class="tags"><span class="who discord">Discord</span></span></label>
+  <div>
+    <p>Текст ниже — как есть, в личку или в общий чат. Удобнее всего сыграть всем вместе в одно время.</p>
+    <div class="cmd text"><pre id="friends">Тест игры «Cards, Snakes & Ladders» в Discord — минут 20–30.
+
+Перед тестом:
+• прими приглашение тестировщика — оно пришло на почту от Discord (кнопка Accept);
+• зайди на сервер, куда я позвал;
+• если потом не увидишь игру в списке активностей: Настройки → Расширенные → включи «Режим разработчика».
+
+Тест:
+1. Зайди в голосовой канал «Игры» → кнопка «Активности» (ракета) → Cards, snakes and ladders. Если кто-то уже играет — нажми на активность и «Присоединиться». Discord спросит разрешение на имя и аватар — «Авторизовать». (Один из нас пусть нажмёт «Отмена»: игра должна пустить его как «Player N».)
+2. Все должны оказаться за одним столом, без кодов. Проверь: видишь ли всех, твоё ли имя и аватар.
+3. Хост (кто зашёл первым) выбирает режим и поле и жмёт Start Game. Играем.
+4. Хост закрывает активность посреди партии — у остальных игра должна идти дальше, на его месте бот. Потом он заходит снова.
+5. С телефона: включи режим полёта на 10–20 секунд и выключи — ты должен вернуться на своё место.
+6. Переключись в текстовый канал — игра станет маленьким окошком с надписью «Make the window bigger to play». Вернись.
+7. How to Play → Privacy или Terms: Discord должен спросить, открыть ли страницу в браузере.
+8. Доиграйте до конца, хост жмёт Play Again — новая партия за тем же столом.
+9. Кто-нибудь заходит в канал посреди партии: он садится на место бота или ждёт следующую партию.
+
+Если что-то не так — напиши в канал #баги: что делал, что ожидал, что вышло, устройство (Windows / Mac / браузер / iPhone / Android) и примерное время. Скриншот очень помогает.</pre><button class="copy" type="button">Копировать</button></div>
+  </div>
+</div>
+
+<!-- ───────────────────────────── 6 ───────────────────────────── -->
+<h2><span class="num">6</span> Прогон с друзьями <span class="time">30 мин</span></h2>
+
+<div class="step" data-id="6.1">
+  <label><input type="checkbox"><span class="id">6.1</span><span class="title">За 5 минут до начала: включить лог сервера</span><span class="tags"><span class="who claude">Claude</span><span class="who term">или Терминал</span></span></label>
+  <div>
+    <p>Напиши мне <b>«следи за релеем»</b> — я запущу лог сервера комнат в фоне и после прогона расскажу, что в нём было (обрывы, ошибки, переполненные комнаты). Или сам, в отдельном окне терминала:</p>
+    <div class="cmd"><pre>cd server/relay
+npx wrangler tail</pre><button class="copy" type="button">Копировать</button></div>
+  </div>
+</div>
+
+<div class="step" data-id="6.2">
+  <label><input type="checkbox"><span class="id">6.2</span><span class="title">Играть по инструкции</span><span class="tags"><span class="who discord">Discord</span><span class="who friends">Друзья</span></span></label>
+  <div><p>Все в канале «Игры», идёте по пунктам 1–9 из текста для друзей. Ты играешь вместе со всеми и посматриваешь в #баги.</p></div>
+</div>
+
+<div class="step" data-id="6.3">
+  <label><input type="checkbox"><span class="id">6.3</span><span class="title">Передать мне итоги</span><span class="tags"><span class="who claude">Claude</span></span></label>
+  <div>
+    <p>Напиши: <b>«прогон закончен»</b> и скопируй сообщения из #баги (или опиши, что видел сам). Я разберу лог релея, исправлю найденное, выложу новую версию и отмечу пункты в чек-листе MVP (<code>docs/discord/launch-plan.md</code>).</p>
+    <div class="note"><b>Как выходят исправления</b>Игру я выкладываю командой <code>npm run deploy:activity</code> (в <code>server/relay</code>) — её можно запускать когда угодно: кто играет, доигрывает старую версию, новая придёт при следующем запуске активности. Сервер комнат (<code>npm run deploy</code>) — только когда никто не играет: идущие партии оборвутся.</div>
+  </div>
+</div>
+
+<div class="note ok"><b>Готово — MVP запущен</b>Игра в Discord работает для тебя и тестировщиков. Дальше по плану — задачи 8–14 (приглашения и presence, зрители, статистика, каталог App Directory) в <code>docs/discord/launch-plan.md</code>.</div>
+
+<!-- ───────────────────────────── 7 ───────────────────────────── -->
+<h2><span class="num">7</span> Позже, по желанию: dev-приложение для туннеля <span class="time">10 мин</span></h2>
+<p>Нужно, когда захочешь проверить изменения в настоящем Discord <b>до</b> того, как их увидят друзья. У приложения Discord один набор сопоставлений, поэтому туннель живёт в отдельном приложении, а продакшен не трогаем. Сервер комнат уже умеет пускать оба.</p>
+
+<div class="step" data-id="7.1">
+  <label><input type="checkbox"><span class="id">7.1</span><span class="title">Создать приложение</span><span class="tags"><span class="who portal">Portal</span></span></label>
+  <div>
+    <ol>
+      <li><a href="https://discord.com/developers/applications">Applications</a> → <b>New Application</b> → имя <code>Cards, snakes and ladders (dev)</code>.</li>
+      <li>Активности → Настройки → <b>Подключить активности</b>.</li>
+      <li>Сопоставления URL-адресов: те же пять <code>/x/…</code>, что в шаге 2.2. Корневое — заполнишь в 7.4.</li>
+    </ol>
+  </div>
+</div>
+
+<div class="step" data-id="7.2">
+  <label><input type="checkbox"><span class="id">7.2</span><span class="title">Client ID — мне, Client Secret — на сервер (сам)</span><span class="tags"><span class="who portal">Portal</span><span class="who term">Терминал</span><span class="who claude">Claude</span></span></label>
+  <div>
+    <ol>
+      <li>Новое приложение → <b>OAuth2</b> → скопируй <b>Client ID</b> и пришли мне: <b>«dev client id: …»</b>. Я впишу его в <code>server/relay/wrangler.toml</code>.</li>
+      <li>Там же <b>Reset Secret</b> → скопируй секрет и <b>сам</b> положи его на сервер (в чат его не присылай):
+        <div class="cmd"><pre>cd server/relay
+npx wrangler secret put DISCORD_DEV_CLIENT_SECRET</pre><button class="copy" type="button">Копировать</button></div>
+        Команда попросит вставить секрет — вставь и нажми Enter.</li>
+      <li>Напиши мне <b>«секрет положил»</b> — я выложу сервер комнат с новым приложением (когда никто не играет).</li>
+    </ol>
+  </div>
+</div>
+
+<div class="step" data-id="7.3">
+  <label><input type="checkbox"><span class="id">7.3</span><span class="title">Тестировщик — ты сам</span><span class="tags"><span class="who portal">Portal</span></span></label>
+  <div><p>Владелец приложения запускает его и так; друзей в dev-приложение не зови. Установи его на сервер CSL по ссылке <code>https://discord.com/oauth2/authorize?client_id=&lt;dev client id&gt;</code>.</p></div>
+</div>
+
+<div class="step" data-id="7.4">
+  <label><input type="checkbox"><span class="id">7.4</span><span class="title">Каждый раз, когда проверяешь через туннель</span><span class="tags"><span class="who claude">Claude</span><span class="who term">Терминал</span><span class="who portal">Portal</span></span></label>
+  <div>
+    <ol>
+      <li>Мне: <b>«подними discord-сборку для туннеля»</b> — я соберу <code>dist/discord/</code> и запущу её на порту 5560.</li>
+      <li>Сам (мне запуск туннелей запрещён), в отдельном окне терминала:
+        <div class="cmd"><pre>cloudflared tunnel --url http://localhost:5560</pre><button class="copy" type="button">Копировать</button></div>
+        Скопируй адрес вида <code>xxxx.trycloudflare.com</code> из вывода.</li>
+      <li>Portal dev-приложения → Сопоставления URL-адресов → Корневое → этот адрес (без <code>https://</code>) → сохранить.</li>
+      <li>Запусти в Discord активность <b>(dev)</b>, не основную.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- ───────────────────────────── trouble ───────────────────────────── -->
+<h2 id="trouble"><span class="num">?</span> Если не работает</h2>
+<div class="table-wrap"><table>
+  <tr><th>Что видно</th><th>Почему</th><th>Что делать</th></tr>
+  <tr><td>Игры нет в списке активностей</td><td>не принято приглашение тестировщика; приложение не установлено на сервер; на сервере 25+ участников</td><td>шаги 5.3 и 4.1; другу — включить «Режим разработчика» (Настройки → Расширенные); перезапустить Discord</td></tr>
+  <tr><td>Белый/чёрный экран, «не удалось загрузить»</td><td>корневое сопоставление не то: старый туннель, лишний <code>https://</code>, не сохранено</td><td>шаг 2.1, обновить страницу Portal и проверить поле</td></tr>
+  <tr><td>«Could not reach the table», кнопки Try Again и Play vs Bots</td><td>нет связи с сервером комнат: нет строки <code>/x/relay</code> или сервер недоступен</td><td>шаг 2.2; открыть <a href="https://csl-relay.csl-relay.workers.dev">csl-relay.csl-relay.workers.dev</a> — должна быть строка «cards-snakes-ladders relay»; написать мне</td></tr>
+  <tr><td>Люди из одного канала за разными столами</td><td>они в разных голосовых каналах или запустили активность отдельно</td><td>все в одном канале; второй и дальше — «Присоединиться» к уже идущей</td></tr>
+  <tr><td>Все «Player N», без аватаров</td><td>отказ от авторизации, или вход не прошёл</td><td>Player N у того, кто нажал «Отмена», — так и задумано. Если у всех — написать мне (проверю <code>/api/token</code> по логу)</td></tr>
+  <tr><td>Имена есть, аватаров нет</td><td>нет строки <code>/x/cdn</code></td><td>шаг 2.2</td></tr>
+  <tr><td>Privacy / Terms не открываются</td><td>Discord показывает окно подтверждения — его легко пропустить</td><td>поискать окно «Открыть ссылку?»; если его нет — написать мне</td></tr>
+  <tr><td>После исправления видна старая версия</td><td>активность открыта со старой загрузкой</td><td>закрыть активность и запустить заново</td></tr>
+</table></div>
+
+<details><summary>Где что лежит</summary><div>
+  <ul>
+    <li>Игра: <code>https://csl-activity.csl-relay.workers.dev</code> — Cloudflare Worker <code>csl-activity</code> (<code>server/activity/wrangler.toml</code>), сборка <code>dist/discord/</code>.</li>
+    <li>Сервер комнат и входа: <code>https://csl-relay.csl-relay.workers.dev</code> — Worker <code>csl-relay</code> (<code>server/relay/</code>), секрет <code>DISCORD_CLIENT_SECRET</code> только на Cloudflare.</li>
+    <li>Политика и условия: <a href="https://andtargd.github.io/cards_snakes_ladders/privacy.html">privacy.html</a>, <a href="https://andtargd.github.io/cards_snakes_ladders/terms.html">terms.html</a> (GitHub Pages).</li>
+    <li>Почему так устроено и что проверено без людей: <code>docs/discord/release.md</code>. План: <code>docs/discord/launch-plan.md</code>. Локальный запуск: <code>docs/run-locally.html</code>.</li>
+    <li>Откат игры на прошлую версию: <code>cd server/relay</code>, затем <code>npx wrangler rollback -c ../activity/wrangler.toml</code> (или мне: «откати активность»).</li>
+  </ul>
+</div></details>
+</main>
+<script>
+  for (const b of document.querySelectorAll('.cmd .copy')) b.addEventListener('click', async () => {
+    const text = b.previousElementSibling.textContent
+    try { await navigator.clipboard.writeText(text); b.textContent = 'Скопировано'; b.classList.add('done') }
+    catch { b.textContent = 'Не вышло' }
+    setTimeout(() => { b.textContent = 'Копировать'; b.classList.remove('done') }, 1500)
+  })
+  // the ticks: kept in this browser only
+  const KEY = 'dc-launch-steps'
+  let done = {}
+  try { done = JSON.parse(localStorage.getItem(KEY) || '{}') } catch {}
+  const steps = [...document.querySelectorAll('.step')]
+  const main = steps.filter(s => !s.dataset.id.startsWith('7.'))
+  function show() {
+    for (const s of steps) s.classList.toggle('done', !!done[s.dataset.id])
+    const n = main.filter(s => done[s.dataset.id]).length
+    document.getElementById('bar').style.width = (100 * n / main.length) + '%'
+    document.getElementById('count').textContent = `Сделано ${n} из ${main.length}` + (n === main.length ? ' — MVP запущен' : '')
+  }
+  for (const s of steps) {
+    const box = s.querySelector('input')
+    box.checked = !!done[s.dataset.id]
+    box.addEventListener('change', () => {
+      if (box.checked) done[s.dataset.id] = true; else delete done[s.dataset.id]
+      try { localStorage.setItem(KEY, JSON.stringify(done)) } catch {}
+      show()
+    })
+  }
+  document.getElementById('reset').addEventListener('click', () => {
+    done = {}
+    try { localStorage.removeItem(KEY) } catch {}
+    for (const s of steps) s.querySelector('input').checked = false
+    show()
+  })
+  show()
+  const root = document.documentElement
+  try { const t = localStorage.getItem('run-theme'); if (t) root.dataset.theme = t } catch {}
+  document.getElementById('theme').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+    root.dataset.theme = dark ? 'light' : 'dark'
+    try { localStorage.setItem('run-theme', root.dataset.theme) } catch {}
+  })
+</script>
+</body>
+</html>
