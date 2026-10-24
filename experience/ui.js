@@ -360,7 +360,7 @@ export class UI {
   }
   /** A click the tip did not let through: the bubble shakes. */
   kickTip() {
-    if (this.time - this.tip.kick > 0.3) this.app.playSound('tick', 0.35)
+    if (this.time - this.tip.kick > 0.3) this.app.playSound('tip')
     this.tip.kick = this.time
   }
   /** The bubble's picture for a tip: its line, and Skip tutorial quietly under it. */
@@ -529,6 +529,19 @@ export class UI {
     g.textBaseline = 'middle'
     if (max) g.fillText(t, x, y, max); else g.fillText(t, x, y)
   }
+  /** Player `id`'s picture on the site (their avatar, the web build's), or null: then the game draws its own. */
+  picture(id) { return id == null ? null : this.p0.web?.picture?.(id) || null }
+  /** A picture in a disc of radius r, in a ring of the player's colour. */
+  pictureDisc(img, x, y, r, color) {
+    const g = this.g
+    g.fillStyle = color
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill()
+    const ir = r - 2 * this.u
+    g.save()
+    g.beginPath(); g.arc(x, y, ir, 0, Math.PI * 2); g.clip()
+    g.drawImage(img, x - ir, y - ir, 2 * ir, 2 * ir)
+    g.restore()
+  }
   /** A name's first letter, or the emoji it starts with, white in its round badge centred at x, y. */
   initial(name, x, y, size) {
     const { ch, emoji } = P.initial(name)
@@ -680,6 +693,7 @@ export class UI {
   /** The main menu: Quick Match on top, then Solo Play, Pass & Play and Online; How to Play under them. */
   drawMenu() {
     const H = this.H, u = this.u, app = this.app
+    if (app.channel()) { this.drawChannelMenu(); return }
     const web = this.p0.web, room = web?.room // the browser build: online rooms stand in for the lot
     const { x, w } = this.menuLayout(this.menuW(440))
     const table = this.p0.table || []
@@ -735,6 +749,28 @@ export class UI {
     this.soundControl()
   }
 
+  /**
+   * The menu where the site has a table of its own (Discord's channel), seen only while out of its room
+   * (it could not be reached, or a game against bots ended): the way back to it, the bots, the rules.
+   */
+  drawChannelMenu() {
+    const H = this.H, u = this.u, app = this.app
+    const { x, w } = this.menuLayout(this.menuW(440))
+    const heroH = 92 * u, cx = x + w / 2, headH = LOGO_H + 44
+    let y = Math.max(16 * u, (H - headH * u - heroH - 14 * u - 46 * u - 14 * u - 36 * u) / 2)
+    this.drawLogo(cx, y, Math.min(1, w / (440 * u)))
+    this.text(T.tagline, cx, y + (LOGO_H + 18) * u, { size: 14, align: 'center', bold: false, color: '#5b544c', max: w })
+    y += headH * u
+    this.heroButton('quick', T.joinTable, T.channelSub, x, y, w, heroH, () => app.enterChannel())
+    this.heroRect = { x, y, w, h: heroH }
+    y += heroH + 14 * u
+    this.button('solo', T.playBots, x, y, w, 46 * u, () => app.startSolo(), { size: 16 })
+    y += 46 * u + 14 * u
+    this.ghostButton('help', T.howToPlay, cx - 168 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 0 })
+    this.ghostButton('cards', T.theCards, cx + 8 * u, y, 160 * u, 36 * u, () => { app.toScreen('help'); this.helpPage = 1 })
+    this.soundControl()
+  }
+
   // ---------- the setup screens: Solo Play, Pass & Play, Online ----------
   /**
    * Where a setup screen's parts go: the mode cards and the big button on the left, the settings panel
@@ -757,16 +793,16 @@ export class UI {
     return { x, y, w: L.w, mw, cardW, cardH, top, midY: top + cardH + 16 * u, playY: top + cardH + 16 * u + mid, playH,
       px: side ? x + mw + gap : x, py: side ? top : top + leftH + 18 * u, pw: side ? sideW : L.w, ph: panelH }
   }
-  /** The top of a setup screen: a round Back, the title and a line under it. */
+  /** The top of a setup screen: a round Back (none without `back`), the title and a line under it. */
   pageHead(x, y, w, title, sub, back) {
-    const u = this.u, b = 38 * u, tx = x + b + 14 * u
-    this.roundButton('back', x, y + 2 * u, b, back, () => this.arrow(x + b / 2, y + 2 * u + b / 2, -b * 0.42, P.INK))
-    this.text(title, tx, y + 18 * u, { size: 27, color: '#2d3a6b', max: w - b - 14 * u })
-    if (sub) this.text(sub, tx, y + 46 * u, { size: 13, bold: false, color: '#5b544c', max: w - b - 14 * u })
+    const u = this.u, b = 38 * u, tx = back ? x + b + 14 * u : x
+    if (back) this.roundButton('back', x, y + 2 * u, b, back, () => this.arrow(x + b / 2, y + 2 * u + b / 2, -b * 0.42, P.INK))
+    this.text(title, tx, y + 18 * u, { size: 27, color: '#2d3a6b', max: w - (tx - x) })
+    if (sub) this.text(sub, tx, y + 46 * u, { size: 13, bold: false, color: '#5b544c', max: w - (tx - x) })
   }
   /** Champion and Fool side by side for `c.mode`; `set(fn)` runs fn and keeps the change. */
   modeCards(c, S, set) {
-    const pick = m => set(() => { if (c.mode !== m) this.app.playSound('select', 0.35); c.mode = m })
+    const pick = m => set(() => { if (c.mode !== m) this.app.playSound('option'); c.mode = m })
     this.modeCard('champion', S.x, S.top, S.cardW, S.cardH, c.mode === 'champion', pick('champion'))
     this.modeCard('fool', S.x + S.cardW + 14 * this.u, S.top, S.cardW, S.cardH, c.mode === 'fool', pick('fool'))
   }
@@ -926,8 +962,13 @@ export class UI {
     for (const l of lines) { this.text(l, W / 2, yy, { size: 15, align: 'center', bold: false, max: pw - 30 * u }); yy += this.lineH(15, 21) }
     if (st.detail) this.text(st.detail, W / 2, yy + 6 * u, { size: 11.5, align: 'center', bold: false, color: '#9a948a', max: pw - 30 * u })
     const by = y + ph - 58 * u
+    // the channel's table could not be reached: again, or the bots meanwhile
+    if (st.kind === 'channel') {
+      const bw = (pw - 52 * u) / 2
+      this.button('olretry', T.tryAgain, x + 20 * u, by, bw, 42 * u, () => { web.dismiss(); this.app.enterChannel() }, { primary: true, size: 15 })
+      this.button('olbots', T.playBots, x + 32 * u + bw, by, bw, 42 * u, () => { web.dismiss(); this.app.startSolo() }, { size: 15 })
     // Quick Match found no one to play: the bots are always there
-    if (st.kind === 'quick') {
+    } else if (st.kind === 'quick') {
       const bw = (pw - 52 * u) / 2
       this.button('olbots', T.playBots, x + 20 * u, by, bw, 42 * u, () => { web.dismiss(); this.app.startSolo() }, { primary: true, size: 15 })
       this.button('olok', T.ok, x + 32 * u + bw, by, bw, 42 * u, () => web.dismiss(), { size: 15 })
@@ -1310,7 +1351,7 @@ export class UI {
     const kx = x + w * v, hov = this.hover === key || this.drag?.key === key
     g.fillStyle = '#ffffff'; g.strokeStyle = hov ? '#e8743b' : 'rgba(43,38,34,0.35)'; g.lineWidth = 1.5 * u
     g.beginPath(); g.arc(kx, cy, (hov ? 9 : 8) * u, 0, Math.PI * 2); g.fill(); g.stroke()
-    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - this.ox - x) / w), end: () => { app.saveSettings(); app.playSound('select', 0.5) } })
+    this.hits.push({ key, x: x - 10 * u, y, w: w + 20 * u, h, action: () => {}, drag: px => app.setVolume((px - this.ox - x) / w), end: () => { app.saveSettings(); app.playSound('soundOn') } })
   }
   /** The title screens' corner: the slider, then the speaker. */
   soundControl() {
@@ -1361,12 +1402,12 @@ export class UI {
    * A table's lobby: an online room, a Quick Match table or Project 0's Shared Table. The mode and the
    * seats on the left with Start under them; the table's settings (board, bots) beside them. The host
    * sets the table up. A Quick Match table plays as it was found and is here only for a moment: its
-   * game starts at once.
+   * game starts at once. The channel's table (Discord) is the only one there is: no code, link or Back.
    */
   drawLobby() {
     const H = this.H, u = this.u, app = this.app, me = this.p0.me.id
     const lob = app.lobby(), isHost = this.p0.room.isHost, room = this.p0.web?.room
-    const quick = app.quick()
+    const quick = app.quick(), channel = !!room?.channel
     const setUp = isHost && !quick
     const seats = lob.seats, n = seats.filter(Boolean).length, humans = seats.filter(s => s && !s.b).length
     const bots = seats.map((s, i) => (s?.b && !s.q ? i : -1)).filter(i => i >= 0)
@@ -1384,8 +1425,8 @@ export class UI {
     // the table's name, its room and host; on the right the way to bring friends
     const hostLine = isHost ? T.youHost : T.hostIs(app.nameOf(this.p0.room.host))
     const bw = Math.min(150 * u, L.w * 0.32)
-    this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : room ? T.onlineRoom : T.sharedTable, room ? T.roomHead(room.code, hostLine) : hostLine, () => app.leaveLobby())
-    if (room && !quick) this.button('share', room.link ? T.shareLink : T.shareCode, x + L.w - bw, y + 4 * u, bw, 38 * u, () => this.shareRoom(), { primary: true, color: '#2d3a6b', size: 14 })
+    this.pageHead(x, y, L.w - bw - 8 * u, quick ? T.quickMatch : channel ? T.channelTable : room ? T.onlineRoom : T.sharedTable, room && !channel ? T.roomHead(room.code, hostLine) : hostLine, channel ? null : () => app.leaveLobby())
+    if (room && !quick && !channel) this.button('share', room.link ? T.shareLink : T.shareCode, x + L.w - bw, y + 4 * u, bw, 38 * u, () => this.shareRoom(), { primary: true, color: '#2d3a6b', size: 14 })
     else if (!room) {
       const others = app.notSeated().length
       this.button('invite', T.invite + (others ? ` (${others})` : ''), x + L.w - bw, y + 4 * u, bw, 38 * u, () => { this.picker = true; this.dirty = true }, { size: 14, primary: others > 0, color: '#2d3a6b' })
@@ -1394,7 +1435,7 @@ export class UI {
     const top = y
     // the mode: the host picks it; a quick table plays the one it was found for
     const cw = (mw - 14 * u) / 2
-    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('select', 0.35); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
+    const pick = m => (setUp ? () => { if (lob.mode !== m) app.playSound('option'); app.lobbyCmd({ t: 'mode', mode: m }) } : null)
     this.modeCard('champion', x, y, cw, modeH, lob.mode === 'champion', pick('champion'))
     this.modeCard('fool', x + cw + 14 * u, y, cw, modeH, lob.mode === 'fool', pick('fool'))
     y += modeH + 16 * u
@@ -1410,12 +1451,14 @@ export class UI {
     for (let i = 0; i < 6; i++) this.seatRow(i, seats[i], x + (i % cols) * (sw + 12 * u), y + Math.floor(i / cols) * (rowH + rowGap), sw, rowH, quick, setUp)
     y += seatsH + 6 * u
     // Start (the host), or a quick table's game on its way, or waiting for the host
-    const can = n >= 2 && humans >= 1 && (lob.mode !== 'fool' || n >= 3)
+    // (at the channel's table bots make up the players the game needs)
+    const can = humans >= 1 && (channel || (n >= 2 && (lob.mode !== 'fool' || n >= 3)))
     if (quick) this.text(T.quickStarting, x + mw / 2, y + 27 * u, { size: 18, align: 'center', color: '#2d3a6b', max: mw })
     else if (isHost) this.playButton(x, y, mw, 54 * u, () => app.lobbyCmd({ t: 'start' }), { label: T.startGame, key: 'lstart', size: 24, disabled: !can })
     else this.text(T.waitingHost, x + mw / 2, y + 27 * u, { size: 15, align: 'center', color: '#5b544c', max: mw })
     y += 58 * u
-    if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
+    if (isHost && channel && n < (lob.mode === 'fool' ? 3 : 2)) this.text(T.botsMakeUp, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c' })
+    else if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
     // the table: its board, and the bots (not at a quick table, where they sit as players)
     const px = side ? x + mw + gap : x, py = side ? top : top + leftH + 12 * u, pw = side ? sideW : L.w
     this.panel(px, py, pw, panelH, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
@@ -1439,8 +1482,13 @@ export class UI {
     const g = this.g, u = this.u, mine = s && s.id === this.p0.me.id
     this.panel(x, y, w, h, { fill: s ? '#ffffff' : 'rgba(255,255,255,0.4)', stroke: mine ? 'rgba(232,116,59,0.8)' : 'rgba(43,38,34,0.16)', r: 12, lw: mine ? 2 : 1.5 })
     const cx = x + 20 * u, cy = y + h / 2
-    g.beginPath(); g.arc(cx, cy, 8 * u, 0, Math.PI * 2)
-    if (s) { g.fillStyle = P.PLAYER_COLORS[i]; g.fill() } else { g.strokeStyle = P.PLAYER_COLORS[i]; g.lineWidth = 2 * u; g.setLineDash([3 * u, 3 * u]); g.stroke(); g.setLineDash([]) }
+    // (a player's avatar where the site has one, in their colour)
+    const pic = s && !s.b ? this.picture(s.id) : null
+    if (pic) this.pictureDisc(pic, cx, cy, 13 * u, P.PLAYER_COLORS[i])
+    else {
+      g.beginPath(); g.arc(cx, cy, 8 * u, 0, Math.PI * 2)
+      if (s) { g.fillStyle = P.PLAYER_COLORS[i]; g.fill() } else { g.strokeStyle = P.PLAYER_COLORS[i]; g.lineWidth = 2 * u; g.setLineDash([3 * u, 3 * u]); g.stroke(); g.setLineDash([]) }
+    }
     if (!s) { this.text(quick ? T.waitingSeat : T.openSeat, x + 38 * u, cy, { size: 13.5, bold: false, color: '#9a948a', max: w - 48 * u }); return }
     const bot = s.b && !s.q, host = !s.b && s.id === this.p0.room.host
     const tag = bot ? T.botTag(T.levels[s.b - 1] || '') : host ? T.hostTag : ''
@@ -1558,9 +1606,14 @@ export class UI {
       const g = this.g
       if (i === leader) this.rowHalo(cx, cy, colW, rowH, 'gold')
       else if (i === last) this.rowHalo(cx, cy, colW, rowH, 'gloom')
-      g.fillStyle = P.PLAYER_COLORS[p.c % 6]
-      g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
-      this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
+      // the player's avatar where the site has one (not while a bot plays the seat), else their initial
+      const pic = p.b ? null : this.picture(p.id)
+      if (pic) this.pictureDisc(pic, cx + rowH / 2, cy + rowH / 2, rowH * 0.32, P.PLAYER_COLORS[p.c % 6])
+      else {
+        g.fillStyle = P.PLAYER_COLORS[p.c % 6]
+        g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
+        this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
+      }
       const nx = cx + rowH * 0.95
       const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos)
       if (this.narrow) {
@@ -1699,14 +1752,27 @@ export class UI {
     // back at the Shared Table while a bot plays my seat: the way to take it back
     const back = app.seatToTakeBack()
     if (back >= 0 && !app.menuOpen && !app.invite) this.drawTakeBack(s.pl[back])
+    else if (app.watching() && !app.menuOpen && !app.invite) this.drawWatching()
+  }
+  /** A box `ph` tall at the bottom, where my hand goes: clear of the log and the dice tray. */
+  handBox(ph) {
+    const W = this.W, H = this.H, u = this.u
+    const left = !this.narrow && this.logRect ? this.logRect.x + this.logRect.w + 10 * u : 10 * u
+    const right = this.narrow ? W - 10 * u : this.trayBox().x - 14 * u
+    const pw = Math.min(380 * u, right - left)
+    return { x: THREE.MathUtils.clamp((W - pw) / 2, left, right - pw), y: H - ph - (this.narrow ? 12 * u : 46 * u), pw, ph }
+  }
+  /** Watching the channel's game with no seat in it: a word where my hand would be that the next game has one. */
+  drawWatching() {
+    const u = this.u, { x, y, pw, ph } = this.handBox(66 * this.u)
+    this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.94)', stroke: 'rgba(45,58,107,0.35)', lw: 2 })
+    this.text(T.watching, x + pw / 2, y + 24 * u, { size: 15.5, align: 'center', max: pw - 24 * u })
+    this.text(T.watchingNext, x + pw / 2, y + 46 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 24 * u })
   }
   /** At the bottom, where my hand goes once the seat is mine again: clear of the log and the dice tray. */
   drawTakeBack(p) {
-    const W = this.W, H = this.H, u = this.u, app = this.app
-    const left = !this.narrow && this.logRect ? this.logRect.x + this.logRect.w + 10 * u : 10 * u
-    const right = this.narrow ? W - 10 * u : this.trayBox().x - 14 * u
-    const pw = Math.min(380 * u, right - left), ph = 108 * u
-    const x = THREE.MathUtils.clamp((W - pw) / 2, left, right - pw), y = H - ph - (this.narrow ? 12 * u : 46 * u)
+    const u = this.u, app = this.app
+    const { x, y, pw, ph } = this.handBox(108 * u)
     const color = P.PLAYER_COLORS[p.c % 6]
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.97)', stroke: color, lw: 3 })
     this.text(T.botPlaysForYou, x + pw / 2, y + 27 * u, { size: 16, align: 'center', max: pw - 24 * u })
@@ -1720,7 +1786,7 @@ export class UI {
     const s = this.app.view.state
     if (!s || !keys.length) return
     this.fxOpen = { gid: s.gid, p, keys, x, y }
-    this.app.sfx('draw', 0.3)
+    this.app.sfx('effects')
     this.dirty = true
   }
   closeFx() { if (this.fxOpen) { this.fxOpen = null; this.dirty = true; return true } return false }
@@ -1781,10 +1847,13 @@ export class UI {
       this.button('skiptut', T.skip, mx + 40 * u + bw, my + mh - 64 * u, bw, 44 * u, () => { app.skipTutorial(); app.toMenu() }, { size: 16 })
     } else if (app.menuOpen) {
       const web = !!this.p0.web
+      // at the channel's table there is nowhere else to go: the host can end the game (back to the lobby), the others play on
+      const channel = app.atChannel() && app.table?.kind === 'shared', leave = !channel || this.p0.room.isHost
+      const top = (web ? 262 : 310) - (leave ? 0 : 48)
       const mw = Math.min(W - 20 * u, Math.max(320 * u, 300))
       // the controls, which used to stand over the players' list, are told here
       const keys = this.wrap(T.controls, 11.5, mw - 36 * u, false), klh = this.lineH(11.5, 15)
-      const mh = (web ? 262 : 310) * u + keys.length * klh + 14 * u
+      const mh = top * u + keys.length * klh + 14 * u
       const mx = (W - mw) / 2, my = (H - mh) / 2, bx = mx + 24 * u, bw = mw - 48 * u
       this.panel(mx, my, mw, mh, { fill: 'rgba(255,253,248,0.97)' })
       this.text(T.menuTitle, W / 2, my + 30 * u, { size: 20, align: 'center' })
@@ -1793,9 +1862,9 @@ export class UI {
       // sound: the speaker mutes, the slider sets the volume
       this.soundButton('snd2', bx, my + 160 * u, 40 * u)
       this.volumeSlider('vol2', bx + 58 * u, my + 160 * u, bw - 68 * u, 40 * u)
-      this.button('leave', T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.leaveGame(), { size: 15 })
+      if (leave) this.button('leave', channel ? T.endGame : T.leaveGame, bx, my + 208 * u, bw, 40 * u, () => app.leaveGame(), { size: 15 })
       if (!web) this.button('exitcity', T.exitCity, bx, my + 256 * u, bw, 40 * u, () => { app.menuOpen = false; this.p0.exit() }, { size: 15, primary: true, color: '#d64545' })
-      keys.forEach((l, i) => this.text(l, W / 2, my + (web ? 268 : 316) * u + i * klh, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
+      keys.forEach((l, i) => this.text(l, W / 2, my + (top + 6) * u + i * klh, { size: 11.5, align: 'center', bold: false, color: '#5b544c', max: mw - 30 * u }))
     }
   }
 
@@ -2059,6 +2128,12 @@ export class UI {
       this.button('mainmenu', T.mainMenu, x + 32 * u + bw * 2, by, bw, 42 * u, () => app.toMenu(), { size: 14 })
       return
     }
+    if (app.atChannel() && app.table?.kind === 'shared') {
+      if (!this.p0.room.isHost) { this.text(T.waitingRematch, W / 2, by + 22 * u, { size: 15, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u }); return }
+      this.button('rematch', T.rematch, x + 20 * u, by, pw / 2 - 26 * u, 44 * u, () => app.rematch(), { primary: true, size: 17 })
+      this.button('mainmenu', T.backToLobby, x + pw / 2 + 6 * u, by, pw / 2 - 26 * u, 44 * u, () => app.toMenu(), { size: 17 })
+      return
+    }
     const canRematch = app.table?.kind === 'solo' || (app.table?.kind === 'shared' && this.p0.room.isHost)
     this.button('rematch', T.rematch, x + 20 * u, by, pw / 2 - 26 * u, 44 * u, () => app.rematch(), { primary: true, disabled: !canRematch, size: 17 })
     this.button('mainmenu', T.mainMenu, x + pw / 2 + 6 * u, by, pw / 2 - 26 * u, 44 * u, () => app.toMenu(), { size: 17 })
@@ -2305,13 +2380,13 @@ export class UI {
     const mesh = this.makeCard('back')
     const s0 = (this.narrow ? 38 : 52) * u
     this.flyers.push({ mesh, burn: true, t: 0, x0: r ? r.x + r.w + s0 * 0.7 : this.W / 2, y0: r ? r.y + r.h / 2 : this.H * 0.3, s0, rot: -0.12, card: 'back' })
-    this.app.sfx('fold', 0.3)
+    this.app.sfx('burn')
   }
   /** A die of Choose Your Roll ('pick') or a card that Choose Your Card offers ('take'): the others burn. */
   choose(kind, i) {
     const app = this.app, s = app.view.state
     if (!s || app.view.busy || app.waiting > 0 || s.ph !== kind) return
-    if (kind === 'pick') { if (s.pick && i < s.pick.d.length) { app.sfx('select', 0.45); app.act({ t: 'pick', i }) } return }
+    if (kind === 'pick') { if (s.pick && i < s.pick.d.length) { app.sfx('take'); app.act({ t: 'pick', i }) } return }
     const offer = this.cards.filter(c => c.kind === 'offer'), c = offer.find(k => k.i === i)
     if (!c) return
     if (app.act({ t: 'take', i }) === false) return
@@ -2321,7 +2396,7 @@ export class UI {
       if (k === c) this.dropCard(k.mesh)
       else this.flyers.push({ mesh: k.mesh, burn: true, t: 0, x0: k.x, y0: k.y, s0: k.s, rot: 0, card: k.id })
     }
-    app.sfx('select', 0.45)
+    app.sfx('take')
     this.dirty = true
   }
   /** A card of my hand leaves it and burns where it is. */
@@ -2332,7 +2407,7 @@ export class UI {
     c.mesh.material.uniforms.dim.value = 0
     const fl = { mesh: c.mesh, burn: true, t: 0, x0: c.x, y0: c.y, s0: c.s, rot: c.mesh.rotation.z, card: c.id }
     this.flyers.push(fl)
-    this.app.sfx('fold', 0.4)
+    this.app.sfx('discard')
     return fl
   }
 
@@ -2376,7 +2451,7 @@ export class UI {
     // Echo: first the player whose last card it plays again (shown by their names), then that card's target
     this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null, echo: def.tgt === 'echo' ? {} : null }
     this.selected = c.i
-    app.sfx('draw', 0.3)
+    app.sfx('aim')
     this.syncHighlight()
     this.dirty = true
   }
@@ -2399,7 +2474,7 @@ export class UI {
     this.syncHighlight()
     const at = echo ? tg[1] : tg
     if (onPlayer && typeof at === 'number') app.view.pointAt(at, 1.8)
-    app.sfx('select', 0.45)
+    app.sfx('play')
     if (app.act({ t: 'play', i, tg }) === false) {
       this.hidden = null
       if (fl) { this.dropCard(fl.mesh); this.flyers = this.flyers.filter(f => f !== fl) }
@@ -2424,7 +2499,7 @@ export class UI {
       if (t.sel.includes(x)) t.sel = t.sel.filter(c => c !== x)
       else t.sel.push(x)
       if (t.sel.length === 2) { send([...t.sel]); return true }
-      this.app.sfx('select', 0.35)
+      this.app.sfx('firstCell')
       this.syncHighlight()
       this.dirty = true
       return true
@@ -2442,7 +2517,7 @@ export class UI {
     const kind = kindOf(def.tgt)
     this.target = { ...t, kind, list, sel: kind === 'cell2' ? [] : null, hov: null, echo: { src, card: id } }
     app.view.pointAt(null)
-    app.sfx('draw', 0.3)
+    app.sfx('aim')
     this.syncHighlight()
     this.dirty = true
     return true
@@ -2529,7 +2604,7 @@ export class UI {
     if (h.drag || h.key === 'snd' || h.key === 'block') return
     if (app.screen === 'game' && !this.modal && h.key !== 'menu') return // the game's own buttons have their sounds
     const name = /back|leave|mainmenu|resume|cancel|close|invno|stand|exit/i.test(h.key) ? 'back' : h.go ? 'menu' : 'tick'
-    app.playSound(name, 0.45)
+    app.playSound(name)
   }
   /** A click: true when the UI used it. A long press on a card only shows it bigger. */
   click(x, y, long = false) {

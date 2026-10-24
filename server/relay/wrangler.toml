@@ -1,0 +1,19 @@
+# The relay server of the online rooms: npm run dev (local, ws://127.0.0.1:8787), npm run deploy (Cloudflare)
+# The client secret of POST /api/token is a secret of the worker: npx wrangler secret put DISCORD_CLIENT_SECRET
+# (locally: server/relay/.env, as .env.example shows; never in the repository)
+name = "csl-relay"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+# SQLite-backed Durable Objects: the kind the Workers free plan has
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# the Discord application (its client id is not a secret: it is the activity's own address)
+[vars]
+DISCORD_CLIENT_ID = "1563178748872753223"

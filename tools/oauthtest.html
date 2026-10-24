@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Discord sign-in: tests</title>
+<style>
+  body { margin: 0; padding: 12px; font: 13.5px/1.4 system-ui, sans-serif; background: #f4f1ea; color: #2b2622; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  p { margin: 0 0 10px; color: #5b544c; }
+  #frames { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  #frames figure { margin: 0; } #frames figcaption { font-weight: bold; }
+  iframe { width: 400px; height: 250px; border: 2px solid #2d3a6b; border-radius: 8px; background: #fff; }
+  table { border-collapse: collapse; width: 100%; max-width: 1240px; background: #fffdf8; }
+  td, th { padding: 5px 8px; border-bottom: 1px solid #e2dccf; text-align: left; vertical-align: top; }
+  .pass { color: #2e7d32; font-weight: bold; } .fail { color: #c62828; font-weight: bold; } .run { color: #2d3a6b; }
+  td.note { color: #5b544c; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<h1>Discord sign-in: tests</h1>
+<p>Names and avatars from Discord (docs/discord/launch-plan.md, task 5), each player a whole game in an iframe
+  (<code>index.html?platform=discord&amp;mockInstance=…&amp;mockUser=…&amp;sid=…</code>): <code>mockUser</code> signs in as that
+  name (Discord's default avatar from its CDN), without it the player said no. Through the relay server:
+  <code>?server=ws://127.0.0.1:8787</code> (the default; server/relay, <code>npm run dev</code>) or the deployed one.
+  Results in <code>window.results</code>; <code>window.done</code> resolves at the end.</p>
+<div id="frames"></div>
+<table><thead><tr><th>#</th><th>Stage</th><th>Result</th><th>ms</th><th>Notes</th></tr></thead><tbody id="rows"></tbody></table>
+<script type="module">
+import * as R from '../experience/rules.js'
+import { isClean } from '../web/names.js'
+
+try { localStorage.removeItem('csl-game') } catch { /* no storage */ }
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+const ok = (v, what) => { if (!v) throw new Error(what) }
+async function waitFor(fn, ms, what) {
+  const t0 = Date.now()
+  for (;;) {
+    let v = false
+    try { v = fn() } catch { /* not yet */ }
+    if (v) return Date.now() - t0
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    await sleep(100)
+  }
+}
+
+const SERVER = new URLSearchParams(location.search).get('server') || 'ws://127.0.0.1:8787'
+// instances and names of this run's own, so an earlier run's rooms and seats are not met
+const RUN = Math.random().toString(36).slice(2, 7)
+const ONE = 'one-' + RUN, TWO = 'two-' + RUN
+const ANN = 'Ann ' + RUN, BOB = 'Bob ' + RUN
+const box = document.getElementById('frames')
+const F = {}
+const errors = {}
+function open(key, caption, instance, user) {
+  const fig = document.createElement('figure'); fig.id = 'fig-' + key
+  fig.innerHTML = `<figcaption>${caption} · ${instance}</figcaption>`
+  box.appendChild(fig)
+  const f = document.createElement('iframe')
+  f.src = `../index.html?platform=discord&mockInstance=${instance}&sid=${key}${user ? '&mockUser=' + encodeURIComponent(user) : ''}&server=${encodeURIComponent(SERVER)}`
+  fig.appendChild(f)
+  F[key] = f
+  // what goes wrong on its console
+  errors[key] = []
+  const watch = () => { try { const c = f.contentWindow.console, e = c.error.bind(c); c.error = (...a) => { errors[key].push(a.map(String).join(' ')); e(...a) } } catch { /* not yet */ } }
+  f.addEventListener('load', watch, { once: true })
+  return waitFor(() => f.contentWindow.__csl && f.contentDocument.getElementById('loading')?.classList.contains('done'), 40000, caption + ' loaded')
+}
+function close(key) { F[key].remove(); document.getElementById('fig-' + key).remove(); delete F[key] }
+const app = k => F[k].contentWindow.__csl
+const p0 = k => app(k).p0
+const web = k => p0(k).web
+const isHost = k => p0(k).room.isHost
+const table = k => app(k).shared?.s
+const fast = k => { app(k).speedIdx = 3; app(k).view.speed = 60 }
+const seatOf = (k, name) => app(k).lobby().seats.find(s => s && !s.b && s.n === name)
+const pic = (k, id) => web(k).picture(id)
+const drawn = img => img && img.width > 0 && img.height > 0
+// the player id an account gets (web/p0web.js) and the mock's account id for a name (web/discord.js)
+function fnv(s) { let h = 0x811c9dc5; for (const c of s) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0; return h }
+const uidOf = name => String(1e17 + fnv(name) * 1e7)
+const idOf = name => 1000 + (fnv(uidOf(name)) % 99000)
+async function autoplay(keys, until, ms, what) {
+  const t0 = Date.now()
+  while (!until()) {
+    if (Date.now() - t0 > ms) throw new Error('waited ' + ms + ' ms for ' + what)
+    for (const k of keys) {
+      const a = F[k]?.isConnected && app(k), s = a?.shared?.s
+      if (!s || s.ph === 'over' || a.view.busy || a.waiting > 0) continue
+      const me = a.mySeat()
+      if (me < 0 || s.cur !== me) continue
+      a.act(R.botAction(R.clone(s), me))
+    }
+    await sleep(120)
+  }
+  return Date.now() - t0
+}
+
+const steps = []
+const step = (title, fn) => steps.push([title, fn])
+
+step('Ann signs in: her Discord name and avatar, no name to type, her id from her account', async note => {
+  await open('a', 'Ann', ONE, ANN)
+  const ms = await waitFor(() => web('a').room?.channel && app('a').screen === 'lobby' && isHost('a'), 25000, 'Ann hosting the channel\'s table')
+  ok(web('a').siteName === ANN && p0('a').me.name === ANN && seatOf('a', ANN), 'name: ' + p0('a').me.name)
+  ok(p0('a').me.uid === uidOf(ANN) && p0('a').me.id === idOf(ANN), `id ${p0('a').me.id}, uid ${p0('a').me.uid}`)
+  await waitFor(() => drawn(pic('a', p0('a').me.id)), 10000, 'Ann\'s avatar')
+  ok(!app('a').ui.hits.some(h => h.key === 'olname'), 'a name field')
+  note(`id ${p0('a').me.id} from uid ${p0('a').me.uid}; avatar ${p0('a').me.pic.split('/').pop()} ${pic('a', p0('a').me.id).width}px`)
+  return ms
+})
+step('Bob signs in and sits down: each sees the other\'s name and avatar', async note => {
+  await open('b', 'Bob', ONE, BOB)
+  const ms = await waitFor(() => app('b').screen === 'lobby' && seatOf('a', BOB) && !isHost('b'), 25000, 'Bob at Ann\'s table')
+  const a = p0('a').me.id, b = p0('b').me.id
+  ok(b === idOf(BOB), 'Bob\'s id ' + b)
+  await waitFor(() => drawn(pic('a', b)) && drawn(pic('b', a)) && drawn(pic('b', b)), 10000, 'the avatars on both screens')
+  const entry = F.a.contentWindow.__cslNet.roster.get(b)
+  ok(entry.uid === uidOf(BOB) && entry.pic === p0('b').me.pic && entry.name === BOB, 'the host\'s list: ' + JSON.stringify(entry))
+  note(`Bob ${b} in the host's list with uid and picture; avatars on both screens`)
+  return ms
+})
+step('Pat would not sign in: "Player 3" from the host, no avatar, no errors', async note => {
+  await open('p', 'Pat (no sign-in)', ONE, null)
+  const id = () => p0('p').me.id
+  const ms = await waitFor(() => app('p').screen === 'lobby' && seatOf('a', 'Player 3'), 25000, 'Player 3 at Ann\'s table')
+  ok(p0('p').me.name === 'Player 3' && !web('p').siteName && !p0('p').me.uid, 'Pat\'s own name: ' + p0('p').me.name)
+  ok(p0('a').players.get(id())?.name === 'Player 3' && p0('b').players.get(id())?.name === 'Player 3', 'the others call Pat ' + p0('b').players.get(id())?.name)
+  ok(pic('a', id()) === null && !F.a.contentWindow.__cslNet.roster.get(id()).pic, 'a picture for Pat')
+  ok(!errors.p.length, 'errors: ' + errors.p.join(' | '))
+  note('lobby: ' + app('a').lobby().seats.filter(Boolean).map(s => s.n).join(', '))
+  return ms
+})
+step('A rude Discord name is swapped for a friendly one', async note => {
+  await open('r', 'Rude', TWO, 'Shithead')
+  const ms = await waitFor(() => app('r').screen === 'lobby' && isHost('r'), 25000, 'the rude one at a table')
+  const n = p0('r').me.name
+  ok(n !== 'Shithead' && isClean(n) && seatOf('r', n), 'name: ' + n)
+  note(`"Shithead" plays as "${n}"`)
+  close('r')
+  return ms
+})
+step('Ann starts: the game shows the avatars', async note => {
+  for (const k of ['a', 'b', 'p']) fast(k)
+  app('a').lobbyCmd({ t: 'start' })
+  const ms = await waitFor(() => ['a', 'b', 'p'].every(k => app(k).screen === 'game' && table(k)?.gid === table('a').gid), 8000, 'all at the game')
+  await autoplay(['a', 'b', 'p'], () => table('a').seq >= 8 || table('a').ph === 'over', 60000, 'a few moves')
+  ok(table('a').ph !== 'over', 'the game ended too soon')
+  const shown = table('b').pl.filter(p => !p.b && drawn(app('b').ui.picture(p.id))).map(p => p.n)
+  ok(shown.includes(ANN) && shown.includes(BOB) && !shown.includes('Player 3'), 'avatars on Bob\'s screen: ' + shown)
+  note('avatars in the players panel: ' + shown.join(', '))
+  return ms
+})
+let bobSeat = -1
+step('Bob\'s app closes mid-game: a bot plays his seat', async note => {
+  bobSeat = table('a').pl.findIndex(p => p.id === idOf(BOB))
+  ok(bobSeat >= 0, 'Bob has no seat')
+  close('b')
+  const ms = await waitFor(() => table('a').pl[bobSeat].b && table('a').pl[bobSeat].rb, 30000, 'a bot in Bob\'s seat')
+  note(`seat ${bobSeat} played by a bot`)
+  return ms
+})
+step('Bob opens it again (a new page: a new tab id at first): his account brings him back to his own seat', async note => {
+  await open('b2', 'Bob again', ONE, BOB)
+  fast('b2')
+  const ms = await waitFor(() => app('b2').screen === 'game' && app('b2').seatToTakeBack() === bobSeat, 25000, 'Bob at the game, his seat his to take back')
+  ok(p0('b2').me.id === idOf(BOB), 'Bob\'s id ' + p0('b2').me.id)
+  app('b2').takeSeatBack()
+  await waitFor(() => table('a').pl[bobSeat].id === idOf(BOB) && !table('a').pl[bobSeat].b && app('b2').mySeat() === bobSeat, 8000, 'Bob in his seat')
+  await waitFor(() => drawn(pic('a', idOf(BOB))), 5000, 'Bob\'s avatar again')
+  await autoplay(['a', 'b2', 'p'], () => table('a').seq >= 14 || table('a').ph === 'over', 60000, 'moves after')
+  for (const k of ['a', 'p', 'b2']) ok(!errors[k].length, k + ': ' + errors[k].join(' | '))
+  note(`seat ${bobSeat} is Bob's again (id ${idOf(BOB)}), the game goes on; no errors on any console`)
+  return ms
+})
+
+const rows = document.getElementById('rows')
+window.results = []
+window.done = (async () => {
+  for (const [i, [title, fn]] of steps.entries()) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td>${i + 1}</td><td>${title}</td><td class="run">running</td><td></td><td class="note"></td>`
+    rows.appendChild(tr)
+    const notes = [], t0 = Date.now()
+    let res = 'pass', ms
+    try { ms = await fn(n => notes.push(n)) } catch (e) { res = 'fail'; notes.push(String(e?.message || e)) }
+    tr.children[2].className = res; tr.children[2].textContent = res
+    tr.children[3].textContent = ms ?? Date.now() - t0
+    tr.children[4].textContent = notes.join('; ')
+    window.results.push({ step: i + 1, title, res, ms: ms ?? Date.now() - t0, notes })
+    if (res === 'fail') break
+  }
+  return window.results
+})()
+</script>
+</body>
+</html>

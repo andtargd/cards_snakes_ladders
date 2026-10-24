@@ -4,6 +4,7 @@
 // Shared Table works as it does in Project 0. There is no city here.
 import * as THREE from 'three'
 import { Net, cleanCode } from './net.js'
+import { relayServer } from './relaypeer.js'
 import { safeName } from './names.js'
 import { onlineControl, shareRoom } from './online.js'
 import { editText } from './textfield.js'
@@ -56,6 +57,7 @@ function getRenderer() {
 
 // this tab keeps its player id through a reload, so an online table gives it its seat back
 // (?sid= keeps several players apart in one tab: the online tests put each in an iframe)
+const USER_MS = 3000, USER_CHANNEL_MS = 120000 // how long the game waits for the site's sign-in (hooks.getUser)
 const NS = q.get('sid') ? ':' + String(q.get('sid')).replace(/\W/g, '').slice(0, 12) : ''
 const ID_KEY = 'csl-id' + NS, ROOM_KEY = 'csl-room' + NS, ROOM_FRESH_MS = 120000
 const newId = () => Math.floor(Math.random() * 90000) + 1000
@@ -67,13 +69,16 @@ let myId = ss.get(ID_KEY)
 if (!Number.isInteger(myId) || myId < 1000 || myId > 99999) { myId = newId(); ss.set(ID_KEY, myId) }
 let savedName = ''
 try { savedName = localStorage.getItem('csl-name') || '' } catch { /* private mode */ }
-const me = { id: myId, name: safeName(q.get('name') || savedName, ''), color: '#e94f37', avatar: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
+// uid and pic: the player's account and picture on the site (hooks.getUser), when they signed in there
+const me = { id: myId, name: safeName(q.get('name') || savedName, ''), color: '#e94f37', avatar: null, uid: null, pic: null, position: new THREE.Vector3(0, 1.5, 0), yaw: 0, isMe: true }
 const players = new Map([[myId, me]])
 const state = {}
 let host = myId
 // the online room this tab is in and its shared state, for coming back after a reload
 let unloading = false
 const keepRoom = () => { if (!unloading && web.room) ss.set(ROOM_KEY, { code: web.room.code, quick: web.room.quick, state, at: Date.now() }) }
+// the site's own room for this player, where it has one (Discord: the channel's), from hooks.instantMultiplayer
+let channel = null
 
 // the session the network keeps in step: who is here, who hosts, the room's shared state
 const session = {
@@ -81,7 +86,7 @@ const session = {
   get host() { return host },
   addPlayer(p) {
     if (p.id === myId || players.has(p.id)) return
-    const pl = { id: p.id, name: safeName(p.name), color: p.color || '#9a948a', avatar: null, position: new THREE.Vector3(), yaw: 0, isMe: false }
+    const pl = { id: p.id, name: safeName(p.name), color: p.color || '#9a948a', avatar: null, pic: typeof p.pic === 'string' ? p.pic : null, position: new THREE.Vector3(), yaw: 0, isMe: false }
     players.set(p.id, pl)
     emit('join', pl)
   },
@@ -91,7 +96,8 @@ const session = {
   message(d, from) { emit('message', d, from) },
   roomChanged(info, reason) {
     if (unloading) return
-    info = info && { ...info, link: roomLink(info.code) } // link: null where only the code is shared
+    // link: null where only the code is shared; channel: this is the site's own room for the player
+    info = info && { ...info, link: roomLink(info.code), channel: !!channel && info.code === channel }
     web.room = info
     if (info) keepRoom(); else ss.set(ROOM_KEY, null)
     // the address bar shows the room's link only where this page's address is one to give
@@ -119,9 +125,27 @@ const session = {
     if (host === old) host = myId
     ss.set(ID_KEY, myId)
   },
+  /**
+   * The player signed in on the site: their id comes from their account, the same on every device and
+   * after the page was closed, so a table knows them again and gives them back their seat. (Two accounts
+   * may get one id: the room's host says 'taken' to the second, and it takes another, as a duplicated tab does.)
+   */
+  signedIn(uid, pic) {
+    me.uid = uid; me.pic = pic || null
+    if (net.online) return
+    let h = 0x811c9dc5
+    for (const c of uid) h = Math.imul(h ^ c.codePointAt(0), 0x01000193) >>> 0
+    const id = 1000 + (h % 99000), old = myId
+    if (id === old) return
+    myId = id
+    players.delete(old); me.id = myId; players.set(myId, me)
+    if (host === old) host = myId
+    ss.set(ID_KEY, myId)
+  },
 }
-// ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round)
-const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay' })
+// ?ice=relay: no direct connections from here, as behind a strict NAT (to try the brokers' way round).
+// The relay server where the profile asks for it, or ?server=ws://… on any site (web/relaypeer.js)
+const net = new Net(session, { quick: platform.quickPrefix, iceRelay: q.get('ice') === 'relay', server: q.get('server') || (platform.server ? relayServer() : null), pictureOk: url => hooks.pictureOk(url) === true })
 // a duplicated tab asks whether its id is someone's already, and takes a new one if so
 try {
   const tabs = new BroadcastChannel('csl-tabs'), born = Date.now()
@@ -164,14 +188,33 @@ const room = {
 // the site's own name for the player (hooks.getUser), if it has one: then there is no name to type
 let siteName = null
 const watchers = new Set()
-const online = onlineControl({ net, me, siteName: () => siteName, changed: () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } } })
+const changed = () => { for (const fn of watchers) { try { fn() } catch (e) { console.error(e) } } }
+// at the site's own table (Discord's) there is no name to type either: one who did not sign in is "Player N" there
+const online = onlineControl({ net, me, siteName: () => siteName, nameless: () => !!channel, changed })
+// the players' pictures (the site's avatars, hooks.pictureOk), each fetched once: url -> an image, or null while it loads (or if it failed)
+const pictures = new Map()
+function picture(id) {
+  const url = players.get(id)?.pic
+  if (!url) return null
+  if (!pictures.has(url)) {
+    pictures.set(url, null)
+    fetch(url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() }).then(b => createImageBitmap(b))
+      .then(img => { pictures.set(url, img); changed() }, e => console.warn('[web] no picture:', url, e?.message || e))
+  }
+  return pictures.get(url)
+}
 const web = {
   platform, // the site this runs on (web/platform.js)
   fixedRatio: !!DPR && !q.has('adapt'), // ?dpr= keeps that pixel ratio (the game would lower it on a slow machine), unless ?adapt
+  unseen: false, // this frame is the steady timer's: no animation frames come, the page is not drawn on screen now
   get safe() { return view.safe }, // the screen's safe area: { top, right, bottom, left } px the game's buttons keep clear of
   hooks, // what the game tells the site: loading, gameplay, wins, between games
   get muted() { return mute.on }, // all sound off for the site (an ad), whatever the player's setting
-  room: null, // { code, quick, mode, size, link } while in an online room (mode and size: a quick table's); link is null where only the code is shared
+  room: null, // { code, quick, mode, size, link, channel } while in an online room (mode and size: a quick table's); link is null where only the code is shared
+  // the site puts the player at a table of its own (Discord: everyone in the voice channel), with this code; null elsewhere.
+  // There the game has no menu of rooms: no codes, Quick Match or links, only that table
+  get channel() { return channel },
+  enterChannel() { return channel ? online.enter(channel) : Promise.resolve(false) },
   get links() { return roomLinks() }, // whether rooms get links here (else only codes)
   // the game's Online screen: how an attempt goes (null | { busy } | { error, detail, kind }), and a room's link that brought the player
   get status() { return online.status },
@@ -185,6 +228,8 @@ const web = {
   // the name the others see: the site's own, else the one typed here
   get name() { return siteName || me.name },
   get siteName() { return siteName },
+  /** Player `id`'s picture on the site (their avatar) to draw, or null: none, or not here yet (onChange says when it is). */
+  picture,
   setName: v => online.setName(v),
   randomName: () => online.randomName(),
   editText, // a real input over a box the game draws (web/textfield.js)
@@ -226,6 +271,10 @@ const p0 = {
   sound: {
     play(path, o = {}) {
       if (mute.on && !o.loop) return 0
+      // through Web Audio once it runs, as the dice's sounds go (sound.cue): one way for all of them, so they
+      // keep their levels on a phone too (iOS plays an <audio> at full volume, whatever its volume says)
+      const src = !o.loop && (o.rate ?? 1) === 1 && played(path, o.volume)
+      if (src) return src
       try {
         const a = new Audio(p0.asset(path)); a.volume = Math.min(1, (o.volume ?? 1) * 0.5); a.loop = !!o.loop; a.playbackRate = o.rate ?? 1; a.muted = mute.on
         sounding.add(a); a.addEventListener('ended', () => sounding.delete(a))
@@ -274,7 +323,7 @@ const p0 = {
         }
       } catch { return null }
     },
-    stop(a) { try { a.pause(); sounding.delete(a) } catch {} }, stopAll() {},
+    stop(a) { try { if (a.pause) a.pause(); else a.stop(); sounding.delete(a) } catch {} }, stopAll() {},
   },
   music: { play() {}, stop() {}, volume() {}, seek() {}, time: 0, playing: false, duration: 0 },
   exit() {},
@@ -308,16 +357,31 @@ function decoded(path) {
   }
   return e.buf
 }
+/** Sound `path` through Web Audio now, if it can be (the page touched, the sound decoded): its source, else null. */
+function played(path, volume = 1) {
+  const buf = decoded(path)
+  if (!actx || !buf || actx.state !== 'running') return null
+  try {
+    const gain = actx.createGain(), src = actx.createBufferSource()
+    gain.gain.value = Math.min(1, volume * 0.5)
+    src.buffer = buf; src.connect(gain); gain.connect(master)
+    src.onended = () => { try { gain.disconnect() } catch {} }
+    src.start()
+    return src
+  } catch { return null }
+}
 function wakeAudio() {
   const AC = globalThis.AudioContext || globalThis.webkitAudioContext
+  // iOS: Web Audio plays as media does (an <audio> does), not as the ringer's sounds, which the silent switch turns off
+  try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback' } catch { /* older iOS */ }
   if (!actx && AC) {
     try { actx = new AC(); master = actx.createGain(); master.gain.value = mute.on ? 0 : 1; master.connect(actx.destination) } catch { actx = null; return }
     for (const url of buffers.keys()) decoded(url)
   }
   if (actx && actx.state !== 'running') actx.resume().catch(() => {})
 }
-addEventListener('pointerdown', wakeAudio, true)
-addEventListener('keydown', wakeAudio, true)
+// (a touch lets the page play sound as it ends, not as it starts: pointerup and touchend too)
+for (const ev of ['pointerdown', 'pointerup', 'touchend', 'keydown']) addEventListener(ev, wakeAudio, true)
 
 function resize() {
   view.width = innerWidth; view.height = innerHeight; view.dpr = pixelRatio(); view.safe = safeArea()
@@ -365,34 +429,44 @@ async function boot() {
   loaded.catch(() => {}) // (a failure is reported once it is awaited, below)
   await ready
   hooks.loadingStart()
-  // the site's own name for the player, if it has one, stands in for the one they type
+  // a site that puts everyone at its own table says which (a room code), before the game starts: it has no menu then
+  const instant = hooks.instantMultiplayer()
+  if (typeof instant === 'string' && cleanCode(instant).length >= 3) channel = cleanCode(instant)
+  // the site's own name for the player, if it has one, stands in for the one they type. The site's own
+  // table waits for it longer: Discord asks the player the first time, with its own box over the game
   const user = Promise.resolve(hooks.getUser()).catch(() => null)
   const mod = await loaded
   await mod.default(p0)
-  const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), 3000))])
+  const u = await Promise.race([user, new Promise(r => setTimeout(() => r(null), channel ? USER_CHANNEL_MS : USER_MS))])
   if (u?.name && safeName(u.name, '')) me.name = siteName = safeName(u.name, '')
+  // (at the site's own table a name saved from the Online screen is not one: the site's, else the host's "Player N")
+  else if (channel) me.name = safeName(q.get('name'), '')
+  if (typeof u?.id === 'string' && u.id) session.signedIn(u.id, typeof u.picture === 'string' ? u.picture : null)
   hooks.loadingStop()
   loadEl.classList.add('done')
   setTimeout(() => loadEl.remove(), 600)
   // the room this tab was in before a reload: back to it. A room's link: its code on the Online screen;
   // the site's invite: straight into that room. The site's multiplayer page: a room of one's own at once
-  // (the mode and board last chosen on the Online screen), no menu and no First Match first
-  const invite = cleanCode(hooks.inviteRoom())
-  const code = cleanCode(q.get('room')) || invite
+  // (the mode and board last chosen on the Online screen), no menu and no First Match first; the site's
+  // own table (Discord's channel): straight to it, and the first one there opens it
+  const invite = channel ? '' : cleanCode(hooks.inviteRoom())
+  const code = channel || cleanCode(q.get('room')) || invite
   const back = ss.get(ROOM_KEY)
   ss.set(ROOM_KEY, null)
-  if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && me.name) {
+  if (back && cleanCode(back.code).length >= 3 && Date.now() - (back.at || 0) < ROOM_FRESH_MS && (!code || code === cleanCode(back.code)) && (me.name || channel)) {
     online.resume(back.code, () => net.rejoin(cleanCode(back.code), !!back.quick, back.state))
-  } else if (code.length >= 3 && code === invite) online.join(code)
+  } else if (channel) online.enter(channel)
+  else if (code.length >= 3 && code === invite) online.join(code)
   else if (code.length >= 3) online.invite(code)
-  else if (hooks.instantMultiplayer()) online.create()
+  else if (instant) online.create()
   hooks.onInvite(goToRoom)
   // animation frames stop in a hidden tab, and in some windows that still count as visible (an
   // embedded view, an occluded window): then a steady timer (web/clock.js) keeps the game, and an
   // online table it hosts, going
   let prev = performance.now(), lastRaf = prev
-  const frame = (now, cap) => {
+  const frame = (now, cap, seen = true) => {
     const dt = Math.min(cap, Math.max(0, (now - prev) / 1000)); prev = now
+    web.unseen = !seen
     p0.time += dt
     emit('frame', dt, p0.time)
     if (p0.autoRender) getRenderer().render(scene, camera)
@@ -401,7 +475,7 @@ async function boot() {
   if (q.get('clock') === 'manual') { globalThis.__cslStep = dt => frame(prev + dt * 1000, 1); return }
   const loop = now => { lastRaf = performance.now(); frame(now, 0.1); requestAnimationFrame(loop) }
   requestAnimationFrame(loop)
-  every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5) })
+  every(100, () => { const now = performance.now(); if (now - lastRaf > 250) frame(now, 0.5, false) })
 }
 boot().catch(e => {
   console.error(e)
