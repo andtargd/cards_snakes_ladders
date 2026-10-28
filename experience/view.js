@@ -71,6 +71,11 @@ export class View {
     this.aim = null
     this.dodge = new THREE.Vector2()
     this.dodgeWant = new THREE.Vector2()
+    // on a wide screen my hand takes much of its height: the picture rises by `lift` px so the tier under the aim
+    // shows above the hand; floor() gives the hand's top (set by the app)
+    this.floor = null
+    this.lift = 0
+    this.liftWant = 0
     this.highlight = null
     this.time = 0
     this.buildStatic()
@@ -902,11 +907,19 @@ export class View {
     this.viewOffset(0, 0)
     cam.updateProjectionMatrix()
     cam.updateMatrixWorld()
-    // the picture moves aside for the hand and the panels, worked out from where things stand without it
-    if (this.aim && this.manual <= 0) this.dodgeFor(this.aim)
+    // the picture rises for the tier under the aim, worked out from where things stand without it; then it moves
+    // aside for the hand and the panels, worked out from where things stand risen
+    if (this.aim && this.manual <= 0) this.liftWant = this.liftFor(this.aim)
+    else if (!this.aim) this.liftWant = 0
+    this.lift += (this.liftWant - this.lift) * (1 - Math.exp(-8 * dt))
+    if (!this.liftWant && this.lift < 0.5) this.lift = 0
+    if (this.aim && this.manual <= 0) {
+      if (this.liftWant) this.viewOffset(0, -this.liftWant)
+      this.dodgeFor(this.aim)
+    }
     this.dodge.lerp(this.dodgeWant, 1 - Math.exp(-8 * dt))
     if (!this.dodgeWant.x && !this.dodgeWant.y && this.dodge.lengthSq() < 0.25) this.dodge.set(0, 0)
-    if (this.dodge.x || this.dodge.y) this.viewOffset(this.dodge.x, this.dodge.y)
+    this.viewOffset(this.dodge.x, this.dodge.y - this.lift)
     this.p0.me.position.set(THREE.MathUtils.clamp(p.x, -5, 5), Math.min(p.y, L.height - 1), THREE.MathUtils.clamp(p.z, -8.5, 8.5))
   }
 
@@ -915,6 +928,19 @@ export class View {
     const cam = this.p0.camera, W = this.p0.width, H = this.p0.height, side = this.aside.sideNow
     if (side || dx || dy) cam.setViewOffset(W, H, -side * W - dx, side * 0.22 * H - dy, W, H)
     else if (cam.view) cam.clearViewOffset()
+  }
+  /**
+   * How far the picture rises (px) so the tier under the piece standing at p shows whole above my hand: none
+   * when it already does, never so far that the piece goes up among the panels. Steady like dodgeFor: worked
+   * out on the picture without it.
+   */
+  liftFor(p) {
+    const floor = this.floor?.()
+    if (floor == null) return 0
+    const z = Math.min(p.z + G.B.tierD, G.tierZ(0)) + G.B.tileD / 2 // the front edge of its tiles (the bottom tier's own)
+    const below = this.screenOf(new THREE.Vector3(p.x, G.drapeY(z), z)), head = this.screenOf(p.clone().add(new THREE.Vector3(0, 0.85, 0)))
+    if (!below || !head) return 0
+    return THREE.MathUtils.clamp(below.y + 6 - floor, 0, Math.max(0, head.y - this.p0.height * 0.2))
   }
   /**
    * The least shift of the picture that puts the piece standing at p clear of the cover (the hand, the

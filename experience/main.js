@@ -437,6 +437,7 @@ class App {
     this.view = new View(p0)
     this.ui = new UI(p0, this)
     this.view.cover = () => this.ui.cover()
+    this.view.floor = () => this.ui.floor()
     this.table = null
     this.shared = null
     this.lastSfx = {}

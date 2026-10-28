@@ -2041,8 +2041,7 @@ export class UI {
     const u = this.u, out = []
     const n = this.cards.filter(c => c.kind === 'hand').length
     if (n) {
-      const cw = this.cardW(), { left, right } = this.handLayout(n)
-      const top = this.H - cw * 1.4 * 0.42 + 6 * u - cw * 0.7 - 6 * u + this.handSink() // the fanned cards lean a little higher
+      const { left, right } = this.handLayout(n), top = this.handTop()
       out.push({ x: left, y: top, w: right - left, h: this.H - top })
     }
     if (this.trayTop != null && this.trayRect) {
@@ -2055,6 +2054,10 @@ export class UI {
     // (the tips' bubbles are not cover: they keep clear of the pieces themselves, the camera would jump as they come and go)
     return out.map(r => ({ x: r.x + this.ox, y: r.y + this.oy, w: r.w, h: r.h }))
   }
+  /** How high my hand at rest reaches (the fanned cards lean a little higher). */
+  handTop() { const u = this.u, cw = this.cardW(); return this.H - cw * 1.4 * 0.42 + 6 * u - cw * 0.7 - 6 * u + this.handSink() }
+  /** In a game, the top of my hand at rest (screen px), with or without cards in it: the camera keeps the tier under the piece it follows above it. */
+  floor() { return this.app.screen === 'game' && this.app.view.state ? this.handTop() + this.oy : null }
   /** A point (screen px) over the hand, the tray, the panels or the log (see cover). */
   overCover(x, y) { return this.cover().some(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) }
   /** Where n cards of my hand go: centred, but clear of the tray, closer together when they don't fit. */
