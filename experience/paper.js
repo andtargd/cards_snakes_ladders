@@ -539,7 +539,7 @@ export function drawIcon(g, id, x, y, s, col = INK) {
  * experience/cards/<id>.webp by tools/cardart.html) in an inked, tarot-like frame.
  */
 export const CARD_STYLES = ['minimal', 'pawn']
-let cardStyle = 'minimal'
+let cardStyle = 'pawn'
 export const getCardStyle = () => cardStyle
 export function setCardStyle(name) { if (CARD_STYLES.includes(name)) cardStyle = name }
 const pictures = new Map() // card id (or 'mascot') -> its picture, once loaded

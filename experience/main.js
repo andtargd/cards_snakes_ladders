@@ -87,7 +87,7 @@ function loadSettings(vol = 0.8) {
   if (typeof saved?.sound?.on === 'boolean') sound.on = saved.sound.on
   if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
   const first = !saved || saved.first === 'due' ? 'due' : 'done'
-  const cardStyle = P.CARD_STYLES.includes(saved?.cardStyle) ? saved.cardStyle : 'minimal'
+  const cardStyle = P.CARD_STYLES.includes(saved?.cardStyle) ? saved.cardStyle : 'pawn'
   return { solo, pass, online, sound, first, cardStyle }
 }
 
