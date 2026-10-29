@@ -66,6 +66,7 @@ FEET = {  # (cx, cy, rx, rotation)
     'run': [(124, 444, 22, -30), (274, 452, 24, 10)],
     'tuck': [(140, 446, 22, -30), (256, 448, 22, 24)],
     'skid': [(130, 456, 24, 0), (282, 440, 22, -20)],
+    'moon': [(102, 442, 26, 35), (298, 458, 28, 0)],  # a step forward: the back foot on its toe, the front one flat
 }
 
 
@@ -157,6 +158,18 @@ def face(kind, uid):
                 + '<ellipse cx="172" cy="156" rx="19" ry="24" fill="#ffffff" stroke-width="6"/>' + spiral(170, 156)
                 + '<ellipse cx="230" cy="154" rx="21" ry="26" fill="#ffffff" stroke-width="6"/>' + spiral(228, 154)
                 + '<path d="M178 208 Q188 196 198 208 Q208 220 218 208 Q228 196 236 206" fill="none" stroke-width="6"/>')
+    if kind == 'sad':  # brows up in the middle, eyes down, a frown
+        return (_cheeks((150, 200), (256, 196))
+                + '<path d="M154 130 Q168 126 188 114 M214 110 Q234 118 250 124" fill="none" stroke-width="6"/>'
+                + _eye(172, 160, 18, 22, 176, 168, 8) + _eye(230, 158, 20, 24, 235, 166, 9)
+                + '<path d="M188 216 Q206 202 226 212" fill="none" stroke-width="6"/>')
+    if kind == 'poker':  # the eyes hidden (under a hat), a flat mouth
+        return '<path d="M188 214 L228 212" fill="none" stroke-width="6"/>'
+    if kind == 'sleep':  # eyes shut, a small open mouth
+        return (_cheeks((148, 194), (258, 190))
+                + '<path d="M156 130 Q170 124 186 128 M216 124 Q232 118 248 122" fill="none" stroke-width="6"/>'
+                + '<path d="M154 158 Q172 172 190 158 M212 156 Q231 171 250 156" fill="none" stroke-width="7"/>'
+                + f'<ellipse cx="206" cy="206" rx="9" ry="8" fill="{MOUTH}" stroke-width="5"/>')
     raise ValueError(kind)
 
 
@@ -735,6 +748,166 @@ def earthquake():
     ])
 
 
+# The Hinder cards: the red pawn is the player the card is played on.
+
+IRON = dict(body=SHOE, shade='#454d5b', light='#8a93a3')
+
+
+def iron_ball(cx, cy, r):
+    return (f'<clipPath id="ball-{cx}"><circle cx="{cx}" cy="{cy}" r="{r}"/></clipPath>'
+            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{IRON["body"]}" stroke="none"/>'
+            f'<circle cx="{cx + r * 0.35:.0f}" cy="{cy + r * 0.35:.0f}" r="{r}" fill="none" stroke="{IRON["shade"]}" stroke-width="{r * 0.5:.0f}" clip-path="url(#ball-{cx})"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke-width="7"/>'
+            f'<ellipse cx="{cx - r * 0.4:.0f}" cy="{cy - r * 0.45:.0f}" rx="{r * 0.3:.0f}" ry="{r * 0.14:.0f}" transform="rotate(-35 {cx - r * 0.4:.0f} {cy - r * 0.45:.0f})" fill="{IRON["light"]}" stroke="none"/>')
+
+
+def chain(a, b, n):
+    """n links from a to b, every other one seen edge-on."""
+    (x0, y0), (x1, y1) = a, b
+    ang = math.degrees(math.atan2(y1 - y0, x1 - x0))
+    out = []
+    for i in range(n):
+        t = (i + 0.5) / n
+        x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+        ry = 6 if i % 2 == 0 else 2
+        out.append(f'<ellipse cx="{x:.1f}" cy="{y:.1f}" rx="10" ry="{ry}" transform="rotate({ang:.0f} {x:.1f} {y:.1f})"/>')
+    return f'<g fill="none" stroke-width="5">{"".join(out)}</g>'
+
+
+def crown(cx, cy, rot, s=1):
+    """A golden crown, centre (cx, cy)."""
+    g = PALETTES['C']
+    shape = 'M-36 18 L-42 -16 L-18 2 L0 -28 L18 2 L42 -16 L36 18 Z'
+    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
+            f'<clipPath id="crown-{cx}"><path d="{shape}"/></clipPath>'
+            f'<path d="{shape}" fill="{g["light"]}" stroke="none"/>'
+            f'<rect x="-50" y="4" width="100" height="20" fill="{g["body"]}" stroke="none" clip-path="url(#crown-{cx})"/>'
+            f'<path d="{shape}" fill="none" stroke-width="6"/><path d="M-37 4 L37 4" fill="none" stroke-width="4"/>'
+            f'<g fill="{GLOVE}" stroke-width="4"><circle cx="-42" cy="-16" r="5"/><circle cx="0" cy="-28" r="5"/><circle cx="42" cy="-16" r="5"/></g>'
+            f'<circle cx="0" cy="12" r="5" fill="{PALETTES["H"]["body"]}" stroke-width="3"/></g>')
+
+
+def zee(x, y, s, col):
+    """A sleeper's Z, top left at (x, y), s across."""
+    d = f'M{x} {y} L{x + s} {y} L{x} {y + s} L{x + s} {y + s}'
+    return f'<path d="{d}" fill="none" stroke-width="{s * 0.5:.0f}"/><path d="{d}" fill="none" stroke="{col}" stroke-width="{s * 0.22:.0f}"/>'
+
+
+def playing_card(cx, cy, rot, pal, s=1):
+    """A card s times 56x80, its bottom centre at (cx, cy), turned rot degrees about it."""
+    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
+            f'<rect x="-28" y="-80" width="56" height="80" rx="9" fill="{GLOVE}" stroke-width="{6 / s:.1f}"/>'
+            f'<rect x="-19" y="-71" width="38" height="62" rx="5" fill="none" stroke="{pal["light"]}" stroke-width="4"/>'
+            f'<path d="M0 -56 L11 -40 L0 -24 L-11 -40 Z" fill="{pal["body"]}" stroke-width="4"/></g>')
+
+
+FEDORA = dict(body='#3b3444', light='#5a5166', band='#ffffff')
+
+
+def fedora(rot=12, low=0, s=1):
+    """A fedora on the pawn's head, in the mascot frame, tipped forward; low pulls it down over the eyes
+    (then make it s times bigger, so the crown still covers the head)."""
+    c = 'M132 108 C132 62 150 30 200 28 C250 30 268 62 268 108 Z'
+    return (f'<g transform="translate(0 {low}) rotate({rot} 200 110) translate(200 110) scale({s}) translate(-200 -110)">'
+            f'<ellipse cx="200" cy="110" rx="122" ry="22" fill="{FEDORA["body"]}" stroke-width="7"/>'
+            f'<path d="M96 104 Q140 94 170 94" fill="none" stroke="{FEDORA["light"]}" stroke-width="5"/>'
+            f'<clipPath id="fedora-crown"><path d="{c}"/></clipPath>'
+            f'<path d="{c}" fill="{FEDORA["body"]}" stroke="none"/>'
+            f'<rect x="120" y="84" width="160" height="18" fill="{FEDORA["band"]}" stroke-width="5" clip-path="url(#fedora-crown)"/>'
+            f'<path d="M150 44 C150 64 154 74 160 80" fill="none" stroke="{FEDORA["light"]}" stroke-width="6"/>'
+            f'<path d="{c}" fill="none"/><path d="M162 40 Q200 56 238 40" fill="none" stroke-width="5"/></g>')
+
+
+def note(x, y):
+    """A music note, its head at (x, y)."""
+    return (f'<path d="M{x + 9} {y - 2} L{x + 9} {y - 40} Q{x + 26} {y - 32} {x + 24} {y - 16}" fill="none" stroke-width="5"/>'
+            f'<ellipse cx="{x}" cy="{y}" rx="11" ry="8" transform="rotate(-20 {x} {y})" fill="{PALETTES["H"]["body"]}" stroke-width="5"/>')
+
+
+def no_sign(cx, cy, r, col):
+    """A prohibition sign: a ring with a slash."""
+    k = r * 0.707
+    slash = f'M{cx - k:.0f} {cy - k:.0f} L{cx + k:.0f} {cy + k:.0f}'
+    return (f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke-width="26"/><path d="{slash}" fill="none" stroke-width="26"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{col}" stroke-width="13"/>'
+            f'<path d="{slash}" fill="none" stroke="{col}" stroke-width="13"/>')
+
+
+def slow_down():
+    """H1 Slow Down: the pawn strains forward, an iron ball chained to its foot."""
+    p = PALETTES['H']
+    return '\n'.join([
+        shadow(262, 240, 44),
+        shadow(100, 234, 30, 5),
+        lines((14, 188, 44), (6, 212, 40)),
+        dust((130, 226, 7), (66, 228, 6)),
+        chain((124, 210), (226, 214), 6),
+        iron_ball(100, 202, 30),
+        pawn('h1', p, place(262, 226, 0.46, 16), face_kind='determined', tuft='up', feet='run',
+             arms=arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
+             + arm('M222 298 C258 296 286 286 304 268', p['body']),
+             front=drop(104, 160, -20) + drop(84, 210, -40) + fist(310, 262)),
+    ])
+
+
+def vanilla_play():
+    """H2 Vanilla play: the cards are off limits; the pawn reaches for them, sad."""
+    p = PALETTES['H']
+    return '\n'.join([
+        shadow(110, 240, 42),
+        shadow(288, 232, 56, 5),
+        playing_card(270, 214, -24, p, 1.25), playing_card(288, 208, 0, p, 1.25), playing_card(306, 214, 24, p, 1.25),
+        no_sign(342, 82, 32, p['body']),
+        pawn('h2', p, place(108, 236, 0.44, 4), face_kind='sad',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 298 C262 300 292 296 320 286', p['body']),
+             front=glove(336, 282, 80)),
+    ])
+
+
+def skip_turn():
+    """H3 Skip Turn: the pawn sleeps through its turn."""
+    p = PALETTES['H']
+    return '\n'.join([
+        shadow(176, 240, 42),
+        zee(254, 98, 22, p['light']), zee(290, 50, 34, p['body']),
+        pawn('h3', p, place(176, 238, 0.44, -6), face_kind='sleep',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 300 C250 312 262 330 266 352', p['body']) + glove(268, 366, 180)),
+    ])
+
+
+def moonwalk():
+    """H4 Moonwalk: in a fedora, the pawn glides backwards facing forward, the front foot up on its toe."""
+    p = PALETTES['H']
+    return '\n'.join([
+        shadow(196, 240, 56),
+        lines((300, 112, 352), (318, 156, 380), (300, 200, 344)),
+        note(56, 104), note(98, 62),
+        pawn('h4', p, place(196, 230, 0.46, 8), face_kind='poker', tuft=None, feet='moon',
+             arms=arm('M178 300 C150 316 140 342 146 368', p['body']) + glove(148, 382, 170)
+             + arm('M222 298 C272 296 306 260 312 218', p['body']),
+             front=fedora(low=56, s=1.22) + glove(318, 200, 30)),
+    ])
+
+
+def dethrone():
+    """H5 Dethrone: the leader is knocked back from the top, its crown flying off."""
+    p = PALETTES['H']
+    return '\n'.join([
+        shadow(132, 240, 34, 5),
+        ghost(place(326, 230, 0.42, 0), p['ghost'], 0.55),
+        ghost(place(250, 222, 0.42, -10), p['ghost'], 1, 'forward'),
+        '<path d="M216 74 Q238 16 280 32" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        crown(318, 54, 24, 1.08),
+        sparkle(370, 106, 12), sparkle(262, 76, 8),
+        pawn('h5', p, place(150, 212, 0.42, -22), face_kind='shock', tuft='forward', feet='tuck',
+             arms=arm('M178 300 C150 290 130 262 124 232', p['body']) + glove(120, 214, -20)
+             + arm('M222 298 C262 290 290 262 300 232', p['body']) + glove(302, 214, 20),
+             front=drop(304, 112, 40)),
+    ])
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -753,6 +926,11 @@ CARDS = {  # id: (name, category, seed, drawing)
     'B4': ('Trampoline', 'B', 33, trampoline),
     'B5': ('Portal', 'B', 35, portal_card),
     'B6': ('Earthquake', 'B', 37, earthquake),
+    'H1': ('Slow Down', 'H', 39, slow_down),
+    'H2': ('Vanilla play', 'H', 41, vanilla_play),
+    'H3': ('Skip Turn', 'H', 43, skip_turn),
+    'H4': ('Moonwalk', 'H', 45, moonwalk),
+    'H5': ('Dethrone', 'H', 47, dethrone),
 }
 
 
