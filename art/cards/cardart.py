@@ -926,18 +926,19 @@ def canopy(cx, top, w, h, pal, gores=5):
     bottom edge where the lines hang from."""
     l, r, b = cx - w / 2, cx + w / 2, top + h
     xs = [l + w * i / gores for i in range(gores + 1)]
-    dome = f'M{l} {b} C{l} {top} {r} {top} {r} {b}'
+    dome = f'M{l} {b} C{l} {top - h / 3:.1f} {r} {top - h / 3:.1f} {r} {b}'  # its apex at (cx, top)
     for i in range(gores, 0, -1):
         dome += f' Q{(xs[i] + xs[i - 1]) / 2} {b - 12} {xs[i - 1]} {b}'
     out = [f'<clipPath id="canopy-{cx}"><path d="{dome} Z"/></clipPath>',
-           f'<path d="{dome} Z" fill="{pal["body"]}" stroke="none"/>', f'<g clip-path="url(#canopy-{cx})" stroke="none">']
+           f'<path d="{dome} Z" fill="{pal["body"]}" stroke="none"/>', f'<g clip-path="url(#canopy-{cx})">']
     for i in range(0, gores, 2):  # every other gore lighter
         a, c = xs[i], xs[i + 1]
-        out.append(f'<path d="M{cx} {top} Q{a * 0.8 + cx * 0.2:.0f} {top + 4} {a} {b} L{c} {b} Q{c * 0.8 + cx * 0.2:.0f} {top + 4} {cx} {top} Z" fill="{pal["light"]}"/>')
-    out.append(f'<path d="M{l} {b - 14} Q{cx} {b - 34} {r} {b - 14} L{r} {b + 10} L{l} {b + 10} Z" fill="{pal["shade"]}" opacity="0.6"/></g>')
+        out.append(f'<path d="M{cx} {top} Q{a * 0.8 + cx * 0.2:.0f} {top + 4} {a} {b} L{c} {b} Q{c * 0.8 + cx * 0.2:.0f} {top + 4} {cx} {top} Z" fill="{pal["light"]}" stroke="none"/>')
+    out.append(f'<path d="M{l} {b - 14} Q{cx} {b - 34} {r} {b - 14} L{r} {b + 10} L{l} {b + 10} Z" fill="{pal["shade"]}" opacity="0.6" stroke="none"/>')
     seams = ' '.join(f'M{cx} {top} Q{x * 0.8 + cx * 0.2:.0f} {top + 4} {x} {b}' for x in xs[1:-1])
-    out.append(f'<path d="{seams}" fill="none" stroke-width="4"/><path d="{dome} Z" fill="none" stroke-width="7"/>')
-    out.append(f'<path d="M{l + 16} {b - 22} Q{l + 20} {top + 22} {cx - w * 0.18:.0f} {top + 10}" fill="none" stroke="#ffffff" stroke-width="5" opacity="0.8"/>')
+    out.append(f'<path d="{seams}" fill="none" stroke-width="4"/>')
+    out.append(f'<path d="M{l + 14} {b - 20} Q{l + 22} {top + 18} {cx - w * 0.2:.0f} {top + 8}" fill="none" stroke="#ffffff" stroke-width="5" opacity="0.8"/></g>')
+    out.append(f'<path d="{dome} Z" fill="none" stroke-width="7"/>')
     return '\n'.join(out), [(x, b) for x in xs]
 
 
@@ -949,7 +950,8 @@ def boot(cx, cy, rot=0):
             f'<path d="{shape}" fill="{RUBBER["body"]}" stroke="none"/>'
             f'<g clip-path="url(#boot-{cx})" stroke="none"><rect x="6" y="-60" width="20" height="50" fill="{RUBBER["shade"]}"/>'
             f'<rect x="-40" y="-2" width="100" height="14" fill="{SHOE}"/><rect x="-40" y="-64" width="70" height="14" fill="{RUBBER["light"]}"/></g>'
-            f'<path d="{shape}" fill="none" stroke-width="6"/><path d="M-28 -50 L18 -50 M-30 -2 L48 -2" fill="none" stroke-width="4"/></g>')
+            f'<path d="{shape}" fill="none" stroke-width="6"/><path d="M-28 -50 L18 -50 M-30 -2 L48 -2" fill="none" stroke-width="4"/>'
+            f'<ellipse cx="-4" cy="-58" rx="22" ry="5" fill="{RUBBER["shade"]}" stroke-width="4"/></g>')  # its opening
 
 
 def shield(cx, cy, s=1, rot=0):
@@ -962,41 +964,70 @@ def shield(cx, cy, s=1, rot=0):
             f'<clipPath id="shield-{cx}"><path d="{inner}"/></clipPath>'
             f'<path d="{inner}" fill="{p["body"]}" stroke="none"/>'
             f'<path d="M0 -50 L0 50 L50 50 L50 -50 Z" fill="{p["shade"]}" stroke="none" clip-path="url(#shield-{cx})"/>'
-            f'<path d="{inner}" fill="none" stroke-width="5"/>'
-            f'<path d="M-24 -26 Q-24 -32 -14 -35" fill="none" stroke="{p["light"]}" stroke-width="5"/>'
-            f'<path d="M-15 0 L-3 13 L17 -12" fill="none" stroke-width="17"/><path d="M-15 0 L-3 13 L17 -12" fill="none" stroke="{GLOVE}" stroke-width="8"/>'
-            f'<path d="M-36 -40 L-8 -50" fill="none" stroke="#ffffff" stroke-width="4"/></g>')
+            f'<path d="{inner}" fill="none" stroke-width="{5 / s:.1f}"/>'
+            f'<path d="M-24 -26 Q-24 -32 -14 -35" fill="none" stroke="{p["light"]}" stroke-width="{5 / s:.1f}"/>'
+            f'<path d="M-15 0 L-3 13 L17 -12" fill="none" stroke-width="{17 / s:.1f}"/><path d="M-15 0 L-3 13 L17 -12" fill="none" stroke="{GLOVE}" stroke-width="{8 / s:.1f}"/>'
+            f'<path d="M-36 -40 L-8 -50" fill="none" stroke="#ffffff" stroke-width="{4 / s:.1f}"/>'
+            f'<g fill="{g["body"]}" stroke-width="{3 / s:.1f}"><circle cx="0" cy="-49" r="3"/><circle cx="36" cy="-38" r="3"/><circle cx="-36" cy="-38" r="3"/><circle cx="0" cy="48" r="3"/></g></g>')
 
 
-def grail(cx, cy, s=1, rot=0):
-    """A golden chalice, the rim's centre at (cx, cy), s times 76x96, with a blue gem."""
+RUBY = PALETTES['H']['body']
+
+
+def gem(cx, cy, r, fill, kind='round'):
+    """A gem set in gold: round (a cabochon) or a rhombus, with a glint."""
+    if kind == 'rhombus':
+        body = f'<path d="M{cx} {cy - r * 1.3:.1f} L{cx + r} {cy} L{cx} {cy + r * 1.3:.1f} L{cx - r} {cy} Z" fill="{fill}" stroke-width="4"/>'
+    else:
+        body = f'<ellipse cx="{cx}" cy="{cy}" rx="{r}" ry="{r * 0.85:.1f}" fill="{fill}" stroke-width="4"/>'
+    return body + f'<ellipse cx="{cx - r * 0.35:.1f}" cy="{cy - r * 0.35:.1f}" rx="{r * 0.3:.1f}" ry="{r * 0.2:.1f}" fill="#ffffff" stroke="none"/>'
+
+
+def big_grail(cx, cy):
+    """The Holy Grail, large and ornate: the rim's centre at (cx, cy); 144 wide, 186 tall below the rim."""
     g, p = PALETTES['C'], PALETTES['P']
-    shape = ('M-38 0 L38 0 C38 26 18 36 7 38 L6 70 Q26 72 30 88 Q30 94 22 94 L-22 94 Q-30 94 -30 88 Q-26 72 -6 70'
-             ' L-7 38 C-18 36 -38 26 -38 0 Z')
-    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
-            f'<clipPath id="grail-{cx}"><path d="{shape}"/></clipPath>'
-            f'<path d="{shape}" fill="{g["light"]}" stroke="none"/>'
-            f'<g clip-path="url(#grail-{cx})" stroke="none"><path d="M8 -4 L60 -4 L60 100 L8 100 Z" fill="{g["body"]}"/>'
-            f'<rect x="-40" y="84" width="80" height="14" fill="{g["shade"]}"/></g>'
-            f'<path d="{shape}" fill="none" stroke-width="{6 / s:.1f}"/>'
-            f'<ellipse cx="0" cy="0" rx="38" ry="8" fill="{g["shade"]}" stroke-width="5"/>'
-            f'<ellipse cx="0" cy="54" rx="11" ry="7" fill="{g["body"]}" stroke-width="4"/>'
-            f'<path d="M-28 14 Q-26 26 -16 32" fill="none" stroke="#ffffff" stroke-width="5"/>'
-            f'<path d="M0 10 L9 19 L0 28 L-9 19 Z" fill="{p["body"]}" stroke-width="4"/></g>')
+    bowl = 'M-70 0 C-70 50 -38 76 -16 82 L16 82 C38 76 70 50 70 0 Z'
+    foot = 'M-9 136 Q-12 154 -46 162 Q-62 166 -60 176 L60 176 Q62 166 46 162 Q12 154 9 136 Z'
+    stem = 'M-14 82 L14 82 L10 96 L-10 96 Z M-8 112 L8 112 L10 138 L-10 138 Z'
+
+    def metal(uid, d):  # a gold part: lit on the left, in shade on the right
+        return (f'<clipPath id="{uid}"><path d="{d}"/></clipPath><path d="{d}" fill="{g["body"]}" stroke="none"/>'
+                f'<g clip-path="url(#{uid})" stroke="none"><path d="M-90 -20 L-30 -20 Q-40 90 -26 200 L-90 200 Z" fill="{g["light"]}"/>'
+                f'<path d="M90 -20 L36 -20 Q28 90 38 200 L90 200 Z" fill="{g["shade"]}"/></g><path d="{d}" fill="none" stroke-width="6"/>')
+    return f'<g transform="translate({cx} {cy})">' + ''.join([
+        metal('g-foot', foot),
+        f'<rect x="-62" y="172" width="124" height="14" rx="6" fill="{g["shade"]}" stroke-width="6"/>',
+        ''.join(f'<circle cx="{x}" cy="179" r="3" fill="{GLOVE}" stroke="none"/>' for x in (-44, -22, 0, 22, 44)),
+        gem(0, 162, 7, RUBY),
+        metal('g-stem', stem),
+        f'<ellipse cx="0" cy="104" rx="24" ry="12" fill="{g["body"]}" stroke-width="6"/>',
+        f'<path d="M-18 100 Q-10 94 0 94" fill="none" stroke="{g["light"]}" stroke-width="4"/>',
+        gem(0, 104, 7, p['body'], 'rhombus'),
+        metal('g-bowl', bowl),
+        # an ornate band around the bowl, with gems
+        f'<path d="M-66 24 Q0 44 66 24" fill="none" stroke-width="18"/><path d="M-66 24 Q0 44 66 24" fill="none" stroke="{g["shade"]}" stroke-width="9"/>',
+        f'<path d="M-46 52 Q-30 62 -16 54 Q0 66 16 54 Q30 62 46 52" fill="none" stroke="{g["shade"]}" stroke-width="4"/>',
+        gem(0, 34, 10, p['body'], 'rhombus'), gem(-38, 30, 7, RUBY), gem(38, 30, 7, RUBY),
+        '<path d="M-58 14 Q-58 46 -40 62" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.85"/>',
+        # the rim and the light inside the cup
+        f'<ellipse cx="0" cy="0" rx="72" ry="15" fill="{g["light"]}" stroke-width="6"/>',
+        f'<ellipse cx="0" cy="1" rx="60" ry="10" fill="{g["shade"]}" stroke-width="4"/>',
+        f'<ellipse cx="0" cy="3" rx="44" ry="6" fill="{GLOVE}" stroke="none"/>',
+    ]) + '</g>'
 
 
 def parachute():
     """P1 Parachute: the pawn floats down under a parachute, past a snake that only gets half a slide out of it."""
     p = PALETTES['P']
-    x, y, s = 168, 216, 0.38
-    hand_l, hand_r = (x + (120 - 200) * s, y + (204 - 450) * s), (x + (302 - 200) * s, y + (204 - 450) * s)
-    dome, edge = canopy(x, 8, 206, 74, p)
+    x, y, s = 168, 228, 0.37
+    hand_l, hand_r = at(x, y, s, 0, 120, 204), at(x, y, s, 0, 302, 204)
+    dome, edge = canopy(x, 6, 206, 58, p)
     strings = ''.join(f'<path d="M{ex} {ey} L{(hand_l if ex < x else hand_r)[0]:.0f} {(hand_l if ex < x else hand_r)[1]:.0f}"/>'
                       for ex, ey in edge)
     return '\n'.join([
-        shadow(170, 244, 30, 5),
+        shadow(170, 246, 30, 5),
         shadow(362, 232, 34, 5),
-        '<path d="M60 108 L60 134 M80 150 L80 168 M276 108 L276 134 M256 150 L256 168" fill="none" stroke-width="4"/>',
+        '<path d="M60 98 L60 124 M80 140 L80 158 M276 98 L276 124 M256 140 L256 158" fill="none" stroke-width="4"/>',
         snake('M350 136 C392 146 394 180 354 192 C322 202 330 222 384 224', (330, 128), other('P'), look='left', face_kind='neutral', s=0.8),
         f'<g fill="none" stroke-width="3">{strings}</g>',
         dome,
@@ -1019,46 +1050,46 @@ def swamp_boots():
         ghost(place(100, 196, 0.42, 6), p['ghost'], 0.4),
         f'<g fill="{m["body"]}" stroke-width="4"><circle cx="312" cy="196" r="7"/><circle cx="330" cy="178" r="5"/><circle cx="160" cy="194" r="6"/><circle cx="144" cy="176" r="4"/></g>',
         f'<path d="M176 222 Q190 212 204 222 M268 224 Q284 214 300 224" fill="none" stroke="{m["light"]}" stroke-width="5"/>',
+        # the boots go over the base; the back one is turned so its opening faces the pawn
         pawn('p2', p, place(234, 196, 0.42, 6), face_kind='happy', tuft='up', feet='none',
-             arms=boot(134, 486, -18) + boot(258, 496, 4)
-             + arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
+             arms=arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
              + arm('M222 298 C258 290 284 270 296 244', p['body']),
-             front=fist(302, 236)),
+             front=boot(130, 490, 32) + boot(262, 500, 4) + fist(302, 236)),
     ])
 
 
 def shield_card():
-    """P3 Shield: the pawn holds up a shield, and the snake that lunged at it bounces off."""
+    """P3 Shield: a shield stands between the pawn and the snake, and the snake bounces off it."""
     p, o = PALETTES['P'], other('P')
     return '\n'.join([
-        shadow(132, 242, 42),
-        shadow(344, 238, 44, 5),
-        snake('M340 138 C380 148 396 178 370 198 C344 216 350 232 398 234', (318, 120), o, look='left', face_kind='shock', s=0.9),
-        '<path d="M276 70 L286 88 M300 64 L298 86 M266 100 L284 106" fill="none" stroke-width="5"/>',
-        sparkle(368, 70, 10),
-        pawn('p3', p, place(126, 236, 0.44, -6), face_kind='determined', tuft='up', feet='stand',
+        shadow(86, 242, 40),
+        shadow(204, 236, 50, 6),
+        shadow(356, 238, 40, 5),
+        snake('M354 136 C392 146 402 172 378 190 C354 208 362 228 402 230', (336, 120), o, look='left', face_kind='shock', s=0.8),
+        '<path d="M282 78 L292 94 M304 70 L302 90 M276 108 L292 112" fill="none" stroke-width="5"/>',
+        sparkle(386, 62, 10), sparkle(132, 40, 8),
+        pawn('p3', p, place(84, 236, 0.44, -6), face_kind='determined', tuft='up', feet='stand',
              arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
-             + arm('M222 298 C262 300 300 294 330 280', p['body'])),
-        shield(236, 140, 1.1, 8),
+             + arm('M222 298 C250 296 272 290 290 280', p['body']),
+             front=glove(300, 276, 80)),
+        shield(204, 122, 1.45, 0),
     ])
 
 
 def holy_grail():
-    """P4 Holy Grail: the pawn raises the shining grail; every effect on it is gone."""
-    p, g = PALETTES['P'], PALETTES['C']
-    x, y, s, lean = 168, 236, 0.44, 4
-    gx, gy = at(x, y, s, lean, 320, 50)  # the grail's bowl, held up in the right hand
-    rays = ''.join(f'<path d="M{gx + 72 * math.cos(a):.0f} {gy + 72 * math.sin(a):.0f} L{gx + 116 * math.cos(a):.0f} {gy + 116 * math.sin(a):.0f}"/>'
-                   for a in (math.radians(d) for d in (-180, -145, -110, -70, -35, 0, 35, 145)))
+    """P4 Holy Grail: the Grail alone, large and shining (a Legendary card)."""
+    g = PALETTES['C']
+    cx, cy = 204, 34
+    rays = ''.join(f'<path d="M{cx + 90 * math.cos(a):.0f} {cy + 70 + 90 * math.sin(a):.0f} L{cx + 150 * math.cos(a):.0f} {cy + 70 + 150 * math.sin(a):.0f}"/>'
+                   for a in (math.radians(d) for d in range(-180, 30, 22)))
     return '\n'.join([
-        f'<g fill="none" stroke="{g["light"]}" stroke-width="8">{rays}</g>',
-        f'<circle cx="{gx:.0f}" cy="{gy:.0f}" r="60" fill="#ffffff" opacity="0.6" stroke="none"/>',
-        shadow(x, 242, 44),
-        pawn('p4', p, place(x, y, s, lean), face_kind='happy', tuft='up',
-             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + fist(132, 362, 16)
-             + arm('M222 296 C276 280 312 220 318 140', p['body']),
-             front=grail(320, 4, 2.3) + glove(320, 128, 10)),
-        sparkle(48, 54, 13), sparkle(386, 150, 12), sparkle(150, 28, 9), sparkle(54, 170, 8, g['light']),
+        f'<g fill="none" stroke="{g["light"]}" stroke-width="9">{rays}</g>',
+        f'<circle cx="{cx}" cy="{cy + 70}" r="86" fill="#ffffff" opacity="0.55" stroke="none"/>',
+        f'<path d="M{cx - 40} {cy} L{cx - 64} -10 L{cx + 64} -10 L{cx + 40} {cy} Z" fill="{GLOVE}" opacity="0.75" stroke="none"/>',  # light rising from the cup
+        shadow(cx, 226, 74, 7),
+        big_grail(cx, cy),
+        sparkle(56, 60, 16), sparkle(350, 44, 12), sparkle(360, 170, 15), sparkle(48, 176, 10, g['light']),
+        sparkle(300, 100, 8), sparkle(110, 116, 7),
     ])
 
 
