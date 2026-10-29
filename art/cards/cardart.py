@@ -92,9 +92,8 @@ def arm(d, col):
 
 
 def glove(cx, cy, rot=0):
-    """An open hand, fingers up, thumb to the right; rot turns it about its centre."""
+    """An open hand, fingers up, no thumb; rot turns it about its centre."""
     return (f'<g transform="rotate({rot} {cx} {cy})">'
-            f'<ellipse cx="{cx + 19}" cy="{cy + 11}" rx="9" ry="6" transform="rotate(-35 {cx + 19} {cy + 11})" fill="{GLOVE}" stroke-width="5"/>'
             f'<ellipse cx="{cx}" cy="{cy}" rx="17" ry="20" fill="{GLOVE}" stroke-width="6"/>'
             f'<path d="M{cx - 6} {cy - 17} L{cx - 6} {cy - 8} M{cx + 5} {cy - 18} L{cx + 5} {cy - 9}" fill="none" stroke-width="4"/></g>')
 

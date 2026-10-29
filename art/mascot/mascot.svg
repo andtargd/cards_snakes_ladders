@@ -38,7 +38,6 @@
     <g id="arm-left">
       <path d="M176 300 C136 302 108 282 100 242" fill="none" stroke-width="21"/>
       <path d="M176 300 C136 302 108 282 100 242" fill="none" stroke="#e5483a" stroke-width="8"/>
-      <ellipse cx="117" cy="232" rx="9" ry="6" transform="rotate(-35 117 232)" fill="#fff4dc" stroke-width="5"/>
       <ellipse cx="98" cy="221" rx="17" ry="20" fill="#fff4dc" stroke-width="6"/>
       <path d="M92 204 L92 213 M103 203 L103 212" fill="none" stroke-width="4"/>
       <path d="M66 214 Q60 200 66 186 M54 222 Q44 202 52 180" fill="none" stroke-width="5"/>
