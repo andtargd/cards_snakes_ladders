@@ -2,7 +2,7 @@
 // icons cards and effects use. Everything is drawn on OffscreenCanvas, so it works in the sandbox's
 // worker and in the diorama builder alike.
 import * as THREE from 'three'
-import { CARD, CATEGORY, RARITY } from './rules.js'
+import { CARD, CARDS, CATEGORY, RARITY } from './rules.js'
 
 export const INK = '#2b2622'
 export const FONT = '"Trebuchet MS", "Segoe UI", Verdana, sans-serif'
@@ -532,8 +532,41 @@ export function drawIcon(g, id, x, y, s, col = INK) {
   g.restore()
 }
 
-/** A card face at w x h pixels (5:7). */
+// ---------- card styles: how the faces and the back look ----------
+/**
+ * The card styles, a player's choice: 'minimal' (Minimalism) draws the faces here, a flat icon in a
+ * coloured frame; 'pawn' (Pawn Parade) puts the mascot's pictures (art/cards/cardart.py, made into
+ * experience/cards/<id>.webp by tools/cardart.html) in an inked, tarot-like frame.
+ */
+export const CARD_STYLES = ['minimal', 'pawn']
+let cardStyle = 'minimal'
+export const getCardStyle = () => cardStyle
+export function setCardStyle(name) { if (CARD_STYLES.includes(name)) cardStyle = name }
+const pictures = new Map() // card id (or 'mascot') -> its picture, once loaded
+let picturesLoading = null
+/**
+ * The Pawn Parade's pictures, fetched once; `asset` makes a path in experience/ a URL (p0.asset). Until a
+ * picture is in, its card shows the Minimalism icon in the window. Resolves when all are tried.
+ */
+export function loadCardPictures(asset) {
+  return (picturesLoading ||= Promise.all([...CARDS.map(c => c.id), ...Object.keys(CAT_COLORS).map(c => 'cat-' + c), 'mascot'].map(id =>
+    fetch(asset(`cards/${id}.webp`)).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob() })
+      .then(b => createImageBitmap(b)).then(img => { pictures.set(id, img) }, e => console.warn('[cards] no picture:', id, e?.message || e)))))
+}
+
+/** A card face at w x h pixels (5:7), in the chosen style. */
 export function drawCard(g, cardId, w = 256, h = 358, x0 = 0, y0 = 0) {
+  if (cardStyle === 'pawn') drawCardPawn(g, cardId, w, h, x0, y0)
+  else drawCardMinimal(g, cardId, w, h, x0, y0)
+}
+/** The back of every card, in the chosen style. */
+export function drawCardBack(g, w = 256, h = 358, x0 = 0, y0 = 0) {
+  if (cardStyle === 'pawn') drawCardBackPawn(g, w, h, x0, y0)
+  else drawCardBackMinimal(g, w, h, x0, y0)
+}
+
+/** Minimalism's face: a frame in the rarity's colour, a category chip and the card's icon. */
+function drawCardMinimal(g, cardId, w, h, x0, y0) {
   const card = CARD[cardId], st = RARITY_STYLE[card.rar], k = w / 256
   g.save()
   g.translate(x0, y0)
@@ -625,8 +658,8 @@ export function drawGhostCard(g, cardId, w = 256, h = 358) {
   g.restore()
 }
 
-/** The back of every card. */
-export function drawCardBack(g, w = 256, h = 358, x0 = 0, y0 = 0) {
+/** Minimalism's back: navy stripes, a gold ring with CS&L. */
+function drawCardBackMinimal(g, w, h, x0, y0) {
   const k = w / 256
   g.save(); g.translate(x0, y0)
   g.fillStyle = '#ffffff'; roundRect(g, 0, 0, w, h, 18 * k); g.fill()
@@ -645,5 +678,140 @@ export function drawCardBack(g, w = 256, h = 358, x0 = 0, y0 = 0) {
   drawIcon(g, 'cat-D', w / 2, h * 0.2, 44 * k, '#f2c14e')
   g.strokeStyle = '#f2c14e'; g.fillStyle = '#f2c14e'
   snakeShape(g, w / 2, h * 0.8, 70 * k)
+  g.restore()
+}
+
+// ---------- Pawn Parade: the mascot's pictures in an inked, tarot-like frame ----------
+const PAWN_INK = '#2b2233' // the pictures' outline (art/cards/cardart.py)
+// the paper by rarity, as Minimalism's backgrounds but warmer; the edge is the rarity's colour (RARITY_STYLE)
+const PAWN_PAPER = { C: '#f5efe1', U: '#e6f0d6', R: '#dfe8f6', L: '#fbe8a6' }
+const PAWN_PALE = { M: '#fcece4', D: '#ede8fb', B: '#e1f3ec', H: '#f9e5e5', P: '#e1eff9', C: '#f5efde' } // the pictures' backgrounds
+
+/** Paper grain: faint specks, the same on every card. */
+function grain(g, w, h, k) {
+  g.fillStyle = 'rgba(43,34,51,0.07)'
+  for (let i = 0; i < 260; i++) g.fillRect(hash(i * 2 + 1) * w, hash(i * 2 + 2) * h, (0.8 + hash(i + 99) * 1.2) * k, (0.8 + hash(i + 199) * 1.2) * k)
+}
+
+/**
+ * Pawn Parade's face: paper of the rarity's tint in a band of the rarity's colour between ink lines; the
+ * name on a ribbon of the category's colour with the category's badge (experience/cards/cat-<X>.webp), the
+ * picture under it with the category on a tag, the text, the rarity's stars.
+ */
+function drawCardPawn(g, cardId, w, h, x0, y0) {
+  const card = CARD[cardId], st = RARITY_STYLE[card.rar], k = w / 256, cc = CAT_COLORS[card.cat]
+  g.save()
+  g.translate(x0, y0)
+  g.lineJoin = 'round'; g.lineCap = 'round'
+  // the card: ink, the rarity's band with a light line along it, ink, the paper
+  g.fillStyle = PAWN_INK; roundRect(g, 0, 0, w, h, 20 * k); g.fill()
+  g.fillStyle = st.frame; roundRect(g, 3.5 * k, 3.5 * k, w - 7 * k, h - 7 * k, 17 * k); g.fill()
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.5 * k
+  roundRect(g, 5.5 * k, 5.5 * k, w - 11 * k, h - 11 * k, 15 * k); g.stroke()
+  g.fillStyle = PAWN_PAPER[card.rar]; roundRect(g, 10 * k, 10 * k, w - 20 * k, h - 20 * k, 11 * k); g.fill()
+  grain(g, w, h, k)
+  g.strokeStyle = PAWN_INK; g.lineWidth = 2.5 * k; g.stroke()
+  if (card.rar === 'L') { // gold studs at the corners
+    for (const [x, y] of [[16, 16], [w / k - 16, 16], [16, h / k - 16], [w / k - 16, h / k - 16]]) {
+      g.fillStyle = '#f7c548'; g.strokeStyle = PAWN_INK; g.lineWidth = 1.5 * k
+      star(g, x * k, y * k, 7 * k, 3 * k, 4); g.fill(); g.stroke()
+    }
+  }
+  // the name on its ribbon, the category's badge over its left end
+  const rx = 18 * k, ry = 19 * k, rw = w - 36 * k, rh = 38 * k
+  g.fillStyle = cc; roundRect(g, rx, ry, rw, rh, 12 * k); g.fill()
+  g.fillStyle = 'rgba(255,255,255,0.18)'; roundRect(g, rx + 4 * k, ry + 4 * k, rw - 8 * k, rh * 0.36, 8 * k); g.fill()
+  g.strokeStyle = PAWN_INK; g.lineWidth = 3 * k; roundRect(g, rx, ry, rw, rh, 12 * k); g.stroke()
+  const br = 23 * k, bx = rx + br - 3 * k, by = ry + rh / 2
+  g.fillStyle = PAWN_PALE[card.cat]; g.beginPath(); g.arc(bx, by, br, 0, Math.PI * 2); g.fill()
+  g.lineWidth = 3 * k; g.stroke()
+  const badge = pictures.get('cat-' + card.cat)
+  if (badge) g.drawImage(badge, bx - br * 0.84, by - br * 0.84, br * 1.68, br * 1.68)
+  else drawIcon(g, 'cat-' + card.cat, bx, by, br * 1.25, cc)
+  g.fillStyle = inkOn(cc)
+  g.textAlign = 'center'; g.textBaseline = 'middle'
+  let size = 22
+  const room = rw - 56 * k
+  g.font = `bold ${size * k}px ${FONT}`
+  while (g.measureText(card.name).width > room && size > 13) { size--; g.font = `bold ${size * k}px ${FONT}` }
+  g.fillText(card.name, rx + 48 * k + room / 2, by + 1 * k)
+  // the picture (408x256, the window's shape), or Minimalism's icon until it is in
+  const px = 18 * k, py = 65 * k, pw = w - 36 * k, ph = pw * 256 / 408
+  g.save(); roundRect(g, px, py, pw, ph, 12 * k); g.clip()
+  const pic = pictures.get(cardId)
+  if (pic) g.drawImage(pic, px, py, pw, ph)
+  else { g.fillStyle = '#ffffff'; g.fillRect(px, py, pw, ph); drawIcon(g, cardId, w / 2, py + ph / 2, 100 * k, cc) }
+  if (card.rar === 'R') { // a glare across the picture
+    const gr = g.createLinearGradient(px, py, px + pw * 0.6, py + ph)
+    gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.4)'); gr.addColorStop(0.56, 'rgba(255,255,255,0)')
+    g.fillStyle = gr; g.fillRect(px, py, pw, ph)
+  }
+  g.restore()
+  g.strokeStyle = PAWN_INK; g.lineWidth = 3.5 * k; roundRect(g, px, py, pw, ph, 12 * k); g.stroke()
+  // the category on a tag over the picture's lower edge (the pictures keep that strip free)
+  const label = CATEGORY[card.cat].toUpperCase()
+  g.font = `bold ${10.5 * k}px ${FONT}`
+  const tw = g.measureText(label).width + 22 * k, ty = py + ph
+  g.fillStyle = PAWN_PAPER[card.rar]; roundRect(g, w / 2 - tw / 2, ty - 9 * k, tw, 18 * k, 9 * k); g.fill()
+  g.lineWidth = 2.5 * k; g.stroke()
+  g.fillStyle = cc; g.fillText(label, w / 2, ty + 0.5 * k)
+  // the text, in the middle between the tag and the stars
+  const sy = h - 41 * k
+  g.fillStyle = PAWN_INK
+  g.font = `${15.5 * k}px ${FONT}`
+  const lines = wrapText(g, card.text, w - 46 * k).slice(0, 4)
+  const top = (ty + sy) / 2 + 1 * k - (lines.length - 1) * 9.5 * k
+  lines.forEach((l, i) => g.fillText(l, w / 2, top + i * 19 * k))
+  // the rarity: its stars (a plain dot for Common) and its name
+  g.strokeStyle = PAWN_INK; g.lineWidth = 1.6 * k
+  if (!st.stars) { g.fillStyle = st.frame; g.beginPath(); g.arc(w / 2, sy, 4.5 * k, 0, Math.PI * 2); g.fill(); g.stroke() }
+  for (let i = 0; i < st.stars; i++) {
+    g.fillStyle = st.frame
+    star(g, w / 2 + (i - (st.stars - 1) / 2) * 21 * k, sy, 10 * k, 4.6 * k); g.fill(); g.stroke()
+  }
+  g.font = `bold ${10.5 * k}px ${FONT}`
+  g.fillStyle = card.rar === 'C' ? 'rgba(43,34,51,0.55)' : st.frame
+  g.fillText(st.label.toUpperCase(), w / 2, h - 23 * k)
+  g.restore()
+}
+
+/** Pawn Parade's back: plum paper with a diamond pattern, the mascot in a gold medallion. */
+function drawCardBackPawn(g, w, h, x0, y0) {
+  const k = w / 256, cx = w / 2, cy = h * 0.47
+  g.save(); g.translate(x0, y0)
+  g.lineJoin = 'round'; g.lineCap = 'round'
+  g.fillStyle = PAWN_INK; roundRect(g, 0, 0, w, h, 20 * k); g.fill()
+  g.fillStyle = '#4a3470'; roundRect(g, 4.5 * k, 4.5 * k, w - 9 * k, h - 9 * k, 16 * k); g.fill()
+  g.save(); roundRect(g, 4.5 * k, 4.5 * k, w - 9 * k, h - 9 * k, 16 * k); g.clip()
+  g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 2 * k
+  for (let i = -h; i < w + h; i += 26 * k) {
+    g.beginPath(); g.moveTo(i, 0); g.lineTo(i + h, h); g.stroke()
+    g.beginPath(); g.moveTo(i, 0); g.lineTo(i - h, h); g.stroke()
+  }
+  grain(g, w, h, k)
+  g.restore()
+  g.strokeStyle = '#f7c548'; g.lineWidth = 3 * k
+  roundRect(g, 14 * k, 14 * k, w - 28 * k, h - 28 * k, 12 * k); g.stroke()
+  // the medallion
+  const r = 78 * k
+  g.fillStyle = '#f7c548'; g.strokeStyle = PAWN_INK; g.lineWidth = 4 * k
+  g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.fill(); g.stroke()
+  g.fillStyle = '#fbf1d0'; g.lineWidth = 3 * k
+  g.beginPath(); g.arc(cx, cy, r - 9 * k, 0, Math.PI * 2); g.fill(); g.stroke()
+  const pic = pictures.get('mascot')
+  if (pic) {
+    g.save(); g.beginPath(); g.arc(cx, cy, r - 10.5 * k, 0, Math.PI * 2); g.clip()
+    const mh = r * 2.05, mw = mh * pic.width / pic.height
+    g.drawImage(pic, cx - mw / 2, cy - mh * 0.53, mw, mh)
+    g.restore()
+  } else drawIcon(g, 'cat-D', cx, cy, 70 * k, '#4a3470')
+  // the corners' stars and the title
+  for (const [x, y] of [[30, 30], [w / k - 30, 30], [30, h / k - 30], [w / k - 30, h / k - 30]]) {
+    g.fillStyle = '#f7c548'; g.strokeStyle = PAWN_INK; g.lineWidth = 1.5 * k
+    star(g, x * k, y * k, 8 * k, 3.4 * k, 4); g.fill(); g.stroke()
+  }
+  g.font = `bold ${24 * k}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
+  g.lineWidth = 6 * k; g.strokeStyle = PAWN_INK; g.strokeText('CS&L', cx, h * 0.83)
+  g.fillStyle = '#f7c548'; g.fillText('CS&L', cx, h * 0.83)
   g.restore()
 }

@@ -87,6 +87,7 @@ export const T = {
   sharedTable: 'Shared Table',
   howToPlay: 'How to Play',
   theCards: 'The Cards',
+  cardStyles: ['Minimalism', 'Pawn Parade'], // P.CARD_STYLES: 'minimal', 'pawn'
   rulesShort: 'Rules',
   back: 'Back',
   // Project 0's Shared Table and its invitations (the web build has online rooms with a code instead)

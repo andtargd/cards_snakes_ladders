@@ -6,6 +6,7 @@
 ## Рисунки карт
 
 Рисунки карт собирает `art/cards/cardart.py` (`python art/cards/cardart.py --preview`), результат — `art/cards/<id>.svg`.
+В игру они попадают как стиль карт Pawn Parade: `tools/cardart.html` переводит их в `experience/cards/<id>.webp`.
 
 Окно картинки на карте — 204×128 на карте 256×358 (`drawCard` в `experience/paper.js`).
 Рисунок делаем в 2×: 408×256, углы `rx="24"`.

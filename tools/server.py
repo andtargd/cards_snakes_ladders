@@ -1,6 +1,7 @@
 """Local dev server: serves the project folder with CORS (for the Project 0 dev kit)
 and accepts POST /save/<path> so the in-browser builder can write GLBs into build/
-(and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/).
+(and tools/covers.html, tools/trailer.html their pictures into docs/crazygames/media/, tools/cardart.html
+the card pictures into experience/cards/).
 
 A page given after the port is served at / instead of index.html, with the query kept: a Discord
 activity always opens at /, so `python tools/server.py 5550 tools/discordspike.html` behind a tunnel
@@ -11,7 +12,7 @@ import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SAVE_DIRS = ('build/', 'tmp/', 'docs/crazygames/media/')
+SAVE_DIRS = ('build/', 'tmp/', 'docs/crazygames/media/', 'experience/cards/')
 HOME = None  # the page served at /, when one is given
 SERVE = ROOT  # the folder served
 

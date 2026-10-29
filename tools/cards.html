@@ -13,10 +13,12 @@
 </head>
 <body>
 <script type="module">
-// Every card face (or ?ids=C1,M2 at ?w=512) for checking the drawings.
+// Every card face (or ?ids=C1,M2 at ?w=512) for checking the drawings; ?style=pawn in Pawn Parade's look.
 import * as P from '../experience/paper.js'
 import { CARDS } from '../experience/rules.js'
 const q = new URLSearchParams(location.search)
+P.setCardStyle(q.get('style') || 'minimal')
+if (P.getCardStyle() === 'pawn') await P.loadCardPictures(path => new URL('../experience/' + path, import.meta.url).href)
 const w = +(q.get('w') || 256), h = Math.round(w * 1.4)
 const ids = q.get('ids') ? q.get('ids').split(',') : CARDS.map(c => c.id)
 for (const id of ids) {

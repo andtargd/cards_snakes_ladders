@@ -1243,6 +1243,88 @@ def echo():
     ])
 
 
+# ---------- the category icons (Pawn Parade's badges on the name's ribbon) ----------
+
+ICON = 128  # the icons' frame, drawn at 2x a badge of about 64 px
+
+
+def icon(cid, title, seed, content):
+    """A category icon: ICON square, no background, in the pictures' outline, wobble and grain."""
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {ICON} {ICON}" width="{ICON}" height="{ICON}">
+  <title>{title} — значок категории</title>
+  <!-- Сделано art/cards/cardart.py ({cid}); правьте там и пересоберите. -->
+  <defs>
+    <filter id="{cid}-drawn" filterUnits="userSpaceOnUse" x="0" y="0" width="{ICON}" height="{ICON}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="{seed}" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="2" xChannelSelector="R" yChannelSelector="G" result="wobbly"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" seed="{seed + 8}" result="noise"/>
+      <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0.17  0 0 0 0 0.13  0 0 0 0 0.2  -2 0 0 0 0.85" result="specks"/>
+      <feComposite in="specks" in2="wobbly" operator="in" result="grain"/>
+      <feMerge><feMergeNode in="wobbly"/><feMergeNode in="grain"/></feMerge>
+    </filter>
+  </defs>
+  <g filter="url(#{cid}-drawn)" stroke="{INK}" stroke-linejoin="round" stroke-linecap="round">
+    {content}
+  </g>
+</svg>
+'''
+
+
+def icon_move():
+    """Movement: a fat arrow forward, speed lines behind."""
+    p = PALETTES['M']
+    arrow = 'M30 50 L70 50 L70 28 L116 64 L70 100 L70 78 L30 78 Z'
+    return '\n'.join([
+        '<clipPath id="im-arrow"><path d="' + arrow + '"/></clipPath>',
+        f'<path d="{arrow}" fill="{p["body"]}" stroke="none"/>',
+        f'<path d="M0 66 L128 66 L128 128 L0 128 Z" fill="{p["shade"]}" stroke="none" clip-path="url(#im-arrow)"/>',
+        f'<path d="{arrow}" fill="none" stroke-width="7"/>',
+        f'<path d="M36 57 L66 57 M76 42 L96 58" fill="none" stroke="{p["light"]}" stroke-width="5"/>',
+        '<path d="M6 46 L20 46 M2 64 L20 64 M6 82 L20 82" fill="none" stroke-width="7"/>',
+    ])
+
+
+def icon_dice():
+    """Dice: a die in the category's violet."""
+    return die3d('id', PALETTES['D'], 64, 66, 36, {'F': 5, 'T': 1, 'R': 3})
+
+
+def icon_board():
+    """Board: a ladder, as the board's own."""
+    return ('<g transform="translate(64 64) scale(1.12) translate(-64 -64)">'
+            + ladder(55.5, 104, 80, 12, PALETTES['B'], w=34, rungs=3) + '</g>')
+
+
+def icon_hinder():
+    """Hinder: a prohibition sign in the category's red, on a cream disc."""
+    p = PALETTES['H']
+    return '\n'.join([
+        f'<circle cx="64" cy="64" r="44" fill="{GLOVE}" stroke="none"/>',
+        no_sign(64, 64, 44, p['body']),
+        f'<path d="M34 46 A36 36 0 0 1 48 31" fill="none" stroke="{p["light"]}" stroke-width="5"/>',
+    ])
+
+
+def icon_protect():
+    """Protection: the shield of P3."""
+    return shield(64, 64, 1.02)
+
+
+def icon_hand():
+    """Hand: three cards fanned out."""
+    return fan(64, 101, (-26, 0, 26), 1.0)
+
+
+ICONS = {  # id: (category's name, seed, drawing)
+    'cat-M': ('Movement', 3, icon_move),
+    'cat-D': ('Dice', 5, icon_dice),
+    'cat-B': ('Board', 7, icon_board),
+    'cat-H': ('Hinder', 9, icon_hinder),
+    'cat-P': ('Protection', 11, icon_protect),
+    'cat-C': ('Hand', 13, icon_hand),
+}
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -1287,6 +1369,11 @@ def main():
         with open(path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(svg)
         out[cid] = (name, cat, svg)
+        print('wrote', os.path.relpath(path, ROOT))
+    for cid, (name, seed, draw) in ICONS.items():
+        path = os.path.join(HERE, f'{cid}.svg')
+        with open(path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(icon(cid, name, seed, draw()))
         print('wrote', os.path.relpath(path, ROOT))
     if '--preview' in sys.argv:
         preview(out)

@@ -6,6 +6,7 @@ import * as THREE from 'three'
 import * as R from './rules.js'
 import { View } from './view.js'
 import { UI } from './ui.js'
+import * as P from './paper.js'
 import { T } from './strings.js'
 import { Tutorial, createFirstGame, FIRST } from './tutorial.js'
 import SOUNDS from './sounds.config.js'
@@ -86,7 +87,8 @@ function loadSettings(vol = 0.8) {
   if (typeof saved?.sound?.on === 'boolean') sound.on = saved.sound.on
   if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
   const first = !saved || saved.first === 'due' ? 'due' : 'done'
-  return { solo, pass, online, sound, first }
+  const cardStyle = P.CARD_STYLES.includes(saved?.cardStyle) ? saved.cardStyle : 'minimal'
+  return { solo, pass, online, sound, first, cardStyle }
 }
 
 /** The game saved by the last LocalTable here, or null. */
@@ -427,6 +429,7 @@ class App {
     this.online = saved.online // online play: { mode, size } for Quick Match and a new room
     this.sound = saved.sound // { on, vol }
     this.first = saved.first // the First Match: 'due' until its forced tips are done or skipped
+    this.cardStyle = saved.cardStyle // how the cards look: P.CARD_STYLES
     this.tut = null // the First Match's tips, while it is played (tutorial.js)
     this.confirmSkip = false // the game menu asks whether leaving the First Match skips its tips
     this.speedIdx = 0
@@ -438,6 +441,7 @@ class App {
     this.ui = new UI(p0, this)
     this.view.cover = () => this.ui.cover()
     this.view.floor = () => this.ui.floor()
+    this.setCardStyle(this.cardStyle)
     this.table = null
     this.shared = null
     this.lastSfx = {}
@@ -512,7 +516,7 @@ class App {
     try { this.p0.sound.play(`sfx/${file}.mp3`, rate === 1 ? { volume: v } : { volume: v, rate }) } catch { /* sound is optional */ }
   }
   saveSettings() {
-    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first })) } catch { /* no storage here */ }
+    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first, cardStyle: this.cardStyle })) } catch { /* no storage here */ }
   }
 
   // ----- the First Match: the web build's first game, with tips (tutorial.js) -----
@@ -597,6 +601,16 @@ class App {
   toScreen(name) {
     this.screen = name
     this.ui.dirty = true
+  }
+  /** The cards' look (The Cards page): Pawn Parade's pictures are fetched the first time, the cards redrawn as they come. */
+  setCardStyle(name) {
+    if (!P.CARD_STYLES.includes(name)) return
+    const changed = name !== this.cardStyle
+    this.cardStyle = name
+    P.setCardStyle(name)
+    this.ui.restyleCards()
+    if (name === 'pawn') P.loadCardPictures(path => this.p0.asset(path)).then(() => { if (P.getCardStyle() === 'pawn') this.ui.restyleCards() })
+    if (changed) this.saveSettings()
   }
   toggleSound() {
     const snd = this.sound

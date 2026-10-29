@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>card pictures to webp</title>
+<style>body { margin: 8px; background: #d8d2c6; font: 12px sans-serif } img { margin: 4px; vertical-align: top; width: 204px }</style>
+</head>
+<body>
+<p id="status">working…</p>
+<script type="module">
+// Pawn Parade's pictures for the game: art/cards/<id>.svg and cat-<X>.svg (python art/cards/cardart.py) and the mascot
+// (art/mascot/mascot.svg) drawn at their own size and saved as experience/cards/<id>.webp through
+// tools/server.py (?to=tmp/x saves there instead). Run it after rebuilding the SVGs; ?save=0 only shows
+// them. window.done resolves with { saved, bytes }.
+import { CARDS } from '../experience/rules.js'
+const q = new URLSearchParams(location.search)
+const save = q.get('save') !== '0', to = q.get('to') || 'experience/cards'
+const ICONS = ['M', 'D', 'B', 'H', 'P', 'C'].map(k => 'cat-' + k) // the categories' badges
+const jobs = [...[...CARDS.map(c => c.id), ...ICONS].map(id => [id, `../art/cards/${id}.svg`]), ['mascot', '../art/mascot/mascot.svg']]
+async function one([id, src]) {
+  const img = new Image()
+  img.src = src + '?v=' + Date.now()
+  await img.decode()
+  const c = document.createElement('canvas')
+  c.width = img.naturalWidth; c.height = img.naturalHeight
+  c.getContext('2d').drawImage(img, 0, 0)
+  const blob = await new Promise(r => c.toBlob(r, 'image/webp', 0.85))
+  const shown = new Image(); shown.src = URL.createObjectURL(blob); shown.title = id
+  document.body.appendChild(shown)
+  if (save) {
+    const r = await fetch(`/save/${to}/${id}.webp`, { method: 'POST', body: blob })
+    if (!r.ok) throw new Error(id + ': HTTP ' + r.status)
+  }
+  return blob.size
+}
+window.done = (async () => {
+  let bytes = 0
+  for (const job of jobs) bytes += await one(job)
+  const out = { saved: save ? jobs.length : 0, bytes }
+  document.getElementById('status').textContent = JSON.stringify(out)
+  return out
+})()
+</script>
+</body>
+</html>

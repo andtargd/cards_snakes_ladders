@@ -185,14 +185,25 @@ export class UI {
   cardTexture(id) {
     if (this.cardTex.has(id)) return this.cardTex.get(id)
     const { c, g } = P.canvas(288, 403)
-    if (id === 'back') P.drawCardBack(g, 288, 403)
-    else if (id.startsWith('ghost:')) P.drawGhostCard(g, id.slice(6), 288, 403) // Echo's copy of a card
-    else P.drawCard(g, id, 288, 403)
+    this.paintCard(g, id)
     const t = new THREE.CanvasTexture(c)
     t.colorSpace = THREE.NoColorSpace
     t.anisotropy = 4
     this.cardTex.set(id, t)
     return t
+  }
+  paintCard(g, id) {
+    g.clearRect(0, 0, 288, 403)
+    if (id === 'back') P.drawCardBack(g, 288, 403)
+    else if (id.startsWith('ghost:')) P.drawGhostCard(g, id.slice(6), 288, 403) // Echo's copy of a card
+    else P.drawCard(g, id, 288, 403)
+  }
+  /** The Cards page: the card style's choice needs a row of its own over the buttons (a narrow screen). */
+  styleRow(pw) { return pw - 400 * this.u < 180 * this.u }
+  /** The card style changed (or its pictures came in): every card drawn so far again, in place. */
+  restyleCards() {
+    for (const [id, t] of this.cardTex) { this.paintCard(t.image.getContext('2d'), id); t.needsUpdate = true }
+    this.dirty = true
   }
   makeCard(id) {
     const mat = new THREE.ShaderMaterial({
@@ -1405,6 +1416,12 @@ export class UI {
     this.button('helpback', T.back, x + 20 * u, y + ph - 56 * u, 130 * u, 40 * u, () => { app.screen = 'menu'; this.dirty = true })
     if (replay && beside) this.ghostButton('replay', T.replayTutorial, x + 160 * u + (pw - 370 * u - rw) / 2, y + ph - 54 * u, rw, 36 * u, () => app.startFirstMatch())
     else if (replay) this.ghostButton('replay', T.replayTutorial, W / 2 - 90 * u, y + ph - 98 * u, 180 * u, 36 * u, () => app.startFirstMatch())
+    // The Cards: how they look, under them
+    if (this.helpPage === 1) {
+      const sw = Math.min(300 * u, pw - 400 * u)
+      if (!this.styleRow(pw)) this.segmented('cstyle', x + (pw - sw) / 2, y + ph - 51 * u, sw, P.CARD_STYLES, T.cardStyles, app.cardStyle, v => { app.setCardStyle(v); this.dirty = true })
+      else this.segmented('cstyle', x + 20 * u, y + ph - 96 * u, pw - 40 * u, P.CARD_STYLES, T.cardStyles, app.cardStyle, v => { app.setCardStyle(v); this.dirty = true })
+    }
     this.button('helpnext', this.helpPage === 0 ? T.theCards + ' →' : '← ' + T.rulesShort, x + pw - 200 * u, y + ph - 56 * u, 180 * u, 40 * u, () => { this.helpPage = 1 - this.helpPage; this.dirty = true }, { primary: true })
   }
 
@@ -2386,7 +2403,7 @@ export class UI {
     if (cat.length) {
       const pw = Math.min(W - 20 * u, 780 * u), ph = Math.min(H - 20 * u, 600 * u)
       const cols = this.narrow ? 5 : 9, rows = Math.ceil(cat.length / cols)
-      const areaW = pw - 30 * u, areaH = ph - 130 * u
+      const areaW = pw - 30 * u, areaH = ph - (this.styleRow(pw) ? 170 : 130) * u
       const cwc = Math.min(areaW / cols * 0.94, areaH / rows / 1.4 * 0.94)
       cat.forEach((c, k) => {
         const col = k % cols, row = Math.floor(k / cols)
