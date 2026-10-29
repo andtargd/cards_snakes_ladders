@@ -983,8 +983,8 @@ def gem(cx, cy, r, fill, kind='round'):
     return body + f'<ellipse cx="{cx - r * 0.35:.1f}" cy="{cy - r * 0.35:.1f}" rx="{r * 0.3:.1f}" ry="{r * 0.2:.1f}" fill="#ffffff" stroke="none"/>'
 
 
-def big_grail(cx, cy):
-    """The Holy Grail, large and ornate: the rim's centre at (cx, cy); 144 wide, 186 tall below the rim."""
+def big_grail(cx, cy, s=1):
+    """The Holy Grail, large and ornate: the rim's centre at (cx, cy); s times 144 wide, 186 tall below the rim."""
     g, p = PALETTES['C'], PALETTES['P']
     bowl = 'M-70 0 C-70 50 -38 76 -16 82 L16 82 C38 76 70 50 70 0 Z'
     foot = 'M-9 136 Q-12 154 -46 162 Q-62 166 -60 176 L60 176 Q62 166 46 162 Q12 154 9 136 Z'
@@ -994,7 +994,7 @@ def big_grail(cx, cy):
         return (f'<clipPath id="{uid}"><path d="{d}"/></clipPath><path d="{d}" fill="{g["body"]}" stroke="none"/>'
                 f'<g clip-path="url(#{uid})" stroke="none"><path d="M-90 -20 L-30 -20 Q-40 90 -26 200 L-90 200 Z" fill="{g["light"]}"/>'
                 f'<path d="M90 -20 L36 -20 Q28 90 38 200 L90 200 Z" fill="{g["shade"]}"/></g><path d="{d}" fill="none" stroke-width="6"/>')
-    return f'<g transform="translate({cx} {cy})">' + ''.join([
+    return f'<g transform="translate({cx} {cy}) scale({s})">' + ''.join([
         metal('g-foot', foot),
         f'<rect x="-62" y="172" width="124" height="14" rx="6" fill="{g["shade"]}" stroke-width="6"/>',
         ''.join(f'<circle cx="{x}" cy="179" r="3" fill="{GLOVE}" stroke="none"/>' for x in (-44, -22, 0, 22, 44)),
@@ -1050,11 +1050,12 @@ def swamp_boots():
         ghost(place(100, 196, 0.42, 6), p['ghost'], 0.4),
         f'<g fill="{m["body"]}" stroke-width="4"><circle cx="312" cy="196" r="7"/><circle cx="330" cy="178" r="5"/><circle cx="160" cy="194" r="6"/><circle cx="144" cy="176" r="4"/></g>',
         f'<path d="M176 222 Q190 212 204 222 M268 224 Q284 214 300 224" fill="none" stroke="{m["light"]}" stroke-width="5"/>',
-        # the boots go over the base; the back one is turned so its opening faces the pawn
+        # the boots go under the base; the back one is turned so its opening faces the pawn
         pawn('p2', p, place(234, 196, 0.42, 6), face_kind='happy', tuft='up', feet='none',
-             arms=arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
+             arms=boot(130, 490, 32) + boot(262, 500, 4)
+             + arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
              + arm('M222 298 C258 290 284 270 296 244', p['body']),
-             front=boot(130, 490, 32) + boot(262, 500, 4) + fist(302, 236)),
+             front=fist(302, 236)),
     ])
 
 
@@ -1079,15 +1080,16 @@ def shield_card():
 def holy_grail():
     """P4 Holy Grail: the Grail alone, large and shining (a Legendary card)."""
     g = PALETTES['C']
-    cx, cy = 204, 34
-    rays = ''.join(f'<path d="M{cx + 90 * math.cos(a):.0f} {cy + 70 + 90 * math.sin(a):.0f} L{cx + 150 * math.cos(a):.0f} {cy + 70 + 150 * math.sin(a):.0f}"/>'
+    cx, cy, s = 204, 52, 0.9  # low enough to leave room for the light over it
+    gy = cy + 70 * s  # the glow's centre
+    rays = ''.join(f'<path d="M{cx + 82 * math.cos(a):.0f} {gy + 82 * math.sin(a):.0f} L{cx + 140 * math.cos(a):.0f} {gy + 140 * math.sin(a):.0f}"/>'
                    for a in (math.radians(d) for d in range(-180, 30, 22)))
     return '\n'.join([
         f'<g fill="none" stroke="{g["light"]}" stroke-width="9">{rays}</g>',
-        f'<circle cx="{cx}" cy="{cy + 70}" r="86" fill="#ffffff" opacity="0.55" stroke="none"/>',
-        f'<path d="M{cx - 40} {cy} L{cx - 64} -10 L{cx + 64} -10 L{cx + 40} {cy} Z" fill="{GLOVE}" opacity="0.75" stroke="none"/>',  # light rising from the cup
-        shadow(cx, 226, 74, 7),
-        big_grail(cx, cy),
+        f'<circle cx="{cx}" cy="{gy:.0f}" r="78" fill="#ffffff" opacity="0.55" stroke="none"/>',
+        f'<path d="M{cx - 36} {cy} L{cx - 60} -10 L{cx + 60} -10 L{cx + 36} {cy} Z" fill="{GLOVE}" opacity="0.75" stroke="none"/>',  # light rising from the cup
+        shadow(cx, 226, 68, 7),
+        big_grail(cx, cy, s),
         sparkle(56, 60, 16), sparkle(350, 44, 12), sparkle(360, 170, 15), sparkle(48, 176, 10, g['light']),
         sparkle(300, 100, 8), sparkle(110, 116, 7),
     ])
