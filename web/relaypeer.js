@@ -7,6 +7,10 @@
 // The server: ?server=ws://127.0.0.1:8787 (server/relay, npm run dev), else in Discord the app's URL
 // Mapping /x/relay on the page's own domain (web/discord.js), else the local one.
 const PREFIX = 'andtargd-csl-v1-' // a room's id in web/net.js is PREFIX + its code
+// The host's word to the server that it is still there (an empty frame), this often. Its pings go to its
+// players only, and a host alone at its table (in the lobby, waiting for friends) would say nothing: the
+// server gives a room whose host is silent for 15 s (STALE_MS) to the next who comes, and the host lost it.
+const KEEP_MS = 5000
 
 /** Where the relay server is for this page. */
 export function relayServer() {
@@ -84,7 +88,12 @@ export function relayPeerClass(server) {
           if (m.x) { this.links.delete(m.c); l.end() } else if ('d' in m) l.emit('data', m.d)
         }
       }
+      const keep = setInterval(() => {
+        if (this.ws !== ws) { clearInterval(keep); return }
+        if (opened && !this.frozen && ws.readyState === 1) ws.send('{}')
+      }, KEEP_MS)
       ws.onclose = () => {
+        clearInterval(keep)
         if (this.ws !== ws) return
         this.ws = null
         for (const l of this.links.values()) l.end()
