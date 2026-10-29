@@ -8,7 +8,7 @@ import { relayServer } from './relaypeer.js'
 import { safeName } from './names.js'
 import { onlineControl, shareRoom } from './online.js'
 import { editText } from './textfield.js'
-import { platform, hooks, mute, roomLink, roomLinks, ready } from './platform.js'
+import { platform, hooks, mute, roomLink, roomLinks, siteInvites, ready } from './platform.js'
 import { every } from './clock.js'
 
 const q = new URLSearchParams(location.search)
@@ -219,6 +219,9 @@ const web = {
   get channel() { return channel },
   enterChannel() { return channel ? online.enter(channel) : Promise.resolve(false) },
   get links() { return roomLinks() }, // whether rooms get links here (else only codes)
+  // the site's own invite to the player's room (Discord's dialog: friends to the voice channel), where it has one
+  get invites() { return siteInvites() },
+  inviteFriends() { hooks.openInvite() },
   // the game's Online screen: how an attempt goes (null | { busy } | { error, detail, kind }), and a room's link that brought the player
   get status() { return online.status },
   get invited() { return online.invited },

@@ -708,6 +708,27 @@ class App {
     if (!playing && this.table?.kind === 'solo' && this.view.state?.ph === 'over') this.finished = true
     this.hook(playing ? 'gameplayStart' : 'gameplayStop')
   }
+  /** Tells the site what the player is doing (Discord shows it under their name): the mode and board, the table's players, since when this game. */
+  syncPresence() {
+    if (!this.p0.web) return
+    const st = this.myStatus(), s = this.view.state
+    let p = { details: T.presenceMenu }
+    if (st === 'solo' && s) p = { details: T.presenceGame(s.mode, s.n || 100), state: s.ph === 'over' ? T.presenceOver : T.presenceBots }
+    else if (st === 'lobby' || st === 'shared') {
+      const lob = this.lobby(), humans = lob.seats.filter(x => x && !x.b).length
+      const state = st === 'lobby' ? T.presenceLobby : s?.ph === 'over' ? T.presenceOver : this.watching() ? T.presenceWatching : T.presencePlaying
+      p = { details: T.presenceGame(s && st === 'shared' ? s.mode : lob.mode, (s && st === 'shared' ? s.n : lob.size) || 100), state, players: Math.max(1, humans), max: 6 }
+    }
+    // the game's time: from its start, the same game until the table changes (a rematch is a new one)
+    const live = st === 'solo' || st === 'shared'
+    if (!live) this.presenceGame = null
+    else if (this.presenceGame !== this.table) { this.presenceGame = this.table; this.presenceSince = Date.now() }
+    if (live && s?.ph !== 'over') p.since = this.presenceSince
+    const key = JSON.stringify(p)
+    if (key === this.presenceSent) return
+    this.presenceSent = key
+    this.hook('presence', p)
+  }
   /** Between two games here the site may show something (an ad); no input until it is done, then `then`. A shared game's rematch does not wait: everyone at the table would. */
   betweenGames(then) {
     const ad = this.hook('midgameAd')
@@ -1097,6 +1118,7 @@ class App {
     this.table?.update(dt)
     this.tut?.update(dt)
     this.syncGameplay()
+    this.syncPresence()
     const trayOn = this.view.trayVisible > 0
     if (trayOn !== this.trayWas) { this.trayWas = trayOn; this.ui.dirty = true }
     if (this.turnLeft != null && Math.ceil(this.turnLeft) !== this.turnShown) { this.turnShown = Math.ceil(this.turnLeft); this.ui.dirty = true }

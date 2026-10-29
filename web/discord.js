@@ -20,6 +20,12 @@
 //
 // Links out of the game (the privacy policy, the terms) go through openExternalLink: the activity's
 // sandbox opens no windows of its own.
+//
+// What the player is doing shows under their name in Discord (presence → setActivity: the mode and board,
+// the table's players of 6, the game's time), which needs the rpc.activities.write permission of the same
+// sign-in: whoever said no keeps Discord's own "Playing" line. Invite (openInviteDialog, no permission)
+// asks friends to the voice channel, and with it to this instance: they sit at the same table. It is there
+// in a server's channel only (no guildId: a call in DMs, where friends are added to the call itself).
 
 // The outside servers and the paths they are mapped to. Each one needs the same mapping in the Portal.
 // The rooms go through the relay server (the profile's `server`; web/relaypeer.js dials /x/relay on the
@@ -36,6 +42,8 @@ export const MAPPINGS = [
 ]
 const READY_MS = 10000
 const API_MS = 10000 // the token and authenticate(); authorize() waits for the player as long as it takes
+const PRESENCE_MS = 4000 // Discord takes 5 setActivity calls in 20 s: one in 4 s at most, the latest one
+const SCOPES = ['identify', 'rpc.activities.write'] // the name and avatar; the status under the name
 const ABC = 'ABCDEFGHJKMNPRSTUVWXYZ23456789' // the room codes' letters (web/net.js)
 
 export let sdk = null
@@ -77,7 +85,10 @@ const late = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeou
 function mock(id) {
   // its links say where they go in the console, and open in a new tab as Discord would in the player's browser
   const openExternalLink = async ({ url }) => { console.info('[discord] mock openExternalLink', url); const w = open(url, '_blank'); if (w) w.opener = null; return { opened: true } }
-  return { instanceId: id, platform: 'desktop', channelId: null, guildId: null, mock: true, ready: async () => {}, commands: { openExternalLink } }
+  // the status and the invite dialog only say in the console what Discord would show
+  const setActivity = async ({ activity }) => { console.info('[discord] mock setActivity', activity); return activity }
+  const openInviteDialog = async () => { console.info('[discord] mock openInviteDialog') }
+  return { instanceId: id, platform: 'desktop', channelId: null, guildId: null, mock: true, ready: async () => {}, commands: { openExternalLink, setActivity, openInviteDialog } }
 }
 
 /** The mock's user (?mockUser=Ann): an id of the name's own (as Discord's are: digits), Discord's default avatar for it. */
@@ -90,12 +101,38 @@ function mockUser(name) {
 
 /** The player signs in (the first time Discord asks them): { name, id, picture }, or it throws (they said no, no server). */
 async function signIn(clientId) {
-  const { code } = await sdk.commands.authorize({ client_id: clientId, response_type: 'code', state: '', prompt: 'none', scope: ['identify'] })
+  const { code } = await sdk.commands.authorize({ client_id: clientId, response_type: 'code', state: '', prompt: 'none', scope: SCOPES })
   const r = await late(fetch(`https://${RELAY_HOST}/api/token`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, client_id: clientId }) }), API_MS, '/api/token')
   const d = await r.json().catch(() => null)
   if (!r.ok || !d?.access_token) throw new Error(`/api/token: ${r.status} ${d?.error || ''}`)
   const { user } = await late(sdk.commands.authenticate({ access_token: d.access_token }), API_MS, 'authenticate()')
   return { name: user.global_name || user.username, id: String(user.id), picture: avatarUrl(user) }
+}
+
+/**
+ * The player's status in Discord: the latest presence (web/platform.js) as an activity, one call in
+ * PRESENCE_MS at most. Only for a player who signed in (the permission comes with it); a failed call is
+ * said once in the console, and the next change tries again.
+ */
+function presenceSender(signedIn) {
+  let next = null, timer = 0, last = 0, failed = false
+  const send = async () => {
+    timer = 0; last = Date.now()
+    const p = next
+    if (!p || !(await signedIn())) return
+    const activity = { type: 0, details: p.details }
+    if (p.state) activity.state = p.state
+    if (p.players > 0 && p.max >= p.players) activity.party = { id: String(instanceId), size: [p.players, p.max] }
+    if (p.since > 0) activity.timestamps = { start: p.since }
+    try { await sdk.commands.setActivity({ activity }); failed = false } catch (e) {
+      if (!failed) console.warn('[discord] no status in Discord:', e?.message || e)
+      failed = true
+    }
+  }
+  return p => {
+    next = p
+    if (!timer) timer = setTimeout(send, Math.max(0, last + PRESENCE_MS - Date.now()))
+  }
 }
 
 /** Starts the SDK and gives web/platform.js the hooks it answers; resolves with what runs ('discord' or 'mock'), rejects outside Discord. */
@@ -122,10 +159,15 @@ export async function start(provide) {
   const code = roomCode(instanceId)
   // (asked once: the game asks before it goes to the table)
   let signedIn = null
+  const getUser = () => (signedIn ||= user().catch(e => { console.warn('[discord] no sign-in, playing without a name:', e?.message || e); return null }))
+  const invite = () => { sdk.commands.openInviteDialog().catch(e => console.warn('[discord] no invite dialog:', e?.message || e)) }
   provide({
     instantMultiplayer: () => code,
-    getUser: () => (signedIn ||= user().catch(e => { console.warn('[discord] no sign-in, playing without a name:', e?.message || e); return null })),
+    getUser,
     pictureOk,
+    presence: presenceSender(getUser),
+    // (in a server's voice channel: a call in DMs has none)
+    ...(sdk.guildId || sdk.mock ? { openInvite: invite } : {}),
     // the iframe's sandbox opens no windows: Discord asks the player and opens the page in their browser
     openLink: url => { sdk.commands.openExternalLink({ url }).catch(e => console.warn('[discord] the link did not open:', url, e?.message || e)) },
   })

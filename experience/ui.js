@@ -1458,6 +1458,8 @@ export class UI {
       if (!mine) this.button('sit', T.takeSeat, x + mw - sw, y, sw, 28 * u, () => app.lobbyCmd({ t: 'sit' }), { disabled: n >= 6, size: 13 })
       else this.button('stand', T.leaveSeat, x + mw - sw, y, sw, 28 * u, () => app.lobbyCmd({ t: 'stand' }), { size: 13 })
     }
+    // the channel's table: friends come by the site's own invite to the voice channel (Discord's), and sit here with it
+    else if (channel && this.p0.web.invites && humans < 6) this.button('dcinvite', T.inviteFriends, x + mw - 140 * u, y, 140 * u, 28 * u, () => this.p0.web.inviteFriends(), { size: 13, primary: humans < 2, color: '#2d3a6b' })
     y += 32 * u
     const sw = (mw - (cols - 1) * 12 * u) / cols
     for (let i = 0; i < 6; i++) this.seatRow(i, seats[i], x + (i % cols) * (sw + 12 * u), y + Math.floor(i / cols) * (rowH + rowGap), sw, rowH, quick, setUp)

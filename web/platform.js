@@ -6,7 +6,8 @@
 // links, the room the player is in, instant multiplayer). No ads: midgameAd stays as it is.
 //
 // On Discord (an Activity in a voice channel) web/discord.js does: the channel's room, which everyone
-// there sits at at once (instantMultiplayer gives its code), and the player's name and avatar (getUser).
+// there sits at at once (instantMultiplayer gives its code), the player's name and avatar (getUser), their
+// status under their name (presence) and Discord's invite to the channel (openInvite).
 //
 // The site: window.CSL_PLATFORM (set by the build's index.html), else ?platform=crazygames or
 // ?platform=discord (to try it locally), else 'pages'. With ?platform=… or ?debug the profile and
@@ -47,6 +48,7 @@ export const mute = {
 
 // what an SDK will do; until then nothing (mute and unmute already work)
 const noLink = () => null
+const noInvite = () => false
 const impl = {
   loadingStart() {}, // the game starts loading
   loadingStop() {}, // the menu is up
@@ -81,6 +83,14 @@ const impl = {
   roomClosed() {},
   /** onInvite(fn): fn(code) when the site brings the player to a room while the game is open (a friend's invite). */
   onInvite() {},
+  /** Asks the player's friends on the site to their room: the site's own invite dialog (Discord's). Only where siteInvites(). */
+  openInvite: noInvite,
+  /**
+   * What the player is doing, for the site's own status of them (Discord's, under their name): { details, state,
+   * players, max, since }, all but details optional (players of max at their table; since: when the game began,
+   * ms). Again whenever it changes; the site may show only the latest of quick changes.
+   */
+  presence() {},
   /** The player's language on the site, or null (the game is in English only for now). */
   locale: () => null,
   /** Opens a page (the privacy policy, the terms) beside the game: a new tab here, the player's browser in Discord. */
@@ -113,6 +123,8 @@ export function roomLink(code) {
 }
 /** Whether rooms get links at all here (for texts shown before there is a room). */
 export const roomLinks = () => platform.allowLinks || impl.inviteLink !== noLink
+/** Whether the site has an invite dialog of its own (hooks.openInvite): Discord's, to the voice channel. */
+export const siteInvites = () => impl.openInvite !== noInvite
 
 // ---------- CrazyGames: the SDK v3 (https://docs.crazygames.com/sdk/game/) ----------
 // The build's index.html loads it before the game (tools/build_cg.py); ?platform=crazygames on a page

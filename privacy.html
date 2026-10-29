@@ -41,7 +41,7 @@
   <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
   <h1>Privacy</h1>
   <p class="game">Cards, Snakes &amp; Ladders</p>
-  <p class="date">Last updated: 24 October 2026</p>
+  <p class="date">Last updated: 29 October 2026</p>
 
   <div class="short">
     <ul>
@@ -75,7 +75,9 @@
   <h2>Playing in Discord</h2>
   <p>In Discord the game runs as an Activity in a voice channel, and everyone who starts it there plays at one table.</p>
   <ul>
-    <li><b>What Discord gives the game.</b> The ID of the activity's session in your channel (it picks the table), and whether you play on a computer or a phone. When you allow it (Discord asks you once), also your <b>Discord user ID, username, display name and avatar</b> (the <code>identify</code> permission: no email, no friends list, no servers, no messages).</li>
+    <li><b>What Discord gives the game.</b> The ID of the activity's session in your channel (it picks the table), and whether you play on a computer or a phone. When you allow it (Discord asks you once), also your <b>Discord user ID, username, display name and avatar</b> (the <code>identify</code> permission: no email, no friends list, no servers, no messages), and the right to set your game status in Discord (the <code>rpc.activities.write</code> permission, below).</li>
+    <li><b>Your status in Discord.</b> While you play, the game tells Discord what to show under your name: the mode and board ("Champion · 100 cells"), whether you are waiting, playing or watching, how many players are at your table and since when the game is on. Discord shows it to the people who can see your activity, under your Discord settings. It says nothing about your moves or the other players' names.</li>
+    <li><b>Invite Friends</b> opens Discord's own invite window: the game does not see whom you invite.</li>
     <li><b>What the others at your table see.</b> Your display name, your avatar and your moves. Your user ID goes along (it is part of your avatar's address), and the player who holds the table uses it only to give you your own seat back if your connection drops.</li>
     <li><b>Our relay server.</b> In Discord the table's messages go through a small server of ours on Cloudflare Workers (<code>csl-relay.csl-relay.workers.dev</code>) instead of direct connections or the public servers above. It passes each message on to the other players and keeps nothing: no names, IDs, moves or logs of its own. A table on it is gone once the last player leaves. Cloudflare sees your IP address and may keep its own request records under its privacy policy.</li>
     <li><b>Signing in.</b> To read your name, your device sends Discord's one-time code to the relay server, which trades it with Discord for an access token and hands the token straight back. The server does not keep the token or use it for anything else.</li>
