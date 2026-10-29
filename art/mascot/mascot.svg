@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 500" width="400" height="500">
+  <title>Фишка — маскот игры</title>
+  <!--
+    Палитра (для перекраски под цвет игрока — замените эти значения):
+      тело        #e5483a   тень #b3302c   блик #f6876a
+      хохолок     #f7c548   тень #d99a22
+      перчатки    #fff4dc   обводка #2b2233
+    Фильтр #drawn даёт «рисованную» дрожь контура и зерно, как на референсе.
+    Уберите filter="url(#drawn)" у группы #mascot — получится чистый плоский вектор.
+  -->
+  <defs>
+    <filter id="drawn" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="4" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="3.5" xChannelSelector="R" yChannelSelector="G" result="wobbly"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" seed="11" result="noise"/>
+      <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0.17  0 0 0 0 0.13  0 0 0 0 0.2  -2 0 0 0 0.85" result="specks"/>
+      <feComposite in="specks" in2="wobbly" operator="in" result="grain"/>
+      <feMerge><feMergeNode in="wobbly"/><feMergeNode in="grain"/></feMerge>
+    </filter>
+    <clipPath id="clip-body"><path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z"/></clipPath>
+    <clipPath id="clip-base"><path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z"/></clipPath>
+    <clipPath id="clip-collar"><ellipse cx="200" cy="258" rx="58" ry="15"/></clipPath>
+    <clipPath id="clip-head"><circle cx="200" cy="168" r="84"/></clipPath>
+    <clipPath id="clip-mouth"><path d="M180 196 Q205 204 230 194 Q228 228 205 229 Q183 229 180 196 Z"/></clipPath>
+  </defs>
+
+  <ellipse cx="200" cy="466" rx="105" ry="10" fill="#2b2233" opacity="0.18"/>
+
+  <g id="mascot" filter="url(#drawn)" stroke="#2b2233" stroke-linejoin="round" stroke-linecap="round">
+
+    <!-- ножки, выглядывают из-под подставки -->
+    <g id="feet" fill="#5c6677" stroke-width="6">
+      <ellipse cx="166" cy="455" rx="24" ry="12"/>
+      <ellipse cx="234" cy="455" rx="24" ry="12"/>
+    </g>
+
+    <!-- левая рука машет -->
+    <g id="arm-left">
+      <path d="M176 300 C136 302 108 282 100 242" fill="none" stroke-width="21"/>
+      <path d="M176 300 C136 302 108 282 100 242" fill="none" stroke="#e5483a" stroke-width="8"/>
+      <ellipse cx="117" cy="232" rx="9" ry="6" transform="rotate(-35 117 232)" fill="#fff4dc" stroke-width="5"/>
+      <ellipse cx="98" cy="221" rx="17" ry="20" fill="#fff4dc" stroke-width="6"/>
+      <path d="M92 204 L92 213 M103 203 L103 212" fill="none" stroke-width="4"/>
+      <path d="M66 214 Q60 200 66 186 M54 222 Q44 202 52 180" fill="none" stroke-width="5"/>
+    </g>
+
+    <!-- правая рука держит кубик -->
+    <g id="arm-right">
+      <path d="M224 300 C262 304 290 298 306 280" fill="none" stroke-width="21"/>
+      <path d="M224 300 C262 304 290 298 306 280" fill="none" stroke="#e5483a" stroke-width="8"/>
+      <g id="die" stroke-width="5">
+        <path d="M310 212 L336 225 L310 238 L284 225 Z" fill="#fffaf0"/>
+        <path d="M284 225 L310 238 L310 268 L284 255 Z" fill="#f1dfb4"/>
+        <path d="M310 238 L336 225 L336 255 L310 268 Z" fill="#dcc08a"/>
+        <g fill="#2b2233" stroke="none">
+          <ellipse cx="310" cy="225" rx="5.5" ry="3.2" fill="#e5483a"/>
+          <ellipse cx="290" cy="236" rx="3" ry="4"/>
+          <ellipse cx="304" cy="257" rx="3" ry="4"/>
+          <ellipse cx="316" cy="258" rx="3" ry="4"/>
+          <ellipse cx="323" cy="246.5" rx="3" ry="4"/>
+          <ellipse cx="330" cy="235" rx="3" ry="4"/>
+        </g>
+      </g>
+      <ellipse cx="312" cy="273" rx="20" ry="12" fill="#fff4dc" stroke-width="6"/>
+      <ellipse cx="292" cy="262" rx="8" ry="6" transform="rotate(30 292 262)" fill="#fff4dc" stroke-width="5"/>
+    </g>
+
+    <!-- корпус фишки -->
+    <g id="body">
+      <path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z" fill="#e5483a" stroke="none"/>
+      <g clip-path="url(#clip-body)" stroke="none">
+        <path d="M214 262 C220 320 238 370 248 410 L300 410 L300 262 Z" fill="#b3302c"/>
+        <path d="M181 276 C178 320 162 364 150 400 L164 400 C174 366 188 322 191 276 Z" fill="#f6876a"/>
+      </g>
+      <path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z" fill="none" stroke-width="7"/>
+    </g>
+
+    <!-- подставка -->
+    <g id="base">
+      <path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z" fill="#e5483a" stroke="none"/>
+      <g clip-path="url(#clip-base)" stroke="none">
+        <rect x="80" y="430" width="240" height="30" fill="#b3302c"/>
+        <rect x="238" y="400" width="80" height="60" fill="#b3302c"/>
+        <path d="M132 409 L215 409" stroke="#f6876a" stroke-width="5"/>
+      </g>
+      <path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z" fill="none" stroke-width="7"/>
+    </g>
+
+    <!-- воротничок -->
+    <g id="collar">
+      <ellipse cx="200" cy="258" rx="58" ry="15" fill="#e5483a" stroke="none"/>
+      <path d="M140 262 Q200 290 260 262 L260 280 L140 280 Z" fill="#b3302c" stroke="none" clip-path="url(#clip-collar)"/>
+      <ellipse cx="200" cy="258" rx="58" ry="15" fill="none" stroke-width="7"/>
+    </g>
+
+    <!-- хохолок-искра -->
+    <g id="tuft">
+      <path d="M184 96 C176 72 184 56 197 50 C195 63 199 71 204 76 C208 58 220 46 236 48 C223 59 221 76 222 96 Z" fill="#f7c548" stroke-width="6"/>
+      <path d="M208 92 C208 80 212 70 220 62" fill="none" stroke="#d99a22" stroke-width="5"/>
+    </g>
+
+    <!-- голова -->
+    <g id="head">
+      <circle cx="200" cy="168" r="84" fill="#b3302c" stroke="none"/>
+      <g clip-path="url(#clip-head)" stroke="none">
+        <circle cx="190" cy="158" r="80" fill="#e5483a"/>
+        <ellipse cx="156" cy="116" rx="24" ry="10" transform="rotate(-38 156 116)" fill="#f6876a"/>
+        <ellipse cx="135" cy="146" rx="5" ry="7" fill="#f6876a"/>
+      </g>
+      <circle cx="200" cy="168" r="84" fill="none" stroke-width="7"/>
+    </g>
+
+    <!-- лицо -->
+    <g id="face">
+      <ellipse cx="148" cy="197" rx="13" ry="8" fill="#f49aa0" stroke="none"/>
+      <ellipse cx="258" cy="193" rx="13" ry="8" fill="#f49aa0" stroke="none"/>
+
+      <path d="M155 126 Q170 116 186 123" fill="none" stroke-width="6"/>
+      <path d="M215 120 Q232 110 249 119" fill="none" stroke-width="6"/>
+
+      <ellipse cx="172" cy="158" rx="19" ry="24" fill="#ffffff" stroke-width="6"/>
+      <ellipse cx="230" cy="156" rx="21" ry="26" fill="#ffffff" stroke-width="6"/>
+      <circle cx="179" cy="162" r="9" fill="#2b2233" stroke="none"/>
+      <circle cx="237" cy="160" r="10" fill="#2b2233" stroke="none"/>
+      <circle cx="182" cy="158" r="3" fill="#ffffff" stroke="none"/>
+      <circle cx="240" cy="156" r="3.4" fill="#ffffff" stroke="none"/>
+
+      <g id="mouth">
+        <path d="M180 196 Q205 204 230 194 Q228 228 205 229 Q183 229 180 196 Z" fill="#3a1f2b" stroke="none"/>
+        <g clip-path="url(#clip-mouth)" stroke="none">
+          <path d="M178 194 Q205 204 232 192 L232 204 Q205 214 178 206 Z" fill="#ffffff"/>
+          <ellipse cx="207" cy="230" rx="17" ry="11" fill="#f07a8a"/>
+        </g>
+        <path d="M180 196 Q205 204 230 194 Q228 228 205 229 Q183 229 180 196 Z" fill="none" stroke-width="6"/>
+      </g>
+    </g>
+  </g>
+</svg>
