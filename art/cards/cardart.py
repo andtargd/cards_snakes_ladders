@@ -141,13 +141,31 @@ def face(kind, uid):
                 + '<path d="M156 164 Q172 146 188 164" fill="none" stroke-width="7"/>'
                 + _eye(232, 154, 21, 25, 240, 158, 9.5)
                 + _grin(uid, 'M176 190 Q208 204 240 186 Q238 228 210 229 Q182 229 176 190 Z'))
+    if kind == 'neutral':  # calm: level brows, a small closed smile
+        return (_cheeks((148, 197), (258, 193))
+                + '<path d="M156 124 Q170 118 186 123 M216 119 Q232 113 248 118" fill="none" stroke-width="6"/>'
+                + _eye(172, 158, 19, 24, 178, 160, 9) + _eye(230, 156, 21, 26, 236, 158, 10)
+                + '<path d="M188 204 Q206 212 224 202" fill="none" stroke-width="6"/>')
+    if kind == 'dizzy':  # spiral eyes, a wavy mouth
+        def spiral(cx, cy):
+            return (f'<path d="M{cx} {cy} A2.5 2.5 0 0 1 {cx + 5} {cy} A5 5 0 0 1 {cx - 5} {cy} A7.5 7.5 0 0 1 {cx + 10} {cy}'
+                    f' A10 10 0 0 1 {cx - 10} {cy} A12.5 12.5 0 0 1 {cx + 15} {cy}" fill="none" stroke-width="4"/>')
+        return (_cheeks((148, 200), (258, 196))
+                + '<path d="M152 118 Q168 110 186 120 M216 116 Q234 106 252 116" fill="none" stroke-width="6"/>'
+                + '<ellipse cx="172" cy="156" rx="19" ry="24" fill="#ffffff" stroke-width="6"/>' + spiral(170, 156)
+                + '<ellipse cx="230" cy="154" rx="21" ry="26" fill="#ffffff" stroke-width="6"/>' + spiral(228, 154)
+                + '<path d="M178 208 Q188 196 198 208 Q208 220 218 208 Q228 196 236 206" fill="none" stroke-width="6"/>')
     raise ValueError(kind)
 
 
 def pawn(uid, pal, transform, *, face_kind='happy', look='right', tuft='up', feet='stand', arms='', front=''):
-    """The pawn. `arms` go behind the body (start them inside it), `front` over everything (a hand in front)."""
+    """The pawn (tuft=None: bald, as other players are). `arms` go behind the body (start them inside it), `front` over everything (a hand in front)."""
     p = pal
-    tuft_d, tuft_line = TUFTS[tuft]
+    tuft_svg = ''
+    if tuft:
+        tuft_d, tuft_line = TUFTS[tuft]
+        tuft_svg = (f'<path d="{tuft_d}" fill="{TUFT_FILL}" stroke-width="6"/>'
+                    f'<path d="{tuft_line}" fill="none" stroke="{TUFT_LINE}" stroke-width="5"/>')
     feet_svg = ''.join(f'<ellipse cx="{x}" cy="{y}" rx="{rx}" ry="11" transform="rotate({r} {x} {y})"/>' for x, y, rx, r in FEET[feet])
     the_face = face(face_kind, uid)
     if look == 'left':
@@ -175,8 +193,7 @@ def pawn(uid, pal, transform, *, face_kind='happy', look='right', tuft='up', fee
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="{p['body']}" stroke="none"/>
   <path d="M140 262 Q200 290 260 262 L260 280 L140 280 Z" fill="{p['shade']}" stroke="none" clip-path="url(#{uid}-collar)"/>
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="none"/>
-  <path d="{tuft_d}" fill="{TUFT_FILL}" stroke-width="6"/>
-  <path d="{tuft_line}" fill="none" stroke="{TUFT_LINE}" stroke-width="5"/>
+  {tuft_svg}
   <circle cx="200" cy="168" r="84" fill="{p['shade']}" stroke="none"/>
   <g clip-path="url(#{uid}-head)" stroke="none">
     <circle cx="190" cy="158" r="80" fill="{p['body']}"/>
@@ -213,6 +230,20 @@ def shadow(cx, cy, rx, ry=6):
 def drop(x, y, rot=0):
     """A sweat drop, (x, y) its tip."""
     return f'<path d="M{x} {y} Q{x - 10} {y + 16} {x} {y + 26} Q{x + 10} {y + 16} {x} {y} Z" fill="#ffffff" stroke-width="5" transform="rotate({rot} {x} {y})"/>'
+
+
+def arrowhead(x, y, angle, fill=INK):
+    """A solid arrowhead with its tip at (x, y), pointing `angle` degrees (0 right, 90 down)."""
+    return (f'<path d="M{x} {y} L{x - 24} {y - 13} L{x - 18} {y} L{x - 24} {y + 13} Z" fill="{fill}" stroke-width="4"'
+            f' transform="rotate({angle} {x} {y})"/>')
+
+
+def die(cx, cy, rot=0, s=1):
+    """A die showing three, centre (cx, cy), s times 44 px across."""
+    pips = ''.join(f'<circle cx="{cx + dx * s}" cy="{cy + dy * s}" r="{4.5 * s:g}" fill="{INK}" stroke="none"/>'
+                   for dx, dy in ((-11, -11), (0, 0), (11, 11)))
+    return (f'<g transform="rotate({rot} {cx} {cy})"><rect x="{cx - 22 * s}" y="{cy - 22 * s}" width="{44 * s}" height="{44 * s}"'
+            f' rx="{9 * s}" fill="#ffffff" stroke-width="6"/>{pips}</g>')
 
 
 def picture(cid, title, cat, seed, content):
@@ -267,7 +298,7 @@ def setback():
         ghost(place(330, 230, 0.46, 0), p['ghost'], 0.45),
         ghost(place(278, 230, 0.46, -5), p['ghost'], 0.7),
         ghost(place(226, 230, 0.46, -10), p['ghost'], 1, 'forward'),
-        dust((104, 232, 9), (84, 226, 12), (64, 233, 7)),
+        dust((308, 233, 8), (330, 228, 12), (354, 234, 8)),  # where it stood before the push
         pawn('m2', p, place(152, 228, 0.46, -14), face_kind='shock', tuft='forward', feet='skid',
              arms=arm('M178 300 C150 290 130 262 124 232', p['body']) + glove(120, 214, -20)
              + arm('M222 298 C262 290 290 262 300 232', p['body']) + glove(302, 214, 20),
@@ -286,20 +317,76 @@ def tailgate():
         dust((44, 224, 8), (26, 218, 10), (40, 206, 5)),
         ghost(place(86, 172, 0.4, -10), p['ghost'], 0.55, 'back'),
         ghost(place(122, 163, 0.4, 4), p['ghost'], 1, 'back'),
-        pawn('m5b', other('M'), place(330, 240, 0.42, 0), face_kind='shock', look='left', feet='stand',
+        pawn('m5b', other('M'), place(330, 240, 0.42, 0), face_kind='shock', look='left', tuft=None,
              arms=arm('M176 300 C150 312 138 330 134 352', other('M')['body']) + glove(132, 366, 180)
              + arm('M224 300 C250 312 262 330 266 352', other('M')['body']) + glove(268, 366, 180)),
         pawn('m5', p, place(161, 166, 0.4, 20), face_kind='sly', tuft='back', feet='tuck',
-             arms=arm('M178 300 C150 290 128 266 120 236', p['body']) + glove(118, 220, -15)
+             arms=arm('M178 300 C140 298 104 282 84 256', p['body']) + glove(74, 240, -40)
              + arm('M222 298 C262 300 290 300 314 310', p['body']),
              front=glove(326, 312, 100)),
+    ])
+
+
+def swap_places():
+    """M3 Swap Places: the pawn and another player trade cells; two arrows cross between them."""
+    p, o = PALETTES['M'], other('M')
+    return '\n'.join([
+        shadow(104, 240, 40),
+        shadow(304, 240, 40),
+        f'<path d="M146 86 Q204 16 254 78" fill="none" stroke="{p["body"]}" stroke-width="7" stroke-dasharray="12 10"/>',
+        arrowhead(262, 90, 55, p['body']),
+        f'<path d="M262 178 Q210 238 166 190" fill="none" stroke="{p["shade"]}" stroke-width="7" stroke-dasharray="12 10"/>',
+        arrowhead(160, 182, 230, p['shade']),
+        pawn('m3b', o, place(304, 238, 0.42, 0), face_kind='dizzy', look='left', tuft=None,
+             arms=arm('M178 300 C150 312 138 330 134 352', o['body']) + glove(132, 366, 180)
+             + arm('M222 298 C262 290 290 262 300 232', o['body']) + glove(302, 214, 20)),
+        pawn('m3', p, place(104, 238, 0.42, 4), face_kind='sly',
+             arms=arm('M178 300 C150 290 130 262 124 232', p['body']) + glove(120, 214, -20)
+             + arm('M222 300 C236 318 242 336 244 354', p['body']) + glove(244, 368, 180)),
+    ])
+
+
+def double_move():
+    """M4 Double Move: still running, the pawn tosses the die up for another roll."""
+    p = PALETTES['M']
+    return '\n'.join([
+        shadow(212, 245, 44),
+        ghost(place(110, 220, 0.46, 14), p['ghost'], 0.6, 'back'),
+        lines((30, 120, 84), (16, 168, 64), (36, 208, 80)),
+        dust((140, 232, 7), (120, 226, 10), (100, 232, 6)),
+        '<path d="M282 92 Q296 46 324 50" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        '<path d="M372 36 L384 28 M378 64 L392 64 M364 90 L374 100" fill="none" stroke-width="5"/>',
+        die(344, 62, 18, 0.95),
+        pawn('m4', p, place(204, 222, 0.46, 12), face_kind='happy', tuft='back', feet='run',
+             arms=arm('M178 300 C140 300 112 318 98 346', p['body']) + fist(94, 354, 16)
+             + arm('M222 298 C262 282 288 240 296 196', p['body']),
+             front=glove(298, 176, 15)),
+    ])
+
+
+def rewind():
+    """M6 Rewind: back on the spot where the turn began, calm (it can be a gift); the rewind sign between."""
+    p = PALETTES['M']
+    return '\n'.join([
+        shadow(110, 228, 42),
+        f'<ellipse cx="110" cy="226" rx="46" ry="8" fill="none" stroke="{p["shade"]}" stroke-width="4" stroke-dasharray="6 7"/>',
+        ghost(place(322, 226, 0.44, 0), p['ghost'], 0.55),
+        '<path d="M300 62 Q228 -12 162 44" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        arrowhead(156, 50, 140),
+        f'<path d="M248 126 L210 150 L248 174 Z M210 126 L172 150 L210 174 Z" fill="{p["body"]}" stroke-width="6"/>',
+        pawn('m6', p, place(110, 224, 0.42, 0), face_kind='neutral',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 300 C250 312 262 330 266 352', p['body']) + glove(268, 366, 180)),
     ])
 
 
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
+    'M3': ('Swap Places', 'M', 11, swap_places),
+    'M4': ('Double Move', 'M', 13, double_move),
     'M5': ('Tailgate', 'M', 9, tailgate),
+    'M6': ('Rewind', 'M', 15, rewind),
 }
 
 

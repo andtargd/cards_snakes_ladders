@@ -43,8 +43,7 @@
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="#e8743b" stroke="none"/>
   <path d="M140 262 Q200 290 260 262 L260 280 L140 280 Z" fill="#b35d39" stroke="none" clip-path="url(#m1-collar)"/>
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="none"/>
-  <path d="M212 96 C184 68 136 64 84 80 C122 84 150 92 164 100 C136 100 104 108 76 126 C124 120 166 116 198 112 Z" fill="#f7c548" stroke-width="6"/>
-  <path d="M196 94 C170 82 142 80 114 84" fill="none" stroke="#d99a22" stroke-width="5"/>
+  <path d="M212 96 C184 68 136 64 84 80 C122 84 150 92 164 100 C136 100 104 108 76 126 C124 120 166 116 198 112 Z" fill="#f7c548" stroke-width="6"/><path d="M196 94 C170 82 142 80 114 84" fill="none" stroke="#d99a22" stroke-width="5"/>
   <circle cx="200" cy="168" r="84" fill="#b35d39" stroke="none"/>
   <g clip-path="url(#m1-head)" stroke="none">
     <circle cx="190" cy="158" r="80" fill="#e8743b"/>

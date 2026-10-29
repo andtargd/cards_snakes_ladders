@@ -19,7 +19,7 @@
 <g transform="translate(330 230) scale(0.46) rotate(0) translate(-200 -450)" fill="#f6c7b1" opacity="0.45" stroke="none"><path d="M184 96 C176 72 184 56 197 50 C195 63 199 71 204 76 C208 58 220 46 236 48 C223 59 221 76 222 96 Z"/><path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z"/><path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z"/><ellipse cx="200" cy="258" rx="58" ry="15"/><circle cx="200" cy="168" r="84"/></g>
 <g transform="translate(278 230) scale(0.46) rotate(-5) translate(-200 -450)" fill="#f6c7b1" opacity="0.7" stroke="none"><path d="M184 96 C176 72 184 56 197 50 C195 63 199 71 204 76 C208 58 220 46 236 48 C223 59 221 76 222 96 Z"/><path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z"/><path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z"/><ellipse cx="200" cy="258" rx="58" ry="15"/><circle cx="200" cy="168" r="84"/></g>
 <g transform="translate(226 230) scale(0.46) rotate(-10) translate(-200 -450)" fill="#f6c7b1" opacity="1" stroke="none"><path d="M188 96 C216 68 264 64 316 80 C278 84 250 92 236 100 C264 100 296 108 324 126 C276 120 234 116 202 112 Z"/><path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z"/><path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z"/><ellipse cx="200" cy="258" rx="58" ry="15"/><circle cx="200" cy="168" r="84"/></g>
-<g fill="#ffffff" stroke-width="4"><circle cx="104" cy="232" r="9"/><circle cx="84" cy="226" r="12"/><circle cx="64" cy="233" r="7"/></g>
+<g fill="#ffffff" stroke-width="4"><circle cx="308" cy="233" r="8"/><circle cx="330" cy="228" r="12"/><circle cx="354" cy="234" r="8"/></g>
 <g transform="translate(152 228) scale(0.46) rotate(-14) translate(-200 -450)" stroke-width="7">
   <clipPath id="m2-body"><path d="M168 262 C165 318 142 370 128 410 L272 410 C258 370 235 318 232 262 Z"/></clipPath>
   <clipPath id="m2-base"><path d="M118 412 Q118 402 130 402 L270 402 Q282 402 282 412 L285 438 Q287 450 273 450 L127 450 Q113 450 115 438 Z"/></clipPath>
@@ -43,8 +43,7 @@
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="#e8743b" stroke="none"/>
   <path d="M140 262 Q200 290 260 262 L260 280 L140 280 Z" fill="#b35d39" stroke="none" clip-path="url(#m2-collar)"/>
   <ellipse cx="200" cy="258" rx="58" ry="15" fill="none"/>
-  <path d="M188 96 C216 68 264 64 316 80 C278 84 250 92 236 100 C264 100 296 108 324 126 C276 120 234 116 202 112 Z" fill="#f7c548" stroke-width="6"/>
-  <path d="M204 94 C230 82 258 80 286 84" fill="none" stroke="#d99a22" stroke-width="5"/>
+  <path d="M188 96 C216 68 264 64 316 80 C278 84 250 92 236 100 C264 100 296 108 324 126 C276 120 234 116 202 112 Z" fill="#f7c548" stroke-width="6"/><path d="M204 94 C230 82 258 80 286 84" fill="none" stroke="#d99a22" stroke-width="5"/>
   <circle cx="200" cy="168" r="84" fill="#b35d39" stroke="none"/>
   <g clip-path="url(#m2-head)" stroke="none">
     <circle cx="190" cy="158" r="80" fill="#e8743b"/>
