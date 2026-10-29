@@ -29,7 +29,8 @@ MOUTH, TONGUE = '#3a1f2b', '#f07a8a'
 PALETTES = {
     'M': dict(body='#e8743b', shade='#b35d39', light='#efa07a', ghost='#f6c7b1', bg='#fcece4'),
     'D': dict(body='#7b5ce0', shade='#654cb0', light='#a590ea', ghost='#cabef3', bg='#ede8fb'),
-    'B': dict(body='#2aa876', shade='#2a8263', light='#6ec4a2', ghost='#aadcc8', bg='#e1f3ec'),
+    'B': dict(body='#2aa876', shade='#2a8263', light='#6ec4a2', ghost='#aadcc8', bg='#e1f3ec',
+              tuft='#c9e05a', tuft_line='#8fab2a'),  # a lime sprout instead of the gold tuft
     'H': dict(body='#d64545', shade='#a63b40', light='#e38181', ghost='#efb5b5', bg='#f9e5e5'),
     'P': dict(body='#2b8fd6', shade='#2b70a8', light='#6fb3e3', ghost='#aad2ef', bg='#e1eff9'),
     'C': dict(body='#b58a12', shade='#8e6d1b', light='#cdaf5e', ghost='#e1d0a0', bg='#f5efde'),
@@ -165,8 +166,8 @@ def pawn(uid, pal, transform, *, face_kind='happy', look='right', tuft='up', fee
     tuft_svg = ''
     if tuft:
         tuft_d, tuft_line = TUFTS[tuft]
-        tuft_svg = (f'<path d="{tuft_d}" fill="{TUFT_FILL}" stroke-width="6"/>'
-                    f'<path d="{tuft_line}" fill="none" stroke="{TUFT_LINE}" stroke-width="5"/>')
+        tuft_svg = (f'<path d="{tuft_d}" fill="{p.get("tuft", TUFT_FILL)}" stroke-width="6"/>'
+                    f'<path d="{tuft_line}" fill="none" stroke="{p.get("tuft_line", TUFT_LINE)}" stroke-width="5"/>')
     feet_svg = ''.join(f'<ellipse cx="{x}" cy="{y}" rx="{rx}" ry="11" transform="rotate({r} {x} {y})"/>' for x, y, rx, r in FEET[feet])
     the_face = face(face_kind, uid)
     if look == 'left':
@@ -569,6 +570,171 @@ def choose_roll():
     ])
 
 
+# The Board cards: the things a card puts on the board, drawn as objects in the pawn's style (no board around them).
+
+SWAMP = dict(body='#6f8130', shade='#4f5f1f', light='#9aab52')  # olive mud, as the 'Stuck!' popup
+
+
+def ladder(x, y, h, rot, pal, w=44, rungs=4):
+    """A ladder standing on (x, y), h tall, w wide, leaning rot degrees."""
+    rail = f'M{-w / 2} 0 L{-w / 2} {-h} M{w / 2} 0 L{w / 2} {-h}'
+    step = h / (rungs + 1)
+    rung = ' '.join(f'M{-w / 2} {-step * (i + 1):.0f} L{w / 2} {-step * (i + 1):.0f}' for i in range(rungs))
+    return (f'<g transform="translate({x} {y}) rotate({rot})" fill="none">'
+            f'<path d="{rung}" stroke-width="17"/><path d="{rung}" stroke="{pal["shade"]}" stroke-width="7"/>'
+            f'<path d="{rail}" stroke-width="22"/><path d="{rail}" stroke="{pal["body"]}" stroke-width="10"/>'
+            f'<path d="M{-w / 2 - 1} {-h * 0.12:.0f} L{-w / 2 - 1} {-h * 0.6:.0f}" stroke="{pal["light"]}" stroke-width="4"/></g>')
+
+
+def snake(body, head, pal, *, look='left', face_kind='sly', s=1):
+    """A snake: body is its path from the neck to the tail; head (x, y) at the neck, the face looking `look`."""
+    hx, hy = head
+    k = -1 if look == 'left' else 1
+    eyes = ''
+    for ex in (-8, 12):
+        x = hx + k * ex * s
+        eyes += (f'<ellipse cx="{x}" cy="{hy - 12 * s}" rx="{8 * s}" ry="{10 * s}" fill="#ffffff" stroke-width="4"/>'
+                 f'<circle cx="{x + k * 3 * s}" cy="{hy - 11 * s}" r="{4 * s}" fill="{INK}" stroke="none"/>')
+    if face_kind == 'sly':  # heavy lids
+        eyes += ''.join(f'<path d="M{hx + k * (ex - 9) * s} {hy - 16 * s} L{hx + k * (ex + 9) * s} {hy - 13 * s}" fill="none" stroke-width="5"/>'
+                        for ex in (-8, 12))
+    tongue = (f'<path d="M{hx + k * 30 * s} {hy + 4 * s} L{hx + k * 46 * s} {hy + 8 * s} L{hx + k * 54 * s} {hy + 2 * s}'
+              f' M{hx + k * 46 * s} {hy + 8 * s} L{hx + k * 54 * s} {hy + 14 * s}" fill="none" stroke="{TONGUE}" stroke-width="{4 * s}"/>')
+    return (f'<path d="{body}" fill="none" stroke-width="{34 * s}"/>'
+            f'<path d="{body}" fill="none" stroke="{pal["body"]}" stroke-width="{22 * s}"/>'
+            f'<path d="{body}" fill="none" stroke="{pal["shade"]}" stroke-width="{22 * s}" stroke-dasharray="{8 * s} {18 * s}"/>'
+            f'<path d="{body}" fill="none" stroke="{pal["light"]}" stroke-width="{4 * s}" stroke-dasharray="{14 * s} {12 * s}" transform="translate({-4 * s} {-5 * s})"/>'
+            + tongue
+            + f'<ellipse cx="{hx}" cy="{hy}" rx="{32 * s}" ry="{22 * s}" fill="{pal["body"]}" stroke-width="7"/>'
+            f'<ellipse cx="{hx - 10 * s}" cy="{hy - 12 * s}" rx="{10 * s}" ry="{4 * s}" fill="{pal["light"]}" stroke="none"/>'
+            f'<path d="M{hx + k * 14 * s} {hy + 8 * s} Q{hx + k * 22 * s} {hy + 12 * s} {hx + k * 28 * s} {hy + 6 * s}" fill="none" stroke-width="4"/>'
+            + eyes)
+
+
+def portal(uid, cx, cy, rx, ry, pal):
+    """A portal seen from the side: a ring with a swirl inside."""
+    swirl = ' '.join(f'M{cx} {cy - ry * f:.0f} Q{cx + rx * f * 0.9:.0f} {cy:.0f} {cx} {cy + ry * f:.0f}' for f in (0.72, 0.44))
+    return (f'<clipPath id="{uid}-in"><ellipse cx="{cx}" cy="{cy}" rx="{rx - 10}" ry="{ry - 12}"/></clipPath>'
+            f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{pal["body"]}" stroke-width="7"/>'
+            f'<ellipse cx="{cx}" cy="{cy}" rx="{rx - 10}" ry="{ry - 12}" fill="{pal["shade"]}" stroke-width="5"/>'
+            f'<g clip-path="url(#{uid}-in)"><path d="{swirl}" fill="none" stroke="{pal["light"]}" stroke-width="5"/></g>'
+            f'<path d="M{cx - rx + 5} {cy - ry * 0.3:.0f} Q{cx - rx + 4} {cy - ry * 0.75:.0f} {cx - rx * 0.4:.0f} {cy - ry + 6}" fill="none" stroke="{pal["light"]}" stroke-width="4"/>')
+
+
+def swamp():
+    """B1 Swamp: the pawn sunk to the waist in the mud, arms up; the mud bubbles."""
+    p, m = PALETTES['B'], SWAMP
+    return '\n'.join([
+        '<clipPath id="b1-mud"><ellipse cx="204" cy="208" rx="150" ry="30"/></clipPath>',
+        f'<ellipse cx="204" cy="208" rx="150" ry="30" fill="{m["body"]}" stroke="none"/>',
+        f'<path d="M40 214 Q204 250 368 214 L368 250 L40 250 Z" fill="{m["shade"]}" stroke="none" clip-path="url(#b1-mud)"/>',
+        f'<ellipse cx="204" cy="208" rx="150" ry="30" fill="none" stroke-width="7"/>',
+        f'<path d="M80 202 Q104 190 140 186" fill="none" stroke="{m["light"]}" stroke-width="5"/>',
+        '<clipPath id="b1-above"><path d="M0 0 L408 0 L408 206 Q300 210 240 204 Q204 212 168 204 Q100 210 0 206 Z"/></clipPath>',
+        '<g clip-path="url(#b1-above)">',
+        pawn('b1', p, place(204, 286, 0.56, -4), face_kind='shock', tuft='up',
+             arms=arm('M178 300 C150 290 130 262 124 232', p['body']) + glove(120, 214, -20)
+             + arm('M222 298 C262 290 290 262 300 232', p['body']) + glove(302, 214, 20),
+             front=drop(300, 110, 40)),
+        '</g>',
+        f'<path d="M156 206 Q180 196 204 206 Q228 196 252 206 Q228 216 204 213 Q180 216 156 206 Z" fill="{m["light"]}" stroke-width="5"/>',
+        f'<g fill="{m["light"]}" stroke-width="4"><circle cx="92" cy="208" r="9"/><circle cx="112" cy="196" r="5"/>'
+        f'<circle cx="318" cy="200" r="11"/><circle cx="340" cy="214" r="6"/><circle cx="298" cy="218" r="4"/></g>',
+        '<path d="M318 172 Q324 162 334 164 M80 180 Q86 170 96 172" fill="none" stroke-width="4"/>',
+    ])
+
+
+def ladder_to_snake():
+    """B2 Ladder to Snake: a pale ladder turns, with a puff of magic, into a sly snake."""
+    p, o = PALETTES['B'], other('B')
+    return '\n'.join([
+        shadow(92, 232, 46),
+        shadow(296, 232, 70),
+        ladder(92, 226, 196, -8, o, rungs=4),
+        '<path d="M142 150 L218 150" fill="none" stroke-width="6"/>',
+        arrowhead(238, 150, 0),
+        snake('M270 92 C330 104 346 140 300 160 C250 180 260 216 340 218', (252, 84), p, look='left'),
+        sparkle(372, 60, 14), sparkle(176, 108, 10), sparkle(362, 150, 8),
+    ])
+
+
+def snake_to_ladder():
+    """B3 Snake to Ladder: a pale, dizzy snake turns into a shining ladder."""
+    p, o = PALETTES['B'], other('B')
+    return '\n'.join([
+        shadow(112, 232, 70),
+        shadow(304, 232, 46),
+        snake('M128 96 C68 108 54 142 100 162 C150 182 140 216 64 218', (146, 88), o, look='right', face_kind='neutral'),
+        '<path d="M172 150 L244 150" fill="none" stroke-width="6"/>',
+        arrowhead(264, 150, 0),
+        ladder(304, 226, 200, 6, p, rungs=4),
+        sparkle(372, 44, 15), sparkle(226, 108, 10), sparkle(370, 170, 9),
+    ])
+
+
+def trampoline():
+    """B4 Trampoline: the pawn bounces off the mat high and forward."""
+    p = PALETTES['B']
+    return '\n'.join([
+        shadow(110, 236, 78, 7),
+        '<g stroke-width="8" fill="none"><path d="M52 210 L44 234 M168 210 L176 234 M110 216 L110 236"/></g>',
+        f'<g stroke="{p["body"]}" stroke-width="3" fill="none"><path d="M52 210 L44 234 M168 210 L176 234 M110 216 L110 236"/></g>',
+        f'<ellipse cx="110" cy="202" rx="70" ry="18" fill="{p["body"]}" stroke-width="7"/>',
+        f'<path d="M50 200 Q110 226 170 200 Q110 196 50 200 Z" fill="{p["shade"]}" stroke-width="5"/>',
+        f'<path d="M58 196 Q80 188 104 187" fill="none" stroke="{p["light"]}" stroke-width="4"/>',
+        '<path d="M86 176 Q110 166 134 176 M78 158 Q110 144 142 158" fill="none" stroke-width="4"/>',
+        '<path d="M120 196 Q170 40 300 64" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        dust((150, 178, 12), (170, 184, 9), (166, 162, 8), (132, 186, 7)),  # kicked up at the take-off
+        ghost(place(180, 150, 0.34, 10), p['ghost'], 0.6, 'back'),
+        shadow(318, 238, 26, 4),
+        pawn('b4', p, place(306, 184, 0.4, 18), face_kind='happy', tuft='back', feet='tuck',
+             arms=arm('M178 300 C146 290 126 262 120 232', p['body']) + glove(116, 214, -20)
+             + arm('M222 298 C262 290 290 262 300 232', p['body']) + glove(302, 214, 20)),
+        sparkle(372, 30, 11),
+    ])
+
+
+def portal_card():
+    """B5 Portal: the pawn steps into one portal and out of the other."""
+    p = PALETTES['B']
+    gate = dict(p, shade='#1f6b4f')
+    return '\n'.join([
+        shadow(110, 234, 40),
+        shadow(300, 234, 60),
+        # each pawn is drawn in front of its portal, cut at the portal's plane: in on the left, out on the right
+        portal('b5a', 110, 146, 28, 84, gate),
+        portal('b5b', 290, 146, 28, 84, gate),
+        '<clipPath id="b5-left"><rect x="0" y="0" width="110" height="256"/></clipPath>',
+        f'<g clip-path="url(#b5-left)">{ghost(place(92, 228, 0.42, 10), p["ghost"], 1, "back")}</g>',
+        lines((14, 120, 44), (6, 168, 34)),
+        '<clipPath id="b5-right"><rect x="290" y="0" width="118" height="256"/></clipPath>',
+        '<g clip-path="url(#b5-right)">',
+        pawn('b5', p, place(328, 228, 0.42, 10), face_kind='happy', tuft='back', feet='run',
+             arms=arm('M222 298 C258 290 284 262 296 232', p['body']) + glove(298, 214, 20)),
+        '</g>',
+        '<path d="M154 146 L230 146" fill="none" stroke-width="6"/>',
+        arrowhead(250, 146, 0),
+        sparkle(388, 40, 11), sparkle(28, 46, 9),
+    ])
+
+
+def earthquake():
+    """B6 Earthquake: the pawn shakes dizzy; the ladder and the snake beside it hop off their places."""
+    p, o = PALETTES['B'], other('B')
+    return '\n'.join([
+        f'<path d="M20 222 L70 210 L96 224 L140 206 L170 220 M238 220 L270 206 L310 222 L352 208 L390 220" fill="none" stroke-width="6"/>',
+        shadow(204, 232, 40),
+        ladder(84, 200, 124, -14, p, w=32, rungs=3),
+        snake('M346 112 C392 122 394 156 360 166 C326 176 332 198 388 196', (328, 104), p, look='left', face_kind='shock', s=0.8),
+        ghost(place(188, 226, 0.42, -6), p['ghost'], 0.6),
+        ghost(place(220, 226, 0.42, 6), p['ghost'], 0.6),
+        pawn('b6', p, place(204, 228, 0.42, 0), face_kind='dizzy', tuft='up', feet='skid',
+             arms=arm('M178 300 C138 296 104 272 88 244', p['body']) + glove(80, 226, -35)
+             + arm('M222 298 C262 296 296 272 312 244', p['body']) + glove(320, 226, 35)),
+        '<path d="M128 70 Q120 86 128 102 M116 62 Q104 86 116 110 M280 70 Q288 86 280 102 M292 62 Q304 86 292 110" fill="none" stroke-width="4"/>',
+    ])
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -581,6 +747,12 @@ CARDS = {  # id: (name, category, seed, drawing)
     'D3': ('Heavy Die', 'D', 21, heavy_die),
     'D4': ('Golden Die', 'D', 23, golden_die),
     'D5': ('Choose Your Roll', 'D', 25, choose_roll),
+    'B1': ('Swamp', 'B', 27, swamp),
+    'B2': ('Ladder to Snake', 'B', 29, ladder_to_snake),
+    'B3': ('Snake to Ladder', 'B', 31, snake_to_ladder),
+    'B4': ('Trampoline', 'B', 33, trampoline),
+    'B5': ('Portal', 'B', 35, portal_card),
+    'B6': ('Earthquake', 'B', 37, earthquake),
 }
 
 
