@@ -1473,6 +1473,12 @@ export class UI {
     y += 58 * u
     if (isHost && channel && n < (lob.mode === 'fool' ? 3 : 2)) this.text(T.botsMakeUp, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c' })
     else if (isHost && !quick && lob.mode === 'fool' && n < 3) this.text(T.foolNeeds3, x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#d64545' })
+    // the channel's table full of players: who is at it without a seat watches the game
+    else if (channel && humans >= 6) {
+      const seated = new Set(seats.filter(s => s && !s.b).map(s => s.id))
+      const left = [...this.p0.players.keys()].filter(id => !seated.has(id) && (id === me || app.status.get(id) === 'lobby'))
+      if (left.length) this.text(T.lobbyWatching(left.map(id => (id === me ? T.watcherMe(app.nameOf(id)) : app.nameOf(id))).join(', ')), x + mw / 2, y + 8 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: mw })
+    }
     // the table: its board, and the bots (not at a quick table, where they sit as players)
     const px = side ? x + mw + gap : x, py = side ? top : top + leftH + 12 * u, pw = side ? sideW : L.w
     this.panel(px, py, pw, panelH, { fill: 'rgba(255,253,248,0.6)', stroke: 'rgba(43,38,34,0.1)', r: 14 })
@@ -1704,7 +1710,10 @@ export class UI {
       else if (this.wardedAt(i)) this.hits.push({ key: 'ward' + i, x: cx, y: cy, w: colW, h: rowH, action: () => this.sayWarded(i) })
       if (!this.target) this.hits.push(...fxHits)
     })
-    const panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
+    // (who watches the game, under the players; on a phone clear of the zoom buttons)
+    let panelBottom = py + Math.ceil(s.pl.length / cols) * (rowH + 5 * u)
+    const ww = this.drawWatchers(px, panelBottom, this.narrow ? rx - 10 * u - px : pw)
+    if (ww) panelBottom += ww + 5 * u
     this.panelBottom = panelBottom
     this.gameLeft = this.narrow ? 0 : px + pw + 10 * u // the messages at the top keep clear of the players
     const status = this.gameStatus(s)
@@ -1808,7 +1817,51 @@ export class UI {
     const u = this.u, { x, y, pw, ph } = this.handBox(66 * this.u)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.94)', stroke: 'rgba(45,58,107,0.35)', lw: 2 })
     this.text(T.watching, x + pw / 2, y + 24 * u, { size: 15.5, align: 'center', max: pw - 24 * u })
-    this.text(T.watchingNext, x + pw / 2, y + 46 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 24 * u })
+    this.text(this.nextGame(this.p0.me.id) ? T.watchingNext : T.watchingFull, x + pw / 2, y + 46 * u, { size: 12.5, align: 'center', bold: false, color: '#5b544c', max: pw - 24 * u })
+  }
+  /** Player `id` has a seat in the Shared Table's next game. */
+  nextGame(id) { return this.app.lobby().seats.some(x => x && !x.b && x.id === id) }
+  /**
+   * Under the players, who watches the channel's game (with no seat in it): their names, a word for those
+   * who play in the next one, and for the host a way to seat them where a bot plays. Returns its height.
+   */
+  drawWatchers(x, y, w) {
+    const app = this.app, u = this.u, me = this.p0.me.id
+    const ids = app.watchers()
+    if (!ids.length) return 0
+    const max = this.narrow ? 2 : 4, shown = ids.slice(0, max), rowH = 28 * u, headH = 22 * u
+    const spare = app.spareSeats().length > 0
+    const h = headH + shown.length * rowH + 6 * u
+    this.panel(x, y, w, h, { fill: 'rgba(255,253,248,0.9)', stroke: 'rgba(43,38,34,0.12)', r: 10 })
+    this.text(T.watchers(ids.length) + (ids.length > max ? ` · +${ids.length - max}` : ''), x + 10 * u, y + 13 * u, { size: 12, color: '#2d3a6b', max: w - 20 * u })
+    shown.forEach((id, k) => {
+      const ry = y + headH + k * rowH, cy = ry + rowH / 2
+      // an eye for the watcher, their avatar where the site has one
+      const pic = this.picture(id)
+      if (pic) this.pictureDisc(pic, x + 18 * u, cy, 9 * u, '#9a948a')
+      else this.eye(x + 18 * u, cy, 7 * u)
+      const bw = spare ? 58 * u : 0
+      let right = x + w - 8 * u - (bw ? bw + 6 * u : 0)
+      if (this.nextGame(id) && !this.narrow) {
+        const tag = T.nextGameTag, g = this.g
+        g.font = this.font(10.5 * u)
+        const tw = g.measureText(tag).width + 12 * u
+        g.fillStyle = 'rgba(42,168,118,0.14)'; P.roundRect(g, right - tw, cy - 9 * u, tw, 18 * u, 9 * u); g.fill()
+        this.text(tag, right - tw / 2, cy + 1, { size: 10.5, align: 'center', color: '#1f7a55' })
+        right -= tw + 6 * u
+      }
+      const name = app.nameOf(id)
+      this.text(id === me ? T.watcherMe(name) : name, x + 32 * u, cy + 1, { size: 13, bold: false, max: right - x - 32 * u })
+      if (bw) this.button('seatw' + k, T.seatWatcher, x + w - 8 * u - bw, cy - 11 * u, bw, 22 * u, () => app.seatWatcher(id), { size: 12, primary: true, color: '#2d3a6b' })
+    })
+    return h
+  }
+  /** A small eye: someone watching. */
+  eye(cx, cy, r) {
+    const g = this.g
+    g.strokeStyle = '#5b544c'; g.lineWidth = 1.6 * this.u
+    g.beginPath(); g.moveTo(cx - r, cy); g.quadraticCurveTo(cx, cy - r * 1.3, cx + r, cy); g.quadraticCurveTo(cx, cy + r * 1.3, cx - r, cy); g.stroke()
+    g.fillStyle = '#5b544c'; g.beginPath(); g.arc(cx, cy, r * 0.38, 0, Math.PI * 2); g.fill()
   }
   /** At the bottom, where my hand goes once the seat is mine again: clear of the log and the dice tray. */
   drawTakeBack(p) {

@@ -784,8 +784,10 @@ class App {
     const host = from === this.p0.me.id
     const seated = lob.seats.findIndex(s => s && s.id === from && !s.b)
     const free = lob.seats.findIndex(s => !s)
-    if (cmd.t === 'sit' && seated < 0 && free >= 0) {
-      lob.seats[free] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
+    // (at the channel's table a player who comes to a full lobby sits where a bot would)
+    const room = free >= 0 ? free : this.atChannel() ? lob.seats.findIndex(s => s?.b) : -1
+    if (cmd.t === 'sit' && seated < 0 && room >= 0) {
+      lob.seats[room] = { id: from, n: (this.nameOf(from) || 'Player').slice(0, 14), b: 0 }
     } else if (cmd.t === 'stand' && seated >= 0) lob.seats[seated] = null
     else if (!host) return
     else if (cmd.t === 'mode' && ['champion', 'fool'].includes(cmd.mode)) lob.mode = cmd.mode
@@ -806,7 +808,9 @@ class App {
   }
   startShared(lob) {
     this.pruneSeats(lob)
-    // at the channel's table one player may start: bots make up the players the rules ask for
+    // at the channel's table those who watched the last game sit down (where seats free up); one player
+    // may start: bots make up the players the rules ask for
+    if (this.atChannel()) for (const id of this.p0.players.keys()) if (['shared', 'lobby'].includes(this.status.get(id))) this.seatNext(id, lob)
     if (this.atChannel()) while (lob.seats.filter(Boolean).length < least(lob.mode) && lob.seats.includes(null)) this.addBot(lob)
     const seats = lob.seats.map((s, i) => (s ? { ...s, c: i } : null)).filter(Boolean)
     if (seats.length < 2 || (lob.mode === 'fool' && seats.length < 3)) return
@@ -1052,26 +1056,56 @@ class App {
     if (!s || s.ph === 'over' || s.pl.some(p => p.id === id)) return
     const kept = s.pl.map((p, i) => i).filter(i => s.pl[i].f && s.pl[i].b && !s.pl[i].d)
     if (!kept.length) { if (channel) this.seatNext(id); return }
-    const p = s.pl[kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a))], bot = p.n
+    this.giveSeat(kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, T.takesSeat)
+  }
+  /** Host: player `id` takes seat `i` of the Shared Table's game from its bot, under their own name, and keeps it for the rematch; `say` (name, the bot's) goes in the log. */
+  giveSeat(i, id, say) {
+    const s = this.shared.s, p = s.pl[i], bot = p.n
     p.id = id; p.b = 0; p.n = (this.nameOf(id) || 'Player').slice(0, 14)
-    delete p.f
-    const text = R.addLog(s, T.takesSeat(p.n, bot))
+    delete p.f; delete p.rb
+    const text = R.addLog(s, say(p.n, bot))
     s.seq++
-    sh.publish([{ e: 'log', text }])
-    const lob = this.lobby()
-    lob.seats[p.c] = { id, n: p.n, b: 0 }
+    this.shared.publish([{ e: 'log', text }])
+    // their seat in the next game: this one's (another free one when someone else has it now)
+    const lob = this.lobby(), seat = { id, n: p.n, b: 0 }
+    lob.seats = lob.seats.map(x => (x && !x.b && x.id === id ? null : x))
+    const there = lob.seats[p.c], k = there && !there.b ? lob.seats.findIndex(x => !x) : p.c
+    if (k >= 0) lob.seats[k] = seat
     this.p0.room.set('lob', lob)
   }
 
-  /** Host: player `id`, watching the channel's table, gets a seat in the next game (a bot's, when none is free). */
-  seatNext(id) {
-    const lob = this.lobby()
+  /** Host: player `id`, watching the channel's table, gets a seat in the next game (a bot's, when none is free); `into` is a lobby being changed, saved by the caller. */
+  seatNext(id, into) {
+    const lob = into || this.lobby()
     if (lob.seats.some(s => s && !s.b && s.id === id)) return
     let i = lob.seats.findIndex(s => !s)
     if (i < 0) i = lob.seats.findIndex(s => s?.b)
     if (i < 0) return
     lob.seats[i] = { id, n: (this.nameOf(id) || 'Player').slice(0, 14), b: 0 }
-    this.p0.room.set('lob', lob)
+    if (!into) this.p0.room.set('lob', lob)
+  }
+  /** At the channel's game (not over): who there holds no seat in it, me among them. */
+  watchers() {
+    const s = this.view.state
+    if (!this.atChannel() || this.screen !== 'game' || this.table !== this.shared || !s || s.ph === 'over') return []
+    const seated = new Set(s.pl.filter(p => !p.b).map(p => p.id))
+    return [...this.p0.players.keys()].filter(id => !seated.has(id) && (id === this.p0.me.id || this.status.get(id) === 'shared'))
+  }
+  /** Host: seats of the channel's game a bot plays that a watcher may have: kept for newcomers, or of a player who is not at the game now. */
+  spareSeats() {
+    const s = this.shared?.s
+    if (!this.p0.room.isHost || !this.atChannel() || !s || s.ph === 'over') return []
+    const here = id => id === this.p0.me.id || (this.p0.players.has(id) && this.status.get(id) === 'shared')
+    return s.pl.map((p, i) => i).filter(i => { const p = s.pl[i]; return p.b && !p.d && (p.f || (p.rb && !here(p.id))) })
+  }
+  /** Host: watcher `id` sits down in the channel's game: in their own seat a bot plays, else in the spare one furthest on. */
+  seatWatcher(id) {
+    const sh = this.shared, s = sh?.s
+    if (!this.watchers().includes(id)) return
+    const own = sh.claimable(id).find(i => s.pl[i].id === id)
+    if (own != null) { sh.takeBack(id, own); return }
+    const spare = this.spareSeats()
+    if (spare.length) this.giveSeat(spare.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, T.takesOver)
   }
 
   // ----- the site's own table (Discord: everyone in the voice channel; Project 0 and the other sites have none) -----

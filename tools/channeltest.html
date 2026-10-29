@@ -159,6 +159,15 @@ step('Eve comes with no seat to take: she watches, with a word on screen, and ha
   note('watching; lobby seats: ' + app('a').lobby().seats.filter(Boolean).map(s => s.n).join(', '))
   return ms
 })
+step('Everyone sees Eve watching; the host has no Seat for her while no bot\'s seat is spare', async note => {
+  const eve = app('e').p0.me.id
+  const ms = await waitFor(() => ['a', 'b', 'd', 'e'].every(k => app(k).watchers().join() === String(eve)), 6000, 'Eve the only watcher on every screen')
+  ok(!['a', 'b', 'd', 'e'].some(k => hit(k, 'seatw0')), 'a Seat with no spare seat')
+  // (the game slows down to the usual speed: it is to be under way when Eve is seated, after Ann goes)
+  for (const k of ['a', 'b', 'd', 'e']) { app(k).speedIdx = 0; app(k).view.speed = 1 }
+  note('watchers: Eve on all four screens; no Seat')
+  return ms
+})
 step('A guest\'s game menu has no way out; the results wait for the host', async note => {
   app('b').openGameMenu()
   await waitFor(() => hit('b', 'resume'), 2000, 'Bob\'s game menu')
@@ -174,10 +183,22 @@ step('Ann (the host) closes the activity mid-game: the game goes on, a bot in he
   const gid = table('b').gid, ann = table('b').pl.findIndex(p => p.n === 'Ann')
   close('a')
   const ms = await waitFor(() => ['b', 'd', 'e'].some(k => isHost(k)) && table('b')?.gid === gid && table('b').pl[ann].b, 45000, 'a new host, a bot in Ann\'s seat')
-  const host = ['b', 'd', 'e'].find(isHost)
-  await autoplay(['b', 'd'], () => table(host).seq >= table('b').seq + 6 || table(host).ph === 'over', 60000, 'moves after the takeover')
+  const host = ['b', 'd', 'e'].find(isHost), seq = table(host).seq
+  await autoplay(['b', 'd'], () => table(host).seq >= seq + 6 || table(host).ph === 'over', 60000, 'moves after the takeover')
   await agree(['b', 'd', 'e'])
   note(`${host} hosts after ${ms} ms; the game goes on on every screen`)
+  return ms
+})
+step('The new host seats Eve where the bot plays Ann\'s seat', async note => {
+  const host = ['b', 'd', 'e'].find(isHost)
+  ok(table(host).ph !== 'over', 'the game is over')
+  if (host === 'e') { note('Eve hosts: she has Continue Playing for Ann\'s seat instead'); return }
+  await waitFor(() => hit(host, 'seatw0'), 4000, 'Seat on the host\'s screen')
+  ok(!['b', 'd', 'e'].filter(k => k !== host).some(k => hit(k, 'seatw0')), 'Seat on a guest\'s screen')
+  hit(host, 'seatw0').action()
+  const ms = await waitFor(() => app('e').mySeat() >= 0 && !app('e').watching() && app('e').watchers().length === 0, 8000, 'Eve seated in the game')
+  ok(table(host).pl[app('e').mySeat()].n === 'Eve' && seated(host, 'Eve'), 'Eve\'s seat: ' + JSON.stringify(table(host).pl.map(p => [p.n, p.b])))
+  note(`${host} seated Eve in seat ${app('e').mySeat()}; log: ${table(host).log.at(-1)}`)
   return ms
 })
 step('Rematch at the channel\'s table: Eve plays in it', async note => {
@@ -193,6 +214,16 @@ step('End Game: everyone back to the channel\'s lobby, no menu', async note => {
   app(host).leaveGame()
   const ms = await waitFor(() => ['b', 'd', 'e'].every(k => app(k).screen === 'lobby' && web(k).room?.channel), 8000, 'all in the lobby')
   note(`${host} ended it; all three in the lobby`)
+  return ms
+})
+step('A full lobby: Fay comes and sits where a bot would', async note => {
+  const host = ['b', 'd', 'e'].find(isHost)
+  for (let i = 0; i < 6; i++) app(host).lobbyCmd({ t: 'bot' })
+  await waitFor(() => app(host).lobby().seats.every(Boolean), 4000, 'the table full')
+  await open('f', 'Fay', ONE)
+  const ms = await waitFor(() => app('f').screen === 'lobby' && seated(host, 'Fay'), 25000, 'Fay seated')
+  ok(app(host).lobby().seats.filter(s => s?.b).length === 2, 'bots: ' + JSON.stringify(app(host).lobby().seats))
+  note('seats: ' + app(host).lobby().seats.map(s => s.n + (s.b ? ' (bot)' : '')).join(', '))
   return ms
 })
 
