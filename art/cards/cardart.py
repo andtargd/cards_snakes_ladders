@@ -801,10 +801,10 @@ def zee(x, y, s, col):
     return f'<path d="{d}" fill="none" stroke-width="{s * 0.5:.0f}"/><path d="{d}" fill="none" stroke="{col}" stroke-width="{s * 0.22:.0f}"/>'
 
 
-def playing_card(cx, cy, rot, pal, s=1):
+def playing_card(cx, cy, rot, pal, s=1, fill=GLOVE):
     """A card s times 56x80, its bottom centre at (cx, cy), turned rot degrees about it."""
     return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
-            f'<rect x="-28" y="-80" width="56" height="80" rx="9" fill="{GLOVE}" stroke-width="{6 / s:.1f}"/>'
+            f'<rect x="-28" y="-80" width="56" height="80" rx="9" fill="{fill}" stroke-width="{6 / s:.1f}"/>'
             f'<rect x="-19" y="-71" width="38" height="62" rx="5" fill="none" stroke="{pal["light"]}" stroke-width="4"/>'
             f'<path d="M0 -56 L11 -40 L0 -24 L-11 -40 Z" fill="{pal["body"]}" stroke-width="4"/></g>')
 
@@ -1095,6 +1095,154 @@ def holy_grail():
     ])
 
 
+# The Hand cards: the gold pawn and the cards in the players' hands.
+
+GOLD = PALETTES['C']
+PALE = dict(body=GOLD['light'], light=GOLD['bg'], fill=GOLD['ghost'])  # someone else's cards, or ones let go
+
+
+def card(cx, cy, rot, s=1, pal=GOLD):
+    """A playing card in the Hand colours (pal=PALE for a pale one), its bottom centre at (cx, cy)."""
+    return playing_card(cx, cy, rot, pal, s, pal.get('fill', GLOVE))
+
+
+def fan(cx, cy, angles, s=1, pal=GOLD):
+    """A hand of cards fanned out about their bottom centre (cx, cy), one card per angle."""
+    return ''.join(card(cx, cy, a, s, pal) for a in angles)
+
+
+def replay_sign(cx, cy, r, col):
+    """A round arrow going clockwise, as on a replay button: the arrowhead at the top points right and
+    closes the ring, its tip at the arc's start."""
+    def pt(deg, rr=r):
+        return cx + rr * math.cos(math.radians(deg)), cy + rr * math.sin(math.radians(deg))
+    base, tip = 240, 300  # degrees, y down: 270 is the top
+    (x0, y0), (x1, y1) = pt(tip - 6), pt(base)  # the arc starts under the tip, so the ring is closed
+    d = f'M{x0:.1f} {y0:.1f} A{r} {r} 0 1 1 {x1:.1f} {y1:.1f}'
+    (bx, by), w = pt(base), r * 0.55
+    head = [(bx, by - w), pt(tip), (bx, by + w)]  # the base upright, so the arrowhead points straight right
+    return (f'<path d="{d}" fill="none" stroke-width="{r * 0.62:.0f}"/><path d="{d}" fill="none" stroke="{col}" stroke-width="{r * 0.3:.0f}"/>'
+            f'<path d="M{" L".join(f"{x:.1f} {y:.1f}" for x, y in head)} Z" fill="{col}" stroke-width="4"/>')
+
+
+def redraw():
+    """C1 Redraw: the old hand tossed away behind, a fresh fan of one more card held up."""
+    p = GOLD
+    return '\n'.join([
+        shadow(262, 240, 42),
+        '<path d="M206 150 Q166 76 128 92" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        '<path d="M204 176 Q150 152 110 188" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        card(106, 112, -38, 0.62, PALE), card(70, 72, -14, 0.5, PALE), card(82, 206, -64, 0.56, PALE),
+        sparkle(392, 40, 11), sparkle(306, 26, 8),
+        pawn('c1', p, place(262, 236, 0.44, 4), face_kind='happy', tuft='up',
+             arms=arm('M178 300 C140 296 108 278 90 254', p['body'])
+             + arm('M222 298 C276 296 322 266 342 226', p['body']),
+             front=glove(80, 240, -50) + fan(346, 222, (-22, -2, 18, 38), 1.55) + glove(346, 218, 20)),
+    ])
+
+
+def peek():
+    """C2 Peek: shading its eyes, the pawn peers at another player's hand over its shoulder."""
+    p, o = GOLD, other('C')
+    return '\n'.join([
+        shadow(116, 240, 40),
+        shadow(302, 240, 40),
+        pawn('c2b', o, place(302, 238, 0.44, 0), face_kind='neutral', tuft=None,
+             arms=arm('M178 300 C150 304 132 300 112 290', o['body'])
+             + arm('M222 300 C250 312 262 330 266 352', o['body']) + glove(268, 366, 180),
+             front=fan(104, 286, (-46, -22, 2), 1.5) + glove(104, 282, -20)),
+        pawn('c2', p, place(116, 238, 0.44, 12), face_kind='sly', tuft='up',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 298 C304 296 318 186 246 122', p['body']),
+             front=glove(262, 118, 94)),
+    ])
+
+
+def steal():
+    """C3 Steal: the pawn snatches a card from another player's hand and runs off with it, looking back."""
+    p, o = GOLD, other('C')
+    return '\n'.join([
+        shadow(92, 240, 38),
+        shadow(276, 242, 42),
+        pawn('c3b', o, place(92, 238, 0.42, -4), face_kind='shock', tuft=None,
+             arms=arm('M178 300 C150 312 138 330 134 352', o['body']) + glove(132, 366, 180)
+             + arm('M222 298 C256 300 282 296 304 286', o['body']),
+             front=fan(312, 284, (-10, 18), 1.5) + glove(312, 280, 20)),
+        '<path d="M164 112 Q208 30 260 58" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        ghost(place(210, 232, 0.42, 14), p['ghost'], 0.5, 'back'),
+        dust((230, 236, 7), (210, 230, 10), (192, 236, 6)),
+        pawn('c3', p, place(276, 236, 0.42, 14), face_kind='sly', look='left', tuft='back', feet='run',
+             arms=arm('M178 300 C140 300 112 318 98 346', p['body']) + fist(94, 354, 16)
+             + arm('M222 298 C262 282 288 240 296 196', p['body']),
+             front=card(300, 196, 6, 1.6) + glove(300, 186, 10)),
+        sparkle(388, 46, 10),
+    ])
+
+
+def swap_hands():
+    """C4 Swap Hands: two players toss their hands to each other; the fans cross in the air."""
+    p, o = GOLD, other('C')
+    return '\n'.join([
+        shadow(90, 240, 38),
+        shadow(318, 240, 38),
+        f'<path d="M136 92 Q200 26 276 66" fill="none" stroke="{p["body"]}" stroke-width="6" stroke-dasharray="12 10"/>',
+        arrowhead(288, 76, 45, p['body']),
+        f'<path d="M274 166 C250 222 200 214 164 194" fill="none" stroke="{p["light"]}" stroke-width="6" stroke-dasharray="12 10"/>',
+        fan(206, 80, (-24, 0, 24), 0.62),
+        fan(222, 200, (-24, 0, 24), 0.62, PALE),
+        arrowhead(154, 188, 210, p['light']),
+        pawn('c4b', o, place(318, 238, 0.42, -4), face_kind='shock', look='left', tuft=None,
+             arms=arm('M178 300 C150 290 130 262 124 232', o['body']) + glove(120, 214, -20)
+             + arm('M222 300 C250 312 262 330 266 352', o['body']) + glove(268, 366, 180)),
+        pawn('c4', p, place(90, 238, 0.42, 4), face_kind='sly', tuft='up',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 298 C262 290 290 262 300 232', p['body']) + glove(302, 214, 20)),
+    ])
+
+
+def choose_card():
+    """C5 Choose Your Card: three cards drawn, the one the pawn points at rises; the others stay pale."""
+    p = GOLD
+    return '\n'.join([
+        shadow(112, 240, 40),
+        shadow(296, 232, 84, 6),
+        card(250, 228, -14, 1.1, PALE), card(342, 228, 14, 1.1, PALE),
+        f'<rect x="262" y="126" width="68" height="96" rx="11" fill="none" stroke="{p["shade"]}" stroke-width="4" stroke-dasharray="6 7"/>',
+        card(296, 168, 4, 1.2),
+        '<path d="M296 36 L296 58 M260 46 L270 62 M332 46 L322 62" fill="none" stroke-width="5"/>',
+        sparkle(378, 92, 13), sparkle(222, 64, 8),
+        pawn('c5', p, place(112, 238, 0.44, 6), face_kind='happy', tuft='up',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 298 C262 292 294 266 312 236', p['body']),
+             front=glove(322, 222, 60)),
+    ])
+
+
+def echo():
+    """C6 Echo: no pawn; one card and its echoes spreading out behind it, a replay arrow on its face (a Legendary card)."""
+    g = GOLD
+    cx, base, s = 204, 214, 1.6
+    rays = ''.join(f'<path d="M{cx + 104 * math.cos(a):.0f} {140 + 104 * math.sin(a):.0f} L{cx + 150 * math.cos(a):.0f} {140 + 150 * math.sin(a):.0f}"/>'
+                   for a in (math.radians(d) for d in (-150, -120, -90, -60, -30, 0, 180)))
+    waves = ''.join(f'<path d="M{cx - d} {140 - h} Q{cx - d - 14} 140 {cx - d} {140 + h} M{cx + d} {140 - h} Q{cx + d + 14} 140 {cx + d} {140 + h}"/>'
+                    for d, h in ((92, 44), (118, 34), (142, 24)))
+    return '\n'.join([
+        f'<g fill="none" stroke="{g["light"]}" stroke-width="8">{rays}</g>',
+        shadow(cx, 228, 70, 7),
+        playing_card(cx - 58, base + 4, -14, PALE, s * 0.9, PALE['fill']).replace('<g ', '<g opacity="0.5" ', 1),
+        playing_card(cx + 58, base + 4, 14, PALE, s * 0.9, PALE['fill']).replace('<g ', '<g opacity="0.5" ', 1),
+        playing_card(cx - 30, base, -7, PALE, s * 0.95, PALE['fill']),
+        playing_card(cx + 30, base, 7, PALE, s * 0.95, PALE['fill']),
+        f'<g fill="none" stroke-width="5">{waves}</g>',
+        f'<g transform="translate({cx} {base}) scale({s})">'
+        f'<rect x="-28" y="-80" width="56" height="80" rx="9" fill="{GLOVE}" stroke-width="{6 / s:.1f}"/>'
+        f'<rect x="-21" y="-73" width="42" height="66" rx="5" fill="none" stroke="{g["light"]}" stroke-width="{4 / s:.1f}"/>'
+        f'<path d="M-24 -50 L-24 -72 L-10 -76" fill="none" stroke="#ffffff" stroke-width="{4 / s:.1f}"/></g>',
+        replay_sign(cx, base - 62, 22, g['body']),
+        sparkle(52, 52, 15), sparkle(358, 40, 12), sparkle(366, 182, 14), sparkle(42, 186, 10, g['light']),
+    ])
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -1122,6 +1270,12 @@ CARDS = {  # id: (name, category, seed, drawing)
     'P2': ('Swamp Boots', 'P', 51, swamp_boots),
     'P3': ('Shield', 'P', 53, shield_card),
     'P4': ('Holy Grail', 'P', 55, holy_grail),
+    'C1': ('Redraw', 'C', 57, redraw),
+    'C2': ('Peek', 'C', 59, peek),
+    'C3': ('Steal', 'C', 61, steal),
+    'C4': ('Swap Hands', 'C', 63, swap_hands),
+    'C5': ('Choose Your Card', 'C', 65, choose_card),
+    'C6': ('Echo', 'C', 67, echo),
 }
 
 
