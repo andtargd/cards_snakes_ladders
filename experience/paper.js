@@ -686,6 +686,8 @@ const PAWN_INK = '#2b2233' // the pictures' outline (art/cards/cardart.py)
 // the paper by rarity, as Minimalism's backgrounds but warmer; the edge is the rarity's colour (RARITY_STYLE)
 const PAWN_PAPER = { C: '#f5efe1', U: '#e6f0d6', R: '#dfe8f6', L: '#fbe8a6' }
 const PAWN_PALE = { M: '#fcece4', D: '#ede8fb', B: '#e1f3ec', H: '#f9e5e5', P: '#e1eff9', C: '#f5efde' } // the pictures' backgrounds
+// the name's ribbon, one for every card: the back's plum, clear of the rarities' and the categories' colours
+const PAWN_RIBBON = '#4a3470', PAWN_RIBBON_TEXT = '#fbf1d0'
 
 /** Paper grain: faint specks, the same on every card. */
 function grain(g, w, h, k) {
@@ -695,7 +697,7 @@ function grain(g, w, h, k) {
 
 /**
  * Pawn Parade's face: paper of the rarity's tint in a band of the rarity's colour between ink lines; the
- * name on a ribbon of the category's colour with the category's badge (experience/cards/cat-<X>.webp), the
+ * name on a plum ribbon with the category's badge (experience/cards/cat-<X>.webp), the
  * picture under it with the category on a tag, the text, the rarity's stars.
  */
 function drawCardPawn(g, cardId, w, h, x0, y0) {
@@ -719,8 +721,8 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   }
   // the name on its ribbon, the category's badge over its left end
   const rx = 18 * k, ry = 19 * k, rw = w - 36 * k, rh = 38 * k
-  g.fillStyle = cc; roundRect(g, rx, ry, rw, rh, 12 * k); g.fill()
-  g.fillStyle = 'rgba(255,255,255,0.18)'; roundRect(g, rx + 4 * k, ry + 4 * k, rw - 8 * k, rh * 0.36, 8 * k); g.fill()
+  g.fillStyle = PAWN_RIBBON; roundRect(g, rx, ry, rw, rh, 12 * k); g.fill()
+  g.fillStyle = 'rgba(255,255,255,0.12)'; roundRect(g, rx + 4 * k, ry + 4 * k, rw - 8 * k, rh * 0.36, 8 * k); g.fill()
   g.strokeStyle = PAWN_INK; g.lineWidth = 3 * k; roundRect(g, rx, ry, rw, rh, 12 * k); g.stroke()
   const br = 23 * k, bx = rx + br - 3 * k, by = ry + rh / 2
   g.fillStyle = PAWN_PALE[card.cat]; g.beginPath(); g.arc(bx, by, br, 0, Math.PI * 2); g.fill()
@@ -728,7 +730,7 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   const badge = pictures.get('cat-' + card.cat)
   if (badge) g.drawImage(badge, bx - br * 0.84, by - br * 0.84, br * 1.68, br * 1.68)
   else drawIcon(g, 'cat-' + card.cat, bx, by, br * 1.25, cc)
-  g.fillStyle = inkOn(cc)
+  g.fillStyle = PAWN_RIBBON_TEXT
   g.textAlign = 'center'; g.textBaseline = 'middle'
   let size = 22
   const room = rw - 56 * k
