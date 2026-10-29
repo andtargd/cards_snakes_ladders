@@ -67,12 +67,20 @@ FEET = {  # (cx, cy, rx, rotation)
     'tuck': [(140, 446, 22, -30), (256, 448, 22, 24)],
     'skid': [(130, 456, 24, 0), (282, 440, 22, -20)],
     'moon': [(102, 442, 26, 35), (298, 458, 28, 0)],  # a step forward: the back foot on its toe, the front one flat
+    'none': [],  # drawn by the card itself (P2's boots)
 }
 
 
 def place(x, y, s, rot=0):
     """Puts the base's bottom centre at (x, y), the pawn s times its mascot size, leaning rot degrees."""
     return f'translate({x} {y}) scale({s}) rotate({rot}) translate(-200 -450)'
+
+
+def at(x, y, s, rot, fx, fy):
+    """Where the point (fx, fy) of the mascot frame lands on the picture, the pawn put by place(x, y, s, rot)."""
+    a = math.radians(rot)
+    dx, dy = (fx - 200) * s, (fy - 450) * s
+    return x + dx * math.cos(a) - dy * math.sin(a), y + dx * math.sin(a) + dy * math.cos(a)
 
 
 def mirror(markup):
@@ -908,6 +916,152 @@ def dethrone():
     ])
 
 
+# The Protection cards: the blue pawn and the thing that keeps it safe.
+
+RUBBER = dict(body=TUFT_FILL, shade=TUFT_LINE, light='#fbe08f')  # yellow rubber boots
+
+
+def canopy(cx, top, w, h, pal, gores=5):
+    """A parachute's canopy, its top centre at (cx, top), w wide, h tall; returns it and the points of its
+    bottom edge where the lines hang from."""
+    l, r, b = cx - w / 2, cx + w / 2, top + h
+    xs = [l + w * i / gores for i in range(gores + 1)]
+    dome = f'M{l} {b} C{l} {top} {r} {top} {r} {b}'
+    for i in range(gores, 0, -1):
+        dome += f' Q{(xs[i] + xs[i - 1]) / 2} {b - 12} {xs[i - 1]} {b}'
+    out = [f'<clipPath id="canopy-{cx}"><path d="{dome} Z"/></clipPath>',
+           f'<path d="{dome} Z" fill="{pal["body"]}" stroke="none"/>', f'<g clip-path="url(#canopy-{cx})" stroke="none">']
+    for i in range(0, gores, 2):  # every other gore lighter
+        a, c = xs[i], xs[i + 1]
+        out.append(f'<path d="M{cx} {top} Q{a * 0.8 + cx * 0.2:.0f} {top + 4} {a} {b} L{c} {b} Q{c * 0.8 + cx * 0.2:.0f} {top + 4} {cx} {top} Z" fill="{pal["light"]}"/>')
+    out.append(f'<path d="M{l} {b - 14} Q{cx} {b - 34} {r} {b - 14} L{r} {b + 10} L{l} {b + 10} Z" fill="{pal["shade"]}" opacity="0.6"/></g>')
+    seams = ' '.join(f'M{cx} {top} Q{x * 0.8 + cx * 0.2:.0f} {top + 4} {x} {b}' for x in xs[1:-1])
+    out.append(f'<path d="{seams}" fill="none" stroke-width="4"/><path d="{dome} Z" fill="none" stroke-width="7"/>')
+    out.append(f'<path d="M{l + 16} {b - 22} Q{l + 20} {top + 22} {cx - w * 0.18:.0f} {top + 10}" fill="none" stroke="#ffffff" stroke-width="5" opacity="0.8"/>')
+    return '\n'.join(out), [(x, b) for x in xs]
+
+
+def boot(cx, cy, rot=0):
+    """A rubber boot in the mascot frame, the sole's centre at (cx, cy), the toe to the right."""
+    shape = 'M-26 -58 L18 -58 L18 -18 Q44 -18 48 2 L48 10 L-30 10 L-30 -6 Z'
+    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale(1.4)">'
+            f'<clipPath id="boot-{cx}"><path d="{shape}"/></clipPath>'
+            f'<path d="{shape}" fill="{RUBBER["body"]}" stroke="none"/>'
+            f'<g clip-path="url(#boot-{cx})" stroke="none"><rect x="6" y="-60" width="20" height="50" fill="{RUBBER["shade"]}"/>'
+            f'<rect x="-40" y="-2" width="100" height="14" fill="{SHOE}"/><rect x="-40" y="-64" width="70" height="14" fill="{RUBBER["light"]}"/></g>'
+            f'<path d="{shape}" fill="none" stroke-width="6"/><path d="M-28 -50 L18 -50 M-30 -2 L48 -2" fill="none" stroke-width="4"/></g>')
+
+
+def shield(cx, cy, s=1, rot=0):
+    """A shield, centre (cx, cy), s times 84x112: a gold rim, the category's blue, a cream tick (the game's icon)."""
+    p, g = PALETTES['P'], PALETTES['C']
+    outer = 'M0 -56 L42 -42 Q40 20 0 56 Q-40 20 -42 -42 Z'
+    inner = 'M0 -42 L30 -32 Q28 14 0 42 Q-28 14 -30 -32 Z'
+    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
+            f'<path d="{outer}" fill="{g["light"]}" stroke-width="{7 / s:.1f}"/>'
+            f'<clipPath id="shield-{cx}"><path d="{inner}"/></clipPath>'
+            f'<path d="{inner}" fill="{p["body"]}" stroke="none"/>'
+            f'<path d="M0 -50 L0 50 L50 50 L50 -50 Z" fill="{p["shade"]}" stroke="none" clip-path="url(#shield-{cx})"/>'
+            f'<path d="{inner}" fill="none" stroke-width="5"/>'
+            f'<path d="M-24 -26 Q-24 -32 -14 -35" fill="none" stroke="{p["light"]}" stroke-width="5"/>'
+            f'<path d="M-15 0 L-3 13 L17 -12" fill="none" stroke-width="17"/><path d="M-15 0 L-3 13 L17 -12" fill="none" stroke="{GLOVE}" stroke-width="8"/>'
+            f'<path d="M-36 -40 L-8 -50" fill="none" stroke="#ffffff" stroke-width="4"/></g>')
+
+
+def grail(cx, cy, s=1, rot=0):
+    """A golden chalice, the rim's centre at (cx, cy), s times 76x96, with a blue gem."""
+    g, p = PALETTES['C'], PALETTES['P']
+    shape = ('M-38 0 L38 0 C38 26 18 36 7 38 L6 70 Q26 72 30 88 Q30 94 22 94 L-22 94 Q-30 94 -30 88 Q-26 72 -6 70'
+             ' L-7 38 C-18 36 -38 26 -38 0 Z')
+    return (f'<g transform="translate({cx} {cy}) rotate({rot}) scale({s})">'
+            f'<clipPath id="grail-{cx}"><path d="{shape}"/></clipPath>'
+            f'<path d="{shape}" fill="{g["light"]}" stroke="none"/>'
+            f'<g clip-path="url(#grail-{cx})" stroke="none"><path d="M8 -4 L60 -4 L60 100 L8 100 Z" fill="{g["body"]}"/>'
+            f'<rect x="-40" y="84" width="80" height="14" fill="{g["shade"]}"/></g>'
+            f'<path d="{shape}" fill="none" stroke-width="{6 / s:.1f}"/>'
+            f'<ellipse cx="0" cy="0" rx="38" ry="8" fill="{g["shade"]}" stroke-width="5"/>'
+            f'<ellipse cx="0" cy="54" rx="11" ry="7" fill="{g["body"]}" stroke-width="4"/>'
+            f'<path d="M-28 14 Q-26 26 -16 32" fill="none" stroke="#ffffff" stroke-width="5"/>'
+            f'<path d="M0 10 L9 19 L0 28 L-9 19 Z" fill="{p["body"]}" stroke-width="4"/></g>')
+
+
+def parachute():
+    """P1 Parachute: the pawn floats down under a parachute, past a snake that only gets half a slide out of it."""
+    p = PALETTES['P']
+    x, y, s = 168, 216, 0.38
+    hand_l, hand_r = (x + (120 - 200) * s, y + (204 - 450) * s), (x + (302 - 200) * s, y + (204 - 450) * s)
+    dome, edge = canopy(x, 8, 206, 74, p)
+    strings = ''.join(f'<path d="M{ex} {ey} L{(hand_l if ex < x else hand_r)[0]:.0f} {(hand_l if ex < x else hand_r)[1]:.0f}"/>'
+                      for ex, ey in edge)
+    return '\n'.join([
+        shadow(170, 244, 30, 5),
+        shadow(362, 232, 34, 5),
+        '<path d="M60 108 L60 134 M80 150 L80 168 M276 108 L276 134 M256 150 L256 168" fill="none" stroke-width="4"/>',
+        snake('M350 136 C392 146 394 180 354 192 C322 202 330 222 384 224', (330, 128), other('P'), look='left', face_kind='neutral', s=0.8),
+        f'<g fill="none" stroke-width="3">{strings}</g>',
+        dome,
+        pawn('p1', p, place(x, y, s, 0), face_kind='happy', tuft='up', feet='tuck',
+             arms=arm('M178 300 C150 290 130 262 124 232', p['body']) + arm('M222 298 C262 290 290 262 300 232', p['body']),
+             front=glove(120, 204, -20) + glove(302, 204, 20)),
+    ])
+
+
+def swamp_boots():
+    """P2 Swamp Boots: in yellow rubber boots the pawn marches right through the mud."""
+    p, m = PALETTES['P'], SWAMP
+    return '\n'.join([
+        '<clipPath id="p2-mud"><ellipse cx="204" cy="222" rx="176" ry="26"/></clipPath>',
+        f'<ellipse cx="204" cy="222" rx="176" ry="26" fill="{m["body"]}" stroke="none"/>',
+        f'<path d="M20 226 Q204 262 388 226 L388 260 L20 260 Z" fill="{m["shade"]}" stroke="none" clip-path="url(#p2-mud)"/>',
+        '<ellipse cx="204" cy="222" rx="176" ry="26" fill="none" stroke-width="7"/>',
+        f'<path d="M60 214 Q90 204 130 202" fill="none" stroke="{m["light"]}" stroke-width="5"/>',
+        f'<g fill="{m["light"]}" stroke-width="4"><circle cx="64" cy="226" r="8"/><circle cx="84" cy="236" r="5"/><circle cx="352" cy="220" r="7"/></g>',
+        ghost(place(100, 196, 0.42, 6), p['ghost'], 0.4),
+        f'<g fill="{m["body"]}" stroke-width="4"><circle cx="312" cy="196" r="7"/><circle cx="330" cy="178" r="5"/><circle cx="160" cy="194" r="6"/><circle cx="144" cy="176" r="4"/></g>',
+        f'<path d="M176 222 Q190 212 204 222 M268 224 Q284 214 300 224" fill="none" stroke="{m["light"]}" stroke-width="5"/>',
+        pawn('p2', p, place(234, 196, 0.42, 6), face_kind='happy', tuft='up', feet='none',
+             arms=boot(134, 486, -18) + boot(258, 496, 4)
+             + arm('M178 300 C150 310 132 330 124 352', p['body']) + fist(122, 362, 16)
+             + arm('M222 298 C258 290 284 270 296 244', p['body']),
+             front=fist(302, 236)),
+    ])
+
+
+def shield_card():
+    """P3 Shield: the pawn holds up a shield, and the snake that lunged at it bounces off."""
+    p, o = PALETTES['P'], other('P')
+    return '\n'.join([
+        shadow(132, 242, 42),
+        shadow(344, 238, 44, 5),
+        snake('M340 138 C380 148 396 178 370 198 C344 216 350 232 398 234', (318, 120), o, look='left', face_kind='shock', s=0.9),
+        '<path d="M276 70 L286 88 M300 64 L298 86 M266 100 L284 106" fill="none" stroke-width="5"/>',
+        sparkle(368, 70, 10),
+        pawn('p3', p, place(126, 236, 0.44, -6), face_kind='determined', tuft='up', feet='stand',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + glove(132, 366, 180)
+             + arm('M222 298 C262 300 300 294 330 280', p['body'])),
+        shield(236, 140, 1.1, 8),
+    ])
+
+
+def holy_grail():
+    """P4 Holy Grail: the pawn raises the shining grail; every effect on it is gone."""
+    p, g = PALETTES['P'], PALETTES['C']
+    x, y, s, lean = 168, 236, 0.44, 4
+    gx, gy = at(x, y, s, lean, 320, 50)  # the grail's bowl, held up in the right hand
+    rays = ''.join(f'<path d="M{gx + 72 * math.cos(a):.0f} {gy + 72 * math.sin(a):.0f} L{gx + 116 * math.cos(a):.0f} {gy + 116 * math.sin(a):.0f}"/>'
+                   for a in (math.radians(d) for d in (-180, -145, -110, -70, -35, 0, 35, 145)))
+    return '\n'.join([
+        f'<g fill="none" stroke="{g["light"]}" stroke-width="8">{rays}</g>',
+        f'<circle cx="{gx:.0f}" cy="{gy:.0f}" r="60" fill="#ffffff" opacity="0.6" stroke="none"/>',
+        shadow(x, 242, 44),
+        pawn('p4', p, place(x, y, s, lean), face_kind='happy', tuft='up',
+             arms=arm('M178 300 C150 312 138 330 134 352', p['body']) + fist(132, 362, 16)
+             + arm('M222 296 C276 280 312 220 318 140', p['body']),
+             front=grail(320, 4, 2.3) + glove(320, 128, 10)),
+        sparkle(48, 54, 13), sparkle(386, 150, 12), sparkle(150, 28, 9), sparkle(54, 170, 8, g['light']),
+    ])
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -931,6 +1085,10 @@ CARDS = {  # id: (name, category, seed, drawing)
     'H3': ('Skip Turn', 'H', 43, skip_turn),
     'H4': ('Moonwalk', 'H', 45, moonwalk),
     'H5': ('Dethrone', 'H', 47, dethrone),
+    'P1': ('Parachute', 'P', 49, parachute),
+    'P2': ('Swamp Boots', 'P', 51, swamp_boots),
+    'P3': ('Shield', 'P', 53, shield_card),
+    'P4': ('Holy Grail', 'P', 55, holy_grail),
 }
 
 
