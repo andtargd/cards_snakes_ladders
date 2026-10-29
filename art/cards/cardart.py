@@ -9,6 +9,7 @@ How to draw them: .claude/skills/card-art/SKILL.md. Colors: art/mascot/README.md
 The pawn is drawn in the mascot frame of art/mascot/mascot.svg (400x500, the base's bottom centre at
 200, 450) and put on the picture with place(). Hands, feet and faces are in that frame too.
 """
+import math
 import os
 import re
 import sys
@@ -246,6 +247,117 @@ def die(cx, cy, rot=0, s=1):
             f' rx="{9 * s}" fill="#ffffff" stroke-width="6"/>{pips}</g>')
 
 
+PIPS = {  # pip centres on a face, the face from -1 to 1 both ways
+    1: [(0, 0)], 2: [(-.5, -.5), (.5, .5)], 3: [(-.5, -.5), (0, 0), (.5, .5)],
+    4: [(-.5, -.5), (.5, -.5), (-.5, .5), (.5, .5)], 5: [(-.5, -.5), (.5, -.5), (0, 0), (-.5, .5), (.5, .5)],
+    6: [(-.5, -.55), (-.5, 0), (-.5, .55), (.5, -.55), (.5, 0), (.5, .55)],
+}
+# the cube's faces: (centre = normal, u axis, v axis); y is down, the viewer looks along +z
+CUBE = {
+    'F': ((0, 0, -1), (1, 0, 0), (0, 1, 0)), 'K': ((0, 0, 1), (-1, 0, 0), (0, 1, 0)),
+    'T': ((0, -1, 0), (1, 0, 0), (0, 0, -1)), 'B': ((0, 1, 0), (1, 0, 0), (0, 0, 1)),
+    'R': ((1, 0, 0), (0, 0, 1), (0, 1, 0)), 'L': ((-1, 0, 0), (0, 0, -1), (0, 1, 0)),
+}
+OPPOSITE = {'F': 'K', 'K': 'F', 'T': 'B', 'B': 'T', 'R': 'L', 'L': 'R'}
+LIGHT_DIR = (-0.45, -1, -0.6)  # from the top left, in front
+
+
+def _rotate(v, pitch, yaw):
+    """Tips the top towards the viewer by pitch, turns the right side towards them by yaw (degrees)."""
+    a, b = math.radians(pitch), math.radians(yaw)
+    x, y, z = v
+    y, z = y * math.cos(a) - z * math.sin(a), y * math.sin(a) + z * math.cos(a)
+    x, z = x * math.cos(b) + z * math.sin(b), -x * math.sin(b) + z * math.cos(b)
+    return x, y, z
+
+
+def _rounded(pts, r):
+    """A closed path through pts with its corners rounded off by about r."""
+    d = []
+    for i, (x, y) in enumerate(pts):
+        (px, py), (nx, ny) = pts[i - 1], pts[(i + 1) % len(pts)]
+        t1 = min(0.4, r / math.hypot(px - x, py - y))
+        t2 = min(0.4, r / math.hypot(nx - x, ny - y))
+        a, b = (x + (px - x) * t1, y + (py - y) * t1), (x + (nx - x) * t2, y + (ny - y) * t2)
+        d.append(f'{"M" if not i else "L"}{a[0]:.1f} {a[1]:.1f} Q{x:.1f} {y:.1f} {b[0]:.1f} {b[1]:.1f}')
+    return ' '.join(d) + ' Z'
+
+
+def _hull(pts):
+    pts = sorted(set(pts))
+    def half(seq):
+        h = []
+        for p in seq:
+            while len(h) > 1 and (h[-1][0] - h[-2][0]) * (p[1] - h[-2][1]) - (h[-1][1] - h[-2][1]) * (p[0] - h[-2][0]) <= 0:
+                h.pop()
+            h.append(p)
+        return h[:-1]
+    return half(pts) + half(pts[::-1])
+
+
+def _die_geometry(cx, cy, s, pitch, yaw, roll):
+    c, r = math.cos(math.radians(roll)), math.sin(math.radians(roll))
+    def proj(v):
+        x, y, _ = _rotate(v, pitch, yaw)
+        return (round(cx + s * (x * c - y * r), 1), round(cy + s * (x * r + y * c), 1))
+    corners = [proj((x, y, z)) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    return proj, _rounded(_hull(corners), 0.3 * s)
+
+
+def die3d(uid, pal, cx, cy, s, faces, *, pitch=22, yaw=28, roll=0, pip=GLOVE):
+    """A die in the mascot's style, centre (cx, cy), s half its edge. faces: values of the faces seen, as
+    {'F': front, 'T': top, 'R' or 'L': the side}; their opposites add up to 7. The lit face is pal light, the
+    one in front pal body (with a light patch), the far one pal shade."""
+    vals = dict(faces)
+    for k, v in faces.items():
+        vals.setdefault(OPPOSITE[k], 7 - v)
+    proj, outline = _die_geometry(cx, cy, s, pitch, yaw, roll)
+    seen = []
+    for k, (n, u, v) in CUBE.items():
+        rn = _rotate(n, pitch, yaw)
+        if rn[2] < -0.05:
+            lit = sum(a * b for a, b in zip(rn, LIGHT_DIR))
+            seen.append((lit, k, n, u, v))
+    seen.sort(reverse=True)
+    fills = [pal['light'], pal['body'], pal['shade']] if len(seen) == 3 else [pal['light'], pal['body']]
+    if len(seen) == 1:
+        fills = [pal['body']]
+    out = [f'<clipPath id="{uid}-die"><path d="{outline}"/></clipPath>', f'<g clip-path="url(#{uid}-die)">']
+    for (lit, k, n, u, v), fill in zip(seen, fills):
+        def at(a, b):
+            return proj(tuple(n[i] + a * u[i] + b * v[i] for i in range(3)))
+        quad = [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1)]
+        (x0, y0), (x1, y1), (x3, y3) = quad[0], quad[1], quad[3]
+        ox, oy = (quad[0][0] + quad[2][0]) / 2, (quad[0][1] + quad[2][1]) / 2
+        m = f'matrix({(x1 - x0) / 2:.2f} {(y1 - y0) / 2:.2f} {(x3 - x0) / 2:.2f} {(y3 - y0) / 2:.2f} {ox:.1f} {oy:.1f})'
+        out.append(f'<path d="M{" L".join(f"{x} {y}" for x, y in quad)} Z" fill="{fill}" stroke-width="5"/>')
+        patch = ''
+        if fill == pal['body']:
+            patch = (f'<ellipse cx="-0.5" cy="-0.72" rx="0.3" ry="0.09" fill="{pal["light"]}"/>'
+                     f'<ellipse cx="-0.78" cy="-0.42" rx="0.06" ry="0.09" fill="{pal["light"]}"/>')
+        dots = ''.join(f'<circle cx="{a}" cy="{b}" r="0.19" fill="{pip}" stroke-width="3" vector-effect="non-scaling-stroke"/>'
+                       for a, b in PIPS[vals[k]])
+        out.append(f'<g transform="{m}" stroke="none">{patch}</g><g transform="{m}">{dots}</g>')
+    out.append(f'</g><path d="{outline}" fill="none" stroke-width="7"/>')
+    return '\n'.join(out)
+
+
+def face_tile(cx, cy, value, fill, *, pip=GLOVE, s=1, rot=0):
+    """One face of a die, flat: the value to pick. s times 52 px across."""
+    h = 26 * s
+    dots = ''.join(f'<circle cx="{cx + a * h * 0.95:.1f}" cy="{cy + b * h * 0.95:.1f}" r="{5.5 * s:.1f}" fill="{pip}" stroke-width="3"/>'
+                   for a, b in PIPS[value])
+    return (f'<g transform="rotate({rot} {cx} {cy})"><rect x="{cx - h}" y="{cy - h}" width="{2 * h}" height="{2 * h}"'
+            f' rx="{10 * s:g}" fill="{fill}" stroke-width="6"/>{dots}</g>')
+
+
+def sparkle(cx, cy, r, fill='#ffffff'):
+    """A four-pointed glint."""
+    k = r * 0.28
+    return (f'<path d="M{cx} {cy - r} Q{cx + k} {cy - k} {cx + r} {cy} Q{cx + k} {cy + k} {cx} {cy + r}'
+            f' Q{cx - k} {cy + k} {cx - r} {cy} Q{cx - k} {cy - k} {cx} {cy - r} Z" fill="{fill}" stroke-width="4"/>')
+
+
 def picture(cid, title, cat, seed, content):
     pal = PALETTES[cat]
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}">
@@ -380,6 +492,83 @@ def rewind():
     ])
 
 
+# The Dice cards show only the dice, no pawn (the user's rule).
+
+def extra_die():
+    """D1 Extra Die: a second die drops in beside the first."""
+    p = PALETTES['D']
+    return '\n'.join([
+        shadow(112, 226, 52),
+        shadow(304, 228, 34, 5),
+        '<g fill="none" stroke-width="4"><path d="M264 30 L264 80"/><path d="M310 14 L310 76"/><path d="M356 30 L356 80"/></g>',
+        die3d('d1a', p, 108, 158, 38, {'F': 3, 'T': 1, 'R': 2}),
+        die3d('d1b', p, 306, 150, 38, {'F': 5, 'T': 3, 'R': 1}, roll=14),
+        f'<path d="M207 128 L207 168 M187 148 L227 148" fill="none" stroke-width="20"/>'
+        f'<path d="M207 128 L207 168 M187 148 L227 148" fill="none" stroke="{p["body"]}" stroke-width="8"/>',
+    ])
+
+
+def choose_face():
+    """D2 Choose a Face: the faces 1 to 3 to pick from, the 3 picked and set on the die."""
+    p = PALETTES['D']
+    return '\n'.join([
+        shadow(132, 226, 54),
+        die3d('d2', p, 132, 152, 40, {'F': 3, 'T': 1, 'R': 2}),
+        face_tile(326, 48, 1, p['ghost'], pip=p['shade'], s=0.9),
+        face_tile(326, 120, 2, p['ghost'], pip=p['shade'], s=0.9),
+        f'<rect x="286" y="152" width="80" height="80" rx="18" fill="none" stroke="{p["shade"]}" stroke-width="4" stroke-dasharray="6 7"/>',
+        face_tile(326, 192, 3, p['body'], s=0.9),
+        '<path d="M278 190 Q248 200 226 172" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        arrowhead(220, 164, 235),
+        sparkle(382, 150, 12),
+    ])
+
+
+def heavy_die():
+    """D3 Heavy Die: a weighty die thuds down; the 1 and the 2 fly off, crossed out."""
+    p = PALETTES['D']
+    heavy = dict(p, body=p['shade'], shade='#4b3986', light=p['body'])
+    slash = '<path d="M{0} {1} L{2} {3}" fill="none" stroke-width="8"/>'
+    return '\n'.join([
+        shadow(204, 228, 84, 8),
+        '<g fill="none" stroke-width="4"><path d="M150 14 L150 44"/><path d="M204 4 L204 26"/><path d="M258 14 L258 44"/></g>',
+        '<path d="M80 190 L62 180 M318 190 L336 180" fill="none" stroke-width="5"/>',
+        dust((88, 216, 7), (104, 222, 11), (122, 216, 9), (320, 216, 7), (304, 222, 11), (286, 216, 9)),
+        die3d('d3', heavy, 204, 140, 48, {'F': 5, 'T': 6, 'R': 4}),
+        face_tile(62, 78, 1, p['ghost'], pip=p['shade'], s=0.8, rot=-18) + slash.format(34, 50, 90, 106),
+        face_tile(346, 72, 2, p['ghost'], pip=p['shade'], s=0.8, rot=16) + slash.format(318, 44, 374, 100),
+    ])
+
+
+def golden_die():
+    """D4 Golden Die: a shining golden die, any face you like."""
+    p, g = PALETTES['D'], PALETTES['C']
+    rays = ''.join(f'<path d="M{204 + 96 * math.cos(a):.0f} {124 + 96 * math.sin(a):.0f} L{204 + 124 * math.cos(a):.0f} {124 + 124 * math.sin(a):.0f}"/>'
+                   for a in (math.radians(d) for d in (-160, -125, -90, -55, -20, 20, 160)))
+    return '\n'.join([
+        f'<g fill="none" stroke="{g["light"]}" stroke-width="8">{rays}</g>',
+        shadow(204, 228, 70, 7),
+        die3d('d4', g, 204, 130, 46, {'F': 6, 'T': 5, 'R': 4}),
+        sparkle(68, 64, 18), sparkle(346, 56, 13), sparkle(350, 186, 17), sparkle(60, 182, 11),
+        sparkle(254, 84, 9, p['bg']),
+    ])
+
+
+def choose_roll():
+    """D5 Choose Your Roll: two dice thrown, the better one picked, the other left pale."""
+    p, o = PALETTES['D'], other('D')
+    return '\n'.join([
+        shadow(118, 226, 46),
+        shadow(286, 228, 52),
+        f'<ellipse cx="286" cy="226" rx="70" ry="10" fill="none" stroke="{p["shade"]}" stroke-width="4" stroke-dasharray="6 7"/>',
+        die3d('d5a', o, 118, 162, 34, {'F': 2, 'T': 6, 'R': 3}, roll=-10, pip=p['shade']),
+        die3d('d5b', p, 286, 148, 40, {'F': 5, 'T': 3, 'R': 1}, roll=6),
+        '<path d="M286 16 L286 52" fill="none" stroke-width="4" stroke-dasharray="2 12"/>',
+        arrowhead(286, 76, 90, p['body']),
+        sparkle(360, 70, 12), sparkle(214, 84, 8),
+    ])
+
+
 CARDS = {  # id: (name, category, seed, drawing)
     'M1': ('Dash', 'M', 5, dash),
     'M2': ('Setback', 'M', 7, setback),
@@ -387,6 +576,11 @@ CARDS = {  # id: (name, category, seed, drawing)
     'M4': ('Double Move', 'M', 13, double_move),
     'M5': ('Tailgate', 'M', 9, tailgate),
     'M6': ('Rewind', 'M', 15, rewind),
+    'D1': ('Extra Die', 'D', 17, extra_die),
+    'D2': ('Choose a Face', 'D', 19, choose_face),
+    'D3': ('Heavy Die', 'D', 21, heavy_die),
+    'D4': ('Golden Die', 'D', 23, golden_die),
+    'D5': ('Choose Your Roll', 'D', 25, choose_roll),
 }
 
 
