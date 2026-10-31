@@ -7,12 +7,12 @@ import * as R from './rules.js'
 import { View } from './view.js'
 import { UI } from './ui.js'
 import * as P from './paper.js'
-import { T } from './strings.js'
+import { T, setLang, getLang, browserLang, errText } from './strings.js'
 import { Tutorial, createFirstGame, FIRST } from './tutorial.js'
 import SOUNDS from './sounds.config.js'
 
 const BOT_NAMES = ['Pip', 'Juniper', 'Mossy', 'Bramble', 'Clover', 'Fennel', 'Quill', 'Basil', 'Tansy', 'Wren', 'Sorrel', 'Nutmeg']
-const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60, 'Skip']]
+const SPEEDS = [[1, '1x'], [2, '2x'], [4, '4x'], [60]]
 const BOT_DELAY = 1.1
 const TURN_SECONDS = 45
 const INVITE_SECONDS = 45
@@ -64,6 +64,7 @@ const cleanLocalName = s => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f
  * & Play (the names typed for its players; '' is "Player n"), the mode and board for online play, and
  * whether the First Match is still due ('due' | 'done'; a browser that kept settings from before it played already).
  * `vol` is the volume the sound starts at, before the player moves it (the site's: quieter in a voice channel).
+ * `lang`: the language chosen in the menu (null: none yet, the browser's goes).
  */
 function loadSettings(vol = 0.8) {
   const solo = { mode: 'champion', bots: 2, level: 1, size: 50 }
@@ -88,7 +89,14 @@ function loadSettings(vol = 0.8) {
   if (Number.isFinite(saved?.sound?.vol)) sound.vol = Math.min(1, Math.max(0, saved.sound.vol))
   const first = !saved || saved.first === 'due' ? 'due' : 'done'
   const cardStyle = P.CARD_STYLES.includes(saved?.cardStyle) ? saved.cardStyle : 'pawn'
-  return { solo, pass, online, sound, first, cardStyle }
+  return { solo, pass, online, sound, first, cardStyle, lang: typeof saved?.lang === 'string' ? saved.lang : null }
+}
+
+/** The language to start in: ?lang= (to try one out), the one chosen in the menu, else the browser's. */
+function startLang() {
+  let saved = null
+  try { saved = JSON.parse(globalThis.localStorage?.getItem(SETTINGS_KEY) || 'null') } catch { /* no storage here */ }
+  return new URLSearchParams(globalThis.location?.search).get('lang') || saved?.lang || browserLang()
 }
 
 /** The game saved by the last LocalTable here, or null. */
@@ -132,7 +140,7 @@ class LocalTable {
     this.wait = 1.4
     app.view.tasks = []
     app.view.setState(R.clone(this.s), { players: p0.players })
-    for (const l of saved ? (Array.isArray(saved.log) ? saved.log.slice(-60).map(String) : this.s.log) : this.s.log) app.ui.log(l)
+    for (const l of saved ? (Array.isArray(saved.log) ? saved.log.slice(-60) : this.s.log) : this.s.log) app.ui.log(l)
     app.view.distWant = 7.5
     app.view.focusWant.copy(app.view.tokens[this.s.cur].group.position)
   }
@@ -163,7 +171,7 @@ class LocalTable {
     const pi = this.mySeat()
     if (pi < 0) return false
     const r = R.apply(this.s, pi, a)
-    if (!r.ok) { this.app.ui.say(r.err); return false }
+    if (!r.ok) { this.app.ui.say(errText(r.err)); return false }
     this.after(r.ev)
     return true
   }
@@ -242,7 +250,7 @@ class SharedTable {
     if (this.p0.room.isHost) return this.applyFrom(this.p0.me.id, a)
     // the host checks it again; a move made out of turn is not sent at all
     const s = this.s, me = this.mySeat()
-    if (s.ph === 'over' || me < 0 || s.cur !== me) { this.app.ui.say(s.ph === 'over' ? 'The game is over' : 'Not your turn'); return false }
+    if (s.ph === 'over' || me < 0 || s.cur !== me) { this.app.ui.say(s.ph === 'over' ? T.gameOver : T.notYourTurn); return false }
     this.p0.room.sendTo(this.p0.room.host, { t: 'act', gid: this.s.gid, seq: this.s.seq, a })
     this.app.waiting = 2.5
     return true
@@ -251,9 +259,9 @@ class SharedTable {
   applyFrom(id, a) {
     const s = this.s
     const pi = s.cur
-    if (s.ph === 'over' || s.pl[pi].id !== id || s.pl[pi].b) { if (id !== this.p0.me.id) this.p0.room.sendTo(id, { t: 'err', text: 'Not your turn' }); return false }
+    if (s.ph === 'over' || s.pl[pi].id !== id || s.pl[pi].b) { if (id !== this.p0.me.id) this.p0.room.sendTo(id, { t: 'err', text: 'notYourTurn' }); return false }
     const r = R.apply(s, pi, a)
-    if (!r.ok) { if (id === this.p0.me.id) this.app.ui.say(r.err); else this.p0.room.sendTo(id, { t: 'err', text: r.err }); return false }
+    if (!r.ok) { if (id === this.p0.me.id) this.app.ui.say(errText(r.err)); else this.p0.room.sendTo(id, { t: 'err', text: r.err }); return false }
     this.publish(r.ev)
     return true
   }
@@ -280,7 +288,7 @@ class SharedTable {
     if (i < 0 || s.ph === 'over') return
     s.pl[i].b = 2
     s.pl[i].rb = 1
-    const text = R.addLog(s, T.replacedByBot(s.pl[i].n))
+    const text = R.addLog(s, 'replacedByBot', s.pl[i].n)
     s.seq++
     this.publish([{ e: 'log', text }])
   }
@@ -308,7 +316,7 @@ class SharedTable {
     p.id = id
     p.b = 0
     delete p.rb
-    const text = R.addLog(s, T.seatBack(p.n))
+    const text = R.addLog(s, 'seatBack', p.n)
     s.seq++
     this.publish([{ e: 'log', text }])
     this.app.keepLobbySeat(id, old)
@@ -430,6 +438,7 @@ class App {
     this.sound = saved.sound // { on, vol }
     this.first = saved.first // the First Match: 'due' until its forced tips are done or skipped
     this.cardStyle = saved.cardStyle // how the cards look: P.CARD_STYLES
+    this.lang = saved.lang // the language chosen in the menu, or null
     this.tut = null // the First Match's tips, while it is played (tutorial.js)
     this.confirmSkip = false // the game menu asks whether leaving the First Match skips its tips
     this.speedIdx = 0
@@ -516,7 +525,7 @@ class App {
     try { this.p0.sound.play(`sfx/${file}.mp3`, rate === 1 ? { volume: v } : { volume: v, rate }) } catch { /* sound is optional */ }
   }
   saveSettings() {
-    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first, cardStyle: this.cardStyle })) } catch { /* no storage here */ }
+    try { globalThis.localStorage?.setItem(SETTINGS_KEY, JSON.stringify({ solo: this.solo, pass: this.pass, online: this.online, sound: this.sound, first: this.first, cardStyle: this.cardStyle, lang: this.lang })) } catch { /* no storage here */ }
   }
 
   // ----- the First Match: the web build's first game, with tips (tutorial.js) -----
@@ -550,7 +559,7 @@ class App {
   /** A button may be clicked: while the First Match is due, the menu takes it and the sound only. */
   allowsHit(key) {
     if (key === 'tipskip') return true
-    if (this.screen === 'menu' && this.firstDue() && !this.p0.web?.status) return key === 'quick' || key === 'snd'
+    if (this.screen === 'menu' && this.firstDue() && !this.p0.web?.status) return key === 'quick' || key === 'snd' || key.startsWith('lang')
     return this.screen === 'game' && this.tut ? this.tut.allowsHit(key) : true
   }
   /** A click the tip does not let through: the tip shakes. */
@@ -612,6 +621,14 @@ class App {
     if (name === 'pawn') P.loadCardPictures(path => this.p0.asset(path)).then(() => { if (P.getCardStyle() === 'pawn') this.ui.restyleCards() })
     if (changed) this.saveSettings()
   }
+  /** The language (the main menu's choice): kept here, and the board and every card drawn so far drawn again in it. */
+  setLanguage(id) {
+    setLang(id)
+    this.lang = getLang()
+    this.view.paintNumbers()
+    this.ui.restyleCards()
+    this.saveSettings()
+  }
   toggleSound() {
     const snd = this.sound
     snd.on = !(snd.on && snd.vol > 0.02)
@@ -634,7 +651,7 @@ class App {
   reveal() { this.table?.reveal?.(); this.sfx('start'); this.ui.dirty = true }
   sessionCount() { return this.p0.players.size }
   nameOf(id) { return this.p0.players.get(id)?.name || 'someone' }
-  speedLabel() { return SPEEDS[this.speedIdx][1] }
+  speedLabel() { return SPEEDS[this.speedIdx][1] ?? T.speedSkip }
   cycleSpeed() { this.speedIdx = (this.speedIdx + 1) % SPEEDS.length; this.view.speed = SPEEDS[this.speedIdx][0]; this.ui.dirty = true }
 
   startAttract() {
@@ -726,12 +743,13 @@ class App {
   syncPresence() {
     if (!this.p0.web) return
     const st = this.myStatus(), s = this.view.state
+    const mode = m => (m === 'fool' ? T.fool : T.champion)
     let p = { details: T.presenceMenu }
-    if (st === 'solo' && s) p = { details: T.presenceGame(s.mode, s.n || 100), state: s.ph === 'over' ? T.presenceOver : T.presenceBots }
+    if (st === 'solo' && s) p = { details: T.presenceGame(mode(s.mode), s.n || 100), state: s.ph === 'over' ? T.presenceOver : T.presenceBots }
     else if (st === 'lobby' || st === 'shared') {
       const lob = this.lobby(), humans = lob.seats.filter(x => x && !x.b).length
       const state = st === 'lobby' ? T.presenceLobby : s?.ph === 'over' ? T.presenceOver : this.watching() ? T.presenceWatching : T.presencePlaying
-      p = { details: T.presenceGame(s && st === 'shared' ? s.mode : lob.mode, (s && st === 'shared' ? s.n : lob.size) || 100), state, players: Math.max(1, humans), max: 6 }
+      p = { details: T.presenceGame(mode(s && st === 'shared' ? s.mode : lob.mode), (s && st === 'shared' ? s.n : lob.size) || 100), state, players: Math.max(1, humans), max: 6 }
     }
     // the game's time: from its start, the same game until the table changes (a rematch is a new one)
     const live = st === 'solo' || st === 'shared'
@@ -934,7 +952,7 @@ class App {
       return
     }
     if (m.t === 'act' && this.p0.room.isHost && this.shared && m.gid === this.shared.s.gid) this.shared.applyFrom(from, m.a)
-    else if (m.t === 'err') { this.waiting = 0; this.ui.hidden = null; this.ui.say(String(m.text).slice(0, 60)) }
+    else if (m.t === 'err') { this.waiting = 0; this.ui.hidden = null; this.ui.say(String(errText(m.text)).slice(0, 60)) }
     else if (m.t === 'lob' && this.p0.room.isHost && m.cmd) this.handleLobby(from, m.cmd)
     else if (m.t === 'leaveSeat' && this.p0.room.isHost) this.leftTable(from)
     else if (m.t === 'claim' && this.p0.room.isHost && this.shared && m.gid === this.shared.s.gid) {
@@ -1070,14 +1088,14 @@ class App {
     if (!s || s.ph === 'over' || s.pl.some(p => p.id === id)) return
     const kept = s.pl.map((p, i) => i).filter(i => s.pl[i].f && s.pl[i].b && !s.pl[i].d)
     if (!kept.length) { if (channel) this.seatNext(id); return }
-    this.giveSeat(kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, T.takesSeat)
+    this.giveSeat(kept.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, 'takesSeat')
   }
-  /** Host: player `id` takes seat `i` of the Shared Table's game from its bot, under their own name, and keeps it for the rematch; `say` (name, the bot's) goes in the log. */
+  /** Host: player `id` takes seat `i` of the Shared Table's game from its bot, under their own name, and keeps it for the rematch; `say`, a key of the log's lines with the name and the bot's, goes in the log. */
   giveSeat(i, id, say) {
     const s = this.shared.s, p = s.pl[i], bot = p.n
     p.id = id; p.b = 0; p.n = (this.nameOf(id) || 'Player').slice(0, 14)
     delete p.f; delete p.rb
-    const text = R.addLog(s, say(p.n, bot))
+    const text = R.addLog(s, say, p.n, bot)
     s.seq++
     this.shared.publish([{ e: 'log', text }])
     // their seat in the next game: this one's (another free one when someone else has it now)
@@ -1119,7 +1137,7 @@ class App {
     const own = sh.claimable(id).find(i => s.pl[i].id === id)
     if (own != null) { sh.takeBack(id, own); return }
     const spare = this.spareSeats()
-    if (spare.length) this.giveSeat(spare.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, T.takesOver)
+    if (spare.length) this.giveSeat(spare.reduce((a, b) => (s.pl[b].pos > s.pl[a].pos ? b : a)), id, 'takesOver')
   }
 
   // ----- the site's own table (Discord: everyone in the voice channel; Project 0 and the other sites have none) -----
@@ -1175,7 +1193,8 @@ class App {
 }
 
 export default async function start(p0) {
-  p0.loading(0.05, 'cutting paper')
+  setLang(startLang())
+  p0.loading(0.05, T.loadPaper, T.title)
   p0.controls.mode = 'none'
   p0.controls.vertical = false
   p0.bodies.visible = false
@@ -1184,7 +1203,7 @@ export default async function start(p0) {
   renderer.outputColorSpace = THREE.SRGBColorSpace
   const app = new App(p0)
   globalThis.__csl = app // for local testing from the console
-  p0.loading(0.5, 'setting the table')
+  p0.loading(0.5, T.loadTable)
   // (where the site puts the player at its own table, it is joined at once: a game against bots is not carried on)
   if (app.channel() || !app.resumeSolo()) app.startAttract()
 
@@ -1269,6 +1288,7 @@ export default async function start(p0) {
     // an online attempt on screen: back cancels it or puts its message away
     const st = app.p0.web?.status
     if (st) { if (back) { if (st.busy) app.p0.web.cancel(); else app.p0.web.dismiss() } return }
+    if (app.ui.langOpen && back) { app.ui.langOpen = false; app.ui.dirty = true; return }
     if (app.screen === 'solo' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startSolo(); return }
     if (app.screen === 'pass' && (e.code === 'Enter' || e.code === 'NumpadEnter') && !app.invite) { app.startPass(); return }
     if (['solo', 'pass', 'online', 'help'].includes(app.screen) && back) { app.toScreen('menu'); return }
@@ -1310,7 +1330,7 @@ export default async function start(p0) {
   app.ui.warm(renderer)
   await renderer.compileAsync(p0.scene, p0.camera)
   await renderer.compileAsync(app.view.tray, app.view.trayCam)
-  p0.loading(0.95, 'ready')
+  p0.loading(0.95, T.loadReady)
 
   // frame: board, screen layer, dice tray; resolution follows the machine's speed
   const res = resolution(renderer, p0)

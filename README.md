@@ -13,15 +13,24 @@ Snakes and ladders up paper tiers on a board of 50, 70 or 100 cells, with a deck
 - **Bots and friends:** 2 to 6 on the board, any mix of players at one computer (pass-and-play) and bots of three levels.
 - **Cards:** extra and golden dice, swamps, trampolines and portals, snakes turned into ladders, shields, freezes, steals and swaps; one card per turn, played before or after the roll. You keep up to 3: a 4th burns at the end of your turn.
 - **Online:** *Quick Match* puts you straight into a game of the mode and board last chosen on the Online screen (Champion on 50 cells at first): a game under way where a bot keeps a seat for you, or a new one with bots in the empty seats under names like the players' own; a player who comes later takes a bot's seat during the game. *Create a Room* gives a code and a link for friends; in the room the host sets the mode, the board and the bots, as in Solo Play. The room's table has seats for up to 6 (players and bots); others can watch.
+- **Four languages:** English, Ukrainian, Russian and Thai, chosen in the main menu; players at one online table each read it in their own.
 - A 3D paper board with animated dice, sound effects, works on desktop and phones.
 
 Controls: click the dice tray when it lights up (or press Space) to roll; while you can still play a card the tray says End Turn: click it or press Space to end the turn. Click a card, then its target; 1–4 play a card, wheel or +/− zoom, drag to look around, M or Tab opens the menu.
 
 ## Tuning the cards and the board
 
-`experience/cards.config.js` holds the deck for game design: each card's name, text, rarity, how often it comes up within its rarity (`weight`), whether it is in the deck (`enabled`), who it can be played on (`target`: any player, any player but yourself, or yourself) and its numbers (spaces, turns, dice values…). Texts use `{placeholders}` for those numbers, so they follow the values. The hand size and the rarity weights are there too. Edit and reload the page.
+`experience/cards.config.js` holds the deck for game design: each card's rarity, how often it comes up within its rarity (`weight`), whether it is in the deck (`enabled`), who it can be played on (`target`: any player, any player but yourself, or yourself) and its numbers (spaces, turns, dice values…). The cards' names and texts are in `experience/locale.js`; the texts use `{placeholders}` for those numbers, so they follow the values. The hand size and the rarity weights are there too. Edit and reload the page.
 
 `experience/board.config.js` holds the field: the snakes and ladders of each board size, how long they run, how many may stand on one tier, how many tiers may stay empty, the share of ladders in the first half and of snakes in the second, and the snake just before the finish.
+
+## Languages
+
+The game speaks English, Ukrainian, Russian and Thai; the main menu's button in the corner changes the language and the choice is remembered. At first the game follows the browser's language, and `?lang=ru` in the address overrides both.
+
+`experience/locale.js` holds every word, a table per language, and English is the source: a key another language leaves out shows in English. A value is a string, or a function where numbers or names go in, and a card's text takes `{spaces}` for its number and `{spaces|клетку|клетки|клеток}` for the word that goes with it. `experience/strings.js` reads the table (`T.key`). The rules hold no words: they give keys, card ids and names, so at an online table each screen reads the same log in its own language.
+
+To add a language, copy a table in `experience/locale.js`, translate it and add a line to `LANGS` with its `id` (the two letters of the browser's language), the `name` in its own language and its `plural` rule. Then open `tools/langtest.html`: it lists what is missing, a function that takes other arguments than English's, words left unfilled, every line a whole game logs, every reason the rules give, and the cards whose text has to shrink to fit (`?faces=ru` shows that language's cards). `tools/shots.html?lang=ru` shoots every screen in it.
 
 ## Running locally
 
@@ -53,7 +62,7 @@ The SDK is used without ads (`web/platform.js`; the game waits up to 10 s for `S
 
 Where the SDK does not load (an ad blocker, offline) the game runs as before, with rooms by their code only. On `localhost` the SDK runs in its local mode, and these parameters on the build's address (cgframe's `src`) try the rest: `?instantJoin=true` (instant multiplayer), `?roomId=CODE` or a whole invite link's `?czy_invite=true&roomId=CODE` (an invite), `?debug` (every hook call in the console). The local SDK never calls the join room listener: `__cslInvite('CODE')` in the game's console does what it would.
 
-`tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down; `?src=../dist/crazygames/index.html` shoots the build instead of `index.html`). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
+`tools/shots.html` saves every screen (menus, a game of six on the board of 100, a card's target, the log, the results, the game menu and more) at each of those sizes and on phones, upright and on their side, as PNGs in `tmp/shots/now/` (`?sizes=`, `?screens=`, `?out=` narrow it down, `?lang=ru` shoots it in that language; `?src=../dist/crazygames/index.html` shoots the build instead of `index.html`). It shows the game at DPR 1, where text is smallest: the screen layer keeps text at 12 px or more and buttons a 40 px reach for a finger. Two parameters on `index.html` help with that: `?dpr=1` keeps a pixel ratio (the game would lower it on a slow machine; add `&adapt` to let it), and `?safe=47,0,34,0` pretends a phone's notch and home bar (top, right, bottom, left px; the game lays its buttons out inside the CSS safe area).
 
 ## Project structure
 
@@ -71,11 +80,14 @@ web/platform.js     the site it runs on (GitHub Pages or CrazyGames) and the hoo
 vendor/three/       three.js and the addons the game uses
 vendor/peerjs/      PeerJS
 experience/         the game itself: rules, board, UI, sounds (also the Project 0 experience package)
-  cards.config.js   the deck's names, texts, rarity, targets and numbers, for tuning
+  locale.js         every word of the game, a table per language (add a language here)
+  strings.js        reads them in the language chosen; log lines and the rules' reasons in words
+  cards.config.js   the deck's rarity, targets and numbers, for tuning
   board.config.js   where snakes and ladders may stand, for tuning
 tools/              dev tools: harness with shared rooms, rules simulation, card and diorama previews, the CrazyGames build,
                     online tests (nettest.html: the network; onlinetest.html: three players through a whole game;
-                    quicktest.html: Quick Match with bots, on two sites), shots.html: every screen at every QA size
+                    quicktest.html: Quick Match with bots, on two sites), shots.html: every screen at every QA size,
+                    langtest.html: every language against English
 build/              the street-view diorama for the Project 0 lot
 diorama/            a monumental paper-craft diorama (12 × 19 × 12 m) with its own viewer page
 ```

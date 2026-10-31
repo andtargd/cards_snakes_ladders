@@ -110,7 +110,7 @@ step('Bob comes during the game: he takes the seat a bot kept, under his name', 
   ok(bob >= 0 && s.pl[bob].n === 'Bob' && !s.pl[bob].b && !s.pl[bob].f, 'Bob\'s seat: ' + JSON.stringify(s.pl[bob]))
   ok(s.pl.filter(p => p.b && p.f).length === 2, 'bots keeping seats: ' + names(s))
   ok(app('a').lobby().seats.some(x => x && x.id === app('b').p0.me.id), 'Bob has no seat for the rematch')
-  ok(s.log.some(l => l.includes('Bob takes the seat')), 'no word of it in the log')
+  ok(s.log.some(l => l[1] === 'takesSeat' && l[2] === 'Bob'), 'no word of it in the log')
   await waitFor(() => app('b').ui.toast?.text?.includes('under way'), 4000, 'the toast on Bob\'s screen')
   note(`${names(s)}; log: "${s.log.at(-1)}"`)
 })

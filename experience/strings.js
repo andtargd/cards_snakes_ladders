@@ -1,273 +1,64 @@
-// Every piece of text the game shows, in one table (English only for now). Card names and texts are in cards.config.js.
-import { CFG, SELF } from './rules.js'
+// The game's words in the language chosen: T.key is that key of locale.js, in that language (English where a
+// language leaves it out). The rules know no words: they give keys, cards and names, and this reads them.
+import { LANGS } from './locale.js'
+import { CARD, SELF } from './rules.js'
 
-const ord = n => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th')
+export { LANGS }
 
-export const T = {
-  title: 'Cards, Snakes & Ladders',
-  // a window too small to play in (Discord's picture-in-picture): the board and this under the game's line
-  expandToPlay: 'Make the window bigger to play',
-  tagline: 'Roll, play a card, climb the paper tiers to the last cell.',
-  // the main menu: Quick Match, then Solo Play, Pass & Play and Online
-  quickMatchSub: (mode, size) => `${mode} · ${size} cells · find players online`,
-  quickGame: 'Quick Game', // Project 0: no online play, a game against bots at once
-  quickGameSub: 'One click: you against the bots',
-  // the First Match (the web build's first game teaches it as it goes) and its tips
-  firstMatch: 'First Match',
-  firstMatchSub: 'Learn as you play · 2 bots · 50 cells',
-  tipStart: 'Start your first match',
-  tipRoll: 'Roll the die',
-  tipLadder: 'Ladders take you up!',
-  tipCard: 'Play your card',
-  tipCell: 'Players start here. Trap them!',
-  tipStuck: 'Both players stuck!',
-  tipAnyTime: 'You can play a card before or after rolling',
-  tipFlip: "Turn your ladder into a snake: the bots can't climb it",
-  tipDiscard: 'You keep 3 cards: burn the one you need least',
-  tipTake: 'Keep one card: the others burn',
-  tipPick: 'Two dice: you move by the one you click',
-  tipTarget: 'Click something lit to play the card on it. Cancel puts it back',
-  tipEnd: 'Not playing a card? End your turn',
-  skipTutorial: 'Skip tutorial',
-  skipTitle: 'Skip the tutorial?',
-  skipText: "Tips won't show again.",
-  keepPlaying: 'Keep playing',
-  skip: 'Skip',
-  replayTutorial: 'Replay tutorial',
-  playAgain: 'Play Again',
-  tryFool: 'Try Fool mode',
-  biggerBoard: 'Bigger board',
-  soloPlay: 'Solo Play',
-  soloSub: 'You against bots. No waiting.',
-  soloHead: 'Pick a mode, the bots and a board.',
-  passPlay: 'Pass & Play',
-  passSub: 'Take turns on one screen, 2 to 6',
-  passHead: 'Players take turns on one screen: each hand shows on its own turn.',
-  online: 'Online',
-  onlineSub: 'Quick match, or a room with friends',
-  onlineHead: 'Play people online, or bring your friends.',
-  inRoom: code => `Back to room ${code}`,
-  invitedShort: code => `Invited to room ${code}`,
-  sharedTableSub: 'Sit down with everyone in this lot', // Project 0 only (the lot's Shared Table)
-  play: 'Play',
-  // the setup screens
-  addPlayer: '+ Add player',
-  // the Online screen (the web build)
-  yourName: 'Your name',
-  playingAs: name => `Playing as ${name}`,
-  quickTable: n => `Players looking for the same game sit down together, up to ${n} at a table.`,
-  createRoom: 'Create a Room',
-  createSub: links => (links ? 'Get a code and a link for friends' : 'Get a room code for friends'),
-  orJoin: 'or join with a code',
-  codeHint: 'CODE',
-  join: 'Join',
-  invitedRoom: code => `You are invited to room ${code}`,
-  onlinePrivacy: 'Online play connects you directly to other players (they can see your IP address).',
-  privacy: 'Privacy',
-  terms: 'Terms',
-  ok: 'OK',
-  playBots: 'Play vs Bots',
-  champion: 'Champion',
-  fool: 'Fool',
-  championDesc: 'The first to reach the last cell wins',
-  foolDesc: 'Whoever is left last on the board is the Fool',
-  settings: 'Settings',
-  level: 'Bots play',
-  levels: ['Easy', 'Medium', 'Hard'],
-  sound: 'Sound',
-  championHint: 'Champion: the first to reach the last cell wins.',
-  foolHint: 'Fool: whoever is left last on the board is the Fool.',
-  hotseatHint: 'Players take turns at this computer: each hand shows on its turn.',
-  bots: 'Bots',
-  players: 'Players',
-  board: 'Board',
-  playerN: n => `Player ${n}`,
-  start: 'Start Game',
-  startGame: 'Start Game',
-  sharedTable: 'Shared Table',
-  howToPlay: 'How to Play',
-  theCards: 'The Cards',
-  cardStyles: ['Minimalism', 'Pawn Parade'], // P.CARD_STYLES: 'minimal', 'pawn'
-  rulesShort: 'Rules',
-  back: 'Back',
-  // Project 0's Shared Table and its invitations (the web build has online rooms with a code instead)
-  othersHere: n => `${n} other player${n > 1 ? 's' : ''} here: invite them to the Shared Table.`,
-  aloneHere: 'Invite friends from the bar and play at the Shared Table.',
-  weekTable: "This week's best",
-  youHost: 'You host this table',
-  hostIs: name => `${name} hosts this table`,
-  takeSeat: 'Take a Seat',
-  leaveSeat: 'Leave Seat',
-  invite: 'Invite',
-  inviteHint: 'Press “+ Invite” in the bar at the top: friends who accept land at this table',
-  inviteNote: 'Join my table: Cards, Snakes & Ladders',
-  inviteTitle: 'Invite to the Table',
-  inviteSub: 'Players in this lot get an invitation on their screen',
-  noOneHere: 'No one else is in this lot right now.',
-  inviteCity: 'Invite from the City',
-  inviteOne: 'Invite',
-  inviteSentShort: 'Sent',
-  close: 'Close',
-  // the web build's online rooms
-  roomLine: (code, n) => `Room ${code} · ${n} here`,
-  shareLink: 'Invite Link',
-  shareCode: 'Copy Code', // where rooms have no links (CrazyGames): friends type the code
-  leaveRoom: 'Leave Room',
-  linkCopied: 'Link copied: send it to your friends',
-  codeCopied: code => `Room code ${code} copied: friends enter it in Online`,
-  copyFailed: code => `Could not copy: tell them the room code ${code}`,
-  roomSub: 'Players in this room get an invitation on their screen',
-  noOneRoom: 'No one else is in this room yet: send them the link.',
-  noOneRoomCode: code => `Room code: ${code} — friends enter it in Online.`,
-  roomLost: 'The connection to the room was lost',
-  // the table of an online room (and the Shared Table)
-  onlineRoom: 'Online Room',
-  roomHead: (code, host) => `Room ${code} · ${host}`,
-  seatsN: n => `Players · ${n}/6`,
-  openSeat: 'Open seat',
-  hostTag: 'Host',
-  botTag: level => `Bot · ${level}`,
-  // Quick Match: players looking for a game (bots sit down with them as players would)
-  quickMatch: 'Quick Match',
-  waitingSeat: 'Waiting for a player…',
-  quickStarting: 'The game is starting…',
-  takesSeat: (name, old) => `${old} left: ${name} takes the seat`,
-  quickSeated: 'You join a game under way: play on!',
-  // the site's own table (Discord: everyone in the voice channel sits at it; there is no menu of rooms)
-  channelTable: 'Channel Table',
-  channelSub: 'Everyone in this voice channel plays at one table',
-  botsMakeUp: 'Bots take the seats the game still needs',
-  inviteFriends: 'Invite Friends',
-  // the player's status on the site (Discord's, under their name; it adds the table's players: "(3 of 6)")
-  presenceMenu: 'In the menu',
-  presenceGame: (mode, size) => `${mode === 'fool' ? T.fool : T.champion} · ${size} cells`,
-  presenceLobby: 'Waiting to start',
-  presencePlaying: 'Playing at the table',
-  presenceWatching: 'Watching the table',
-  presenceBots: 'Playing vs bots',
-  presenceOver: 'The game is over',
-  watching: 'You are watching this game',
-  watchingNext: 'You play in the next one',
-  watchingFull: 'The table is full: you play when a seat is free',
-  // who is watching the channel's game (the host may seat them where a bot plays)
-  watchers: n => `Watching · ${n}`,
-  watcherMe: name => `${name} (you)`,
-  nextGameTag: 'Next game',
-  seatWatcher: 'Seat',
-  takesOver: (name, old) => `${name} takes over from ${old}`,
-  lobbyWatching: names => `Watching (the table is full): ${names}`,
-  endGame: 'End Game',
-  backToLobby: 'Back to Lobby',
-  waitingRematch: 'Waiting for the host: a rematch or a new game',
-  tryAgain: 'Try Again',
-  status: { menu: 'in the menu', solo: 'playing vs bots', lobby: 'at the table', shared: 'playing at the table' },
-  inviteSent: name => `Invitation sent to ${name}`,
-  inviteYes: name => `${name} is coming to the table`,
-  inviteNo: name => `${name} can't come right now`,
-  inviteHere: name => `${name} is already at the table`,
-  invitedBy: name => `${name} invites you`,
-  invitedTo: 'to sit down together at the Shared Table',
-  inviteEnds: 'Your game here will end.',
-  joinTable: 'Join the Table',
-  notNow: 'Not now',
-  waitingHost: 'Waiting for the host to start',
-  foolNeeds3: 'Fool needs at least 3 players',
-  place: n => `${ord(n)} place`,
-  atStart: 'At the start',
-  cellTier: c => `Cell ${c} · Tier ${Math.floor((c - 1) / 10) + 1}`,
-  cellShort: c => (c <= 0 ? 'Start' : `Cell ${c}`),
-  wins: name => (name === SELF ? 'You win!' : `${name} wins!`),
-  isFool: name => (name === SELF ? 'You are the Fool!' : `${name} is the Fool!`),
-  mine: name => (name === SELF ? name : `${name} (you)`), // the name of the player at this screen
-  chooseTarget: 'Choose a target',
-  chooseTwoCells: 'Choose two free cells, up to your own',
-  // the soft message in the middle of the screen while a card waits for its target
-  chooseWhat: tgt => ({ any: 'Choose any player', other: 'Choose another player', leader: 'Choose a leader', cell: 'Choose a cell', cell2: 'Choose two cells', ladder: 'Choose a ladder', snake: 'Choose a snake', echo: 'Choose a card to echo' })[tgt] || 'Choose a target',
-  targetHint: kind => ({ player: 'Click a player or their panel to play the card', cell: 'Click a lit cell to play the card', cell2: 'Click two lit cells: portals go no further than your cell', ladder: 'Click a lit ladder', snake: 'Click a lit snake', echo: "Each player's last card is by their name: click one to play it again" })[kind],
-  echoing: (name, hint) => `Echo of ${name} · ${hint}`,
-  chooseDiscard: 'Choose a card to discard',
-  // the message at the end of a turn with more cards than the hand holds
-  discardTitle: 'Discard a card',
-  discardHint: n => (n > 1 ? `You hold ${n} too many: click the cards to burn` : `You can keep ${CFG.hand}: click a card to burn it`),
-  cantPlay: "You can't play cards this turn",
-  yourTurn: 'Your turn',
-  turnOf: name => `${name}'s turn`,
-  passTo: name => `${name}'s turn`,
-  passHint: 'Pass the computer over: the others look away.',
-  showCards: 'Show my cards',
-  playOrEnd: 'Play a card or end the turn',
-  waitingFor: name => `Waiting for ${name}`,
-  demo: 'Bots are playing a demo game',
-  round: (n, max) => `Round ${n} of ${max}`,
-  confirm: 'Confirm',
-  cancel: 'Cancel',
-  discard: 'Discard',
-  chooseValue: 'Choose a value',
-  chooseBack: 'How far back?',
-  chooseDie: 'Choose a die',
-  pickDie: 'Click the die to move by',
-  tapDie: 'Tap a die',
-  chooseCard: 'Choose a card',
-  chooseCardHint: 'Click the card to keep: the others burn',
-  tapToRoll: 'Tap to roll',
-  clickToRoll: 'Click to roll · Space',
-  clickToEnd: 'Click or press Space',
-  endTurn: 'End Turn',
-  playCard: 'Play Card',
-  handOf: name => `${name}'s hand`,
-  noCards: 'No cards',
-  // an effect on a player (the icons in the players panel): what it does to them, by its key in fx; `c` is its card
-  fxHint: {
-    x: c => `Their next roll uses ${c.dice} dice.`,
-    cf: c => `They pick their next die's value, 1 to ${c.max}.`,
-    hv: c => `Their next roll: no die shows less than ${c.min}.`,
-    gd: c => `They pick their next die's value, 1 to ${c.max}.`,
-    pk: () => 'Their next roll uses 2 dice: they move by the one they pick.',
-    sl: c => `Their next roll totals ${c.max} at most.`,
-    fz: () => "They can't play cards on their next turn.",
-    sk: () => 'They skip their next turn.',
-    bk: () => 'Their next roll moves them back.',
-    pa: () => 'They slide only half as far down the next snake.',
-    bo: () => 'They ignore swamps.',
-    sh: () => 'They ignore the next snake they land on.',
-    gr: () => 'Until their next turn no one else can hinder, move or rob them.',
-    cc: c => `On their next turn they draw ${c.draw} cards and keep one.`,
-  },
-  turnsLeft: n => `${n} turn${n > 1 ? 's' : ''} left`,
-  fxGone: 'No longer on them', // under an effect's card that wore off while it was shown
-  fxSeeCard: 'Click to see the card',
-  effectsOf: (name, n) => `${name}'s effect${n > 1 ? 's' : ''}`,
-  log: 'Log',
-  youWon: 'You won!',
-  youAreFool: 'You are the Fool!',
-  youFinished: n => `You finished in place ${n}`,
-  roundLimit: 'The round limit was reached',
-  finished: 'Finished',
-  rematch: 'Rematch',
-  mainMenu: 'Main Menu',
-  skips: name => `${name} skips this turn`,
-  noTargets: 'No valid targets',
-  protectedBy: (name, card) => `${name} is protected by ${card}`,
-  // Project 0's week's table (the web build has none)
-  score: (score, best, place) => `Weekly score ${score}${best != null ? ` · your best ${best}` : ''}${place ? ` · place ${place}` : ''}`,
-  scoreSent: score => `Weekly score ${score} sent`,
-  hostLeft: 'The host left: the table carries on',
-  replacedByBot: name => `${name} left: a bot takes the seat`,
-  seatBack: name => `${name} is back and takes their seat again`,
-  botPlaysForYou: 'A bot is playing your seat',
-  continuePlaying: 'Continue Playing',
-  seatNotFree: 'That seat is not free any more',
-  menuTitle: 'Game menu',
-  resume: 'Resume',
-  leaveGame: 'Main Menu',
-  exitCity: 'Exit to the City', // Project 0 only
-  controls: 'Click a card, then its target; Cancel, a right-click or a click beside the board puts it back. Hold a card to read it. Click the dice tray to roll, and again to end the turn. Space rolls and ends the turn, 1-4 play a card, wheel or +/- zoom, drag to look around, Backspace or Esc goes back, M or Tab opens this menu.',
-  // How to Play: only the basics, a heading and a line or two each
-  rules: [
-    ['Goal', 'Be the first to reach the last cell of the board.'],
-    ['Your turn', 'Roll the die once (click the dice tray) and, before or after it, play one card if you like. Then End Turn.'],
-    ['The board', 'Stop on a ladder to climb it, on a snake’s head to slide down. A swamp stops you; a trampoline or a portal sends you on.'],
-    ['Cards', `Draw one each turn and keep up to ${CFG.hand}. Click a card, then its target (Cancel or a right-click puts it back). Rarer cards come up less often and hit harder.`],
-    ['Modes', 'Champion: the first to finish wins. Fool: the last one left on the board loses.'],
-  ],
+const EN = LANGS[0]
+const plain = v => !!v && typeof v === 'object' && !Array.isArray(v)
+/** A language's table over English's: what it leaves out, at any depth, stays English. */
+const over = (base, own) => {
+  const o = { ...base }
+  for (const k of Object.keys(own)) o[k] = plain(base[k]) && plain(own[k]) ? over(base[k], own[k]) : own[k]
+  return o
+}
+
+let lang = EN, words = EN.words
+export const T = new Proxy({}, { get: (_, k) => words[k] })
+export const getLang = () => lang.id
+export function setLang(id) {
+  lang = LANGS.find(l => l.id === id) || EN
+  words = over(EN.words, lang.words)
+  if (globalThis.document) { document.documentElement.lang = lang.id; document.title = T.title }
+}
+/** The language this browser asks for, of those the game has; else English. */
+export function browserLang() {
+  const asked = globalThis.navigator?.languages || [globalThis.navigator?.language]
+  for (const a of asked) { const l = LANGS.find(l => l.id === String(a).slice(0, 2).toLowerCase()); if (l) return l.id }
+  return EN.id
+}
+
+/** A player's name as it shows: the player at this screen who gave none is "You" in this language. */
+export const who = name => (name === SELF ? T.you : name)
+/** The name after the words that say it is this screen's player: "Pip (you)", or just "You". */
+export const myName = name => (name === SELF ? T.you : T.mine(name))
+export const winsText = name => (name === SELF ? T.youWin : T.wins(name))
+export const foolText = name => (name === SELF ? T.youAreFool : T.isFool(name))
+
+export const cardName = id => T.cards[id]?.name ?? String(id)
+/** The word that pops up over a piece when card `id` hits it. */
+export const cardPopup = id => T.cards[id].popup ?? T.cards[id].name
+/** A card's text with its numbers: {spaces} is the card's own number, {spaces|клетку|клетки|клеток} the word for it. */
+export function cardText(id) {
+  const c = CARD[id]
+  return T.cards[id].text.replace(/\{(\w+)(?:\|([^}]*))?\}/g, (m, k, forms) => (c[k] === undefined ? m : forms ? lang.plural(c[k], ...forms.split('|')) : String(c[k])))
+}
+
+// what goes in a line of the rules: a name, a card ({ c: id }), some cards ({ cards: [id] }), or a number
+const word = a => (a === SELF ? T.you : a?.c ? cardName(a.c) : Array.isArray(a?.cards) ? a.cards.map(cardName).join(', ') : a)
+/** Why a move can't be made, as the rules give it: a key of T, or [key, ...what goes in it]. */
+export function errText(e) {
+  const [k, ...a] = [].concat(e), t = T[k]
+  return typeof t === 'function' ? t(...a.map(word)) : t ?? String(k)
+}
+const piece = ([k, ...a]) => { const t = T.logLine[k]; return typeof t === 'function' ? t(...a.map(word)) : t ?? String(k) }
+/**
+ * A line of the game's log in this language: [turn, key, ...what goes in it, { then: [[key, ...]] }], `then`
+ * being what follows the line. (A line that is only text is from a game saved before, or from an older host.)
+ */
+export function logText(l) {
+  if (!Array.isArray(l)) return String(l)
+  const [turn, ...line] = l, then = line[line.length - 1]?.then
+  return `${turn}. ${piece(then ? line.slice(0, -1) : line)}${(Array.isArray(then) ? then : []).map(piece).join('')}`
 }

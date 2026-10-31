@@ -2,18 +2,19 @@
 // icons cards and effects use. Everything is drawn on OffscreenCanvas, so it works in the sandbox's
 // worker and in the diorama builder alike.
 import * as THREE from 'three'
-import { CARD, CARDS, CATEGORY, RARITY } from './rules.js'
+import { CARD, CARDS, RARITY } from './rules.js'
+import { T, cardName, cardText } from './strings.js'
 
 export const INK = '#2b2622'
-export const FONT = '"Trebuchet MS", "Segoe UI", Verdana, sans-serif'
+export const FONT = '"Trebuchet MS", "Segoe UI", Verdana, "Leelawadee UI", Thonburi, "Noto Sans Thai", sans-serif'
 export const TIER_COLORS = ['#f28b82', '#f7a072', '#f9cf5e', '#c5df6f', '#7fd19b', '#5fcac6', '#73a8ee', '#9d91ee', '#cf8ce4', '#ef8fb9']
 export const PLAYER_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fbc02d', '#8e24aa', '#fb8c00']
 export const CAT_COLORS = { M: '#e8743b', D: '#7b5ce0', B: '#2aa876', H: '#d64545', P: '#2b8fd6', C: '#b58a12' }
 export const RARITY_STYLE = {
-  C: { frame: '#9aa0a6', bg: '#f3f1ec', stars: 0, label: 'Common' },
-  U: { frame: '#3fa34d', bg: '#eaf4e4', stars: 1, label: 'Uncommon' },
-  R: { frame: '#2f6fd6', bg: '#e4ecf9', stars: 2, label: 'Rare' },
-  L: { frame: '#d4a017', bg: '#fbf0cc', stars: 3, label: 'Legendary' },
+  C: { frame: '#9aa0a6', bg: '#f3f1ec', stars: 0 },
+  U: { frame: '#3fa34d', bg: '#eaf4e4', stars: 1 },
+  R: { frame: '#2f6fd6', bg: '#e4ecf9', stars: 2 },
+  L: { frame: '#d4a017', bg: '#fbf0cc', stars: 3 },
 }
 
 export const canvas = (w, h) => {
@@ -116,10 +117,10 @@ export function atlasCanvas(size = 1024, last = 100) {
     g.fillStyle = INK
     g.font = `bold ${Math.round(44 * k)}px ${FONT}`
     g.textAlign = 'center'; g.textBaseline = 'middle'
-    g.fillText(text, (x0 + x1) / 2 * k, (y0 + y1) / 2 * k + 2 * k)
+    g.fillText(text, (x0 + x1) / 2 * k, (y0 + y1) / 2 * k + 2 * k, (x1 - x0 - 12) * k)
   }
-  label(4, 962, 236, 1022, 'START')
-  label(244, 962, 476, 1022, 'DICE')
+  label(4, 962, 236, 1022, T.boardStart)
+  label(244, 962, 476, 1022, T.boardDice)
   return c
 }
 /**
@@ -215,16 +216,33 @@ export function roundRect(g, x, y, w, h, r) {
   g.arcTo(x, y, x + w, y, r)
   g.closePath()
 }
-export function wrapText(g, text, maxWidth) {
-  const words = text.split(' ')
+// Thai has no spaces between its words: a line breaks where this finds a word's end
+const thaiWords = globalThis.Intl?.Segmenter ? new Intl.Segmenter('th', { granularity: 'word' }) : null
+const THAI = /[\u0E00-\u0E7F]/
+/** Text in lines at most `maxWidth` wide; `whole`: a run of it that stays on one line (a link). */
+export function wrapText(g, text, maxWidth, whole = null) {
   const lines = []
   let line = ''
-  for (const w of words) {
-    const t = line ? line + ' ' + w : w
-    if (g.measureText(t).width > maxWidth && line) { lines.push(line); line = w } else line = t
+  for (const run of text.split(' ')) {
+    const words = thaiWords && THAI.test(run) && run !== whole ? Array.from(thaiWords.segment(run), s => s.segment) : [run]
+    words.forEach((w, i) => {
+      const t = line ? line + (i ? '' : ' ') + w : w
+      if (g.measureText(t).width > maxWidth && line) { lines.push(line); line = w } else line = t
+    })
   }
   if (line) lines.push(line)
   return lines
+}
+/**
+ * A card's text at `size` px or as much smaller as it takes to fit its four lines (a language may run
+ * longer than the card's English): { lines, k }, `k` being how much smaller, for the line pitch too.
+ */
+export function fitCardText(g, text, width, size) {
+  for (let k = 1; ; k -= 0.04) {
+    g.font = `${size * k}px ${FONT}`
+    const lines = wrapText(g, text, width)
+    if (lines.length <= 4 || k <= 0.7) return { lines: lines.slice(0, 4), k }
+  }
 }
 
 function arrow(g, x1, y1, x2, y2, w, head = w) {
@@ -595,11 +613,12 @@ function drawCardMinimal(g, cardId, w, h, x0, y0) {
   g.textAlign = 'left'; g.textBaseline = 'middle'
   let size = 25
   g.font = `bold ${size * k}px ${FONT}`
-  while (g.measureText(card.name).width > w - 82 * k && size > 15) { size--; g.font = `bold ${size * k}px ${FONT}` }
-  g.fillText(card.name, 64 * k, 37 * k)
+  const name = cardName(cardId)
+  while (g.measureText(name).width > w - 82 * k && size > 15) { size--; g.font = `bold ${size * k}px ${FONT}` }
+  g.fillText(name, 64 * k, 37 * k, w - 82 * k)
   g.font = `${12 * k}px ${FONT}`
   g.fillStyle = 'rgba(43,38,34,0.65)'
-  g.fillText(CATEGORY[card.cat].toUpperCase(), 64 * k, 58 * k)
+  g.fillText(T.category[card.cat].toUpperCase(), 64 * k, 58 * k)
   // picture
   g.fillStyle = 'rgba(255,255,255,0.75)'
   roundRect(g, 26 * k, 76 * k, w - 52 * k, 128 * k, 12 * k); g.fill()
@@ -614,14 +633,13 @@ function drawCardMinimal(g, cardId, w, h, x0, y0) {
   }
   // text
   g.fillStyle = INK
-  g.font = `${16.5 * k}px ${FONT}`
   g.textAlign = 'center'
-  const lines = wrapText(g, card.text, w - 52 * k)
-  lines.slice(0, 4).forEach((l, i) => g.fillText(l, w / 2, (230 + i * 20) * k))
+  const fit = fitCardText(g, cardText(cardId), w - 52 * k, 16.5 * k)
+  fit.lines.forEach((l, i) => g.fillText(l, w / 2, (230 + i * 20 * fit.k) * k))
   // rarity and stars
   g.font = `bold ${12 * k}px ${FONT}`
   g.fillStyle = st.frame
-  g.fillText(st.label.toUpperCase(), w / 2, h - 30 * k)
+  g.fillText(T.rarity[card.rar].toUpperCase(), w / 2, h - 30 * k)
   for (let i = 0; i < st.stars; i++) {
     g.fillStyle = st.frame
     star(g, w / 2 + (i - (st.stars - 1) / 2) * 18 * k, h - 48 * k, 7 * k, 3 * k)
@@ -654,7 +672,7 @@ export function drawGhostCard(g, cardId, w = 256, h = 358) {
   g.fillStyle = '#7a4fd0'
   roundRect(g, w / 2 - 44 * k, h * 0.555 - 14 * k, 88 * k, 26 * k, 13 * k); g.fill()
   g.fillStyle = '#ffffff'; g.font = `bold ${15 * k}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
-  g.fillText('ECHO', w / 2, h * 0.555)
+  g.fillText(T.echoStamp, w / 2, h * 0.555, 80 * k)
   g.restore()
 }
 
@@ -733,8 +751,9 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   let size = 22
   const room = rw - 56 * k
   g.font = `bold ${size * k}px ${FONT}`
-  while (g.measureText(card.name).width > room && size > 13) { size--; g.font = `bold ${size * k}px ${FONT}` }
-  g.fillText(card.name, rx + 48 * k + room / 2, by + 1 * k)
+  const name = cardName(cardId)
+  while (g.measureText(name).width > room && size > 13) { size--; g.font = `bold ${size * k}px ${FONT}` }
+  g.fillText(name, rx + 48 * k + room / 2, by + 1 * k, room)
   // the picture (408x256, the window's shape), or Minimalism's icon until it is in
   const px = 18 * k, py = 65 * k, pw = w - 36 * k, ph = pw * 256 / 408
   g.save(); roundRect(g, px, py, pw, ph, 12 * k); g.clip()
@@ -749,7 +768,7 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   g.restore()
   g.strokeStyle = PAWN_INK; g.lineWidth = 3.5 * k; roundRect(g, px, py, pw, ph, 12 * k); g.stroke()
   // the category on a tag over the picture's lower edge (the pictures keep that strip free)
-  const label = CATEGORY[card.cat].toUpperCase()
+  const label = T.category[card.cat].toUpperCase()
   g.font = `bold ${10.5 * k}px ${FONT}`
   const tw = g.measureText(label).width + 22 * k, ty = py + ph
   g.fillStyle = PAWN_PAPER[card.rar]; roundRect(g, w / 2 - tw / 2, ty - 9 * k, tw, 18 * k, 9 * k); g.fill()
@@ -758,10 +777,9 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   // the text, in the middle between the tag and the stars
   const sy = h - 41 * k
   g.fillStyle = PAWN_INK
-  g.font = `${15.5 * k}px ${FONT}`
-  const lines = wrapText(g, card.text, w - 46 * k).slice(0, 4)
-  const top = (ty + sy) / 2 + 1 * k - (lines.length - 1) * 9.5 * k
-  lines.forEach((l, i) => g.fillText(l, w / 2, top + i * 19 * k))
+  const fit = fitCardText(g, cardText(cardId), w - 46 * k, 15.5 * k), pitch = 19 * k * fit.k
+  const top = (ty + sy) / 2 + 1 * k - (fit.lines.length - 1) * pitch / 2
+  fit.lines.forEach((l, i) => g.fillText(l, w / 2, top + i * pitch))
   // the rarity: its stars (a plain dot for Common) and its name
   g.strokeStyle = PAWN_INK; g.lineWidth = 1.6 * k
   if (!st.stars) { g.fillStyle = st.frame; g.beginPath(); g.arc(w / 2, sy, 4.5 * k, 0, Math.PI * 2); g.fill(); g.stroke() }
@@ -771,7 +789,7 @@ function drawCardPawn(g, cardId, w, h, x0, y0) {
   }
   g.font = `bold ${10.5 * k}px ${FONT}`
   g.fillStyle = card.rar === 'C' ? 'rgba(43,34,51,0.55)' : st.frame
-  g.fillText(st.label.toUpperCase(), w / 2, h - 23 * k)
+  g.fillText(T.rarity[card.rar].toUpperCase(), w / 2, h - 23 * k)
   g.restore()
 }
 

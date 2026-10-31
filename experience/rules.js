@@ -26,10 +26,11 @@ export function boardCfg(n = CFG.cells) {
 
 export const RARITY = DECK.rarity
 
-export const CATEGORY = { M: 'Movement', D: 'Dice', B: 'Board', H: 'Hinder', P: 'Protection', C: 'Hand' }
+/** The cards' categories, in catalogue order. */
+export const CATEGORIES = ['M', 'D', 'B', 'H', 'P', 'C']
 
-// How each card works: its category and what it targets. Names, texts, rarity and numbers come from
-// cards.config.js, and so does the target of a card played on a player (its `target`). tgt: any (any
+// How each card works: its category and what it targets. Rarity and numbers come from cards.config.js,
+// and so does the target of a card played on a player (its `target`); names and texts are in locale.js. tgt: any (any
 // player on the board, self included), other (another player), self (automatic), leader (automatic),
 // cell, cell2 (two cells), ladder, snake, board, none, echo (a player whose last card is played again,
 // then that card's own target)
@@ -49,13 +50,12 @@ const NOT_SELF = new Set(['M3', 'C2', 'C3', 'C4'])
 // (Dash, Setback, Swap Places, Rewind) and those that take their cards (Steal, Swap Hands)
 const WARDED = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'M1', 'M2', 'M3', 'M6', 'C3', 'C4'])
 const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3, rounds: 1 }
-/** Every card with its settings: { id, name, cat, rar, tgt, text, w, on, ...numbers }. */
+/** Every card with its settings: { id, cat, rar, tgt, w, on, ...numbers }. */
 const ALL = Object.entries(KINDS).map(([id, [cat, kind]]) => {
   const c = { ...DEFAULTS, ...DECK.cards[id] }
   const onPlayers = ['any', 'other', 'self'].includes(kind)
   const tgt = onPlayers && TARGETS[c.target] ? (NOT_SELF.has(id) ? 'other' : TARGETS[c.target]) : kind
-  const text = String(c.text || '').replace(/\{(\w+)\}/g, (m, k) => (c[k] !== undefined ? String(c[k]) : m))
-  return { ...c, id, name: String(c.name || id), cat, rar: RARITY[c.rarity] ? c.rarity : 'C', tgt, text, w: Math.max(0, +(c.weight ?? 1) || 0), on: c.enabled !== false }
+  return { ...c, id, cat, rar: RARITY[c.rarity] ? c.rarity : 'C', tgt, w: Math.max(0, +(c.weight ?? 1) || 0), on: c.enabled !== false }
 })
 /** The cards in the deck, in catalogue order. */
 export const CARDS = ALL.filter(c => c.on && c.w > 0)
@@ -63,9 +63,9 @@ export const CARD = Object.fromEntries(ALL.map(c => [c.id, c]))
 const BY_RARITY = { C: [], U: [], R: [], L: [] }
 for (const c of CARDS) BY_RARITY[c.rar].push(c.id)
 
-// effects shown over a player: key in fx -> label
+// effects shown over a player: key in fx -> its card
 export const FX = Object.fromEntries(Object.entries({ x: 'D1', cf: 'D2', hv: 'D3', gd: 'D4', pk: 'D5', sl: 'H1', fz: 'H2', sk: 'H3', bk: 'H4', pa: 'P1', bo: 'P2', sh: 'P3', gr: 'P4', cc: 'C5' })
-  .map(([k, card]) => [k, { name: CARD[card].name, card }]))
+  .map(([k, card]) => [k, { card }]))
 const TIMED = ['pa', 'bo', 'sh']
 
 // ---------- randomness ----------
@@ -420,18 +420,22 @@ export function createGame({ seed, mode = 'champion', players, cells = CFG.cells
 
 export const clone = s => JSON.parse(JSON.stringify(s))
 const onBoard = s => s.pl.map((p, i) => i).filter(i => !s.pl[i].d)
-/** A line for the game's log, the turn's number before it ("12. Pip rolls 4"); returns the line. */
-export function addLog(s, text) {
-  const line = `${s.turnNo}. ${text}`
-  s.log.push(line)
+/**
+ * A line for the game's log, the turn's number before it: [12, 'rolled', 'Pip', 4], a key of locale.js's
+ * logLine and what goes in it (a card as { c: id }), as every screen at a table reads it in its own language
+ * (strings.js, logText). Returns the line.
+ */
+export function addLog(s, ...line) {
+  const entry = [s.turnNo, ...line]
+  s.log.push(entry)
   if (s.log.length > 6) s.log.shift()
-  return line
+  return entry
 }
-function log(s, ev, text) {
-  ev.push({ e: 'log', text: addLog(s, text) })
+function log(s, ev, ...line) {
+  ev.push({ e: 'log', text: addLog(s, ...line) })
 }
 const nm = (s, i) => s.pl[i].n
-/** The name of the player at this screen who gave none (Solo Play, the First Match): "You win!", not "You wins!". */
+/** The name of the player at this screen who gave none (Solo Play, the First Match): it shows as "You" in the language chosen. */
 export const SELF = 'You'
 
 /** A rarity by its weight (rarities without cards in the deck left out), then a card of it by the cards' weights. */
@@ -472,7 +476,7 @@ function beginTurn(s, ev) {
     ev.push({ e: 'turn', p: pi, round: s.round })
     if (p.fx.sk) {
       delete p.fx.sk
-      log(s, ev, `${p.n} skips this turn`)
+      log(s, ev, 'skipped', p.n)
       ev.push({ e: 'skip', p: pi })
       tickTimers(s, pi, ev)
       if (!advance(s, ev)) return
@@ -558,8 +562,8 @@ function gameOver(s, ev, extra) {
   }
   ev.push({ e: 'over', res: s.res })
   const self = nm(s, s.mode === 'champion' ? s.res.winner : s.res.fool) === SELF
-  if (s.mode === 'champion') log(s, ev, self ? 'You win!' : `${nm(s, s.res.winner)} wins!`)
-  else log(s, ev, self ? 'You are the Fool!' : `${nm(s, s.res.fool)} is the Fool!`)
+  if (s.mode === 'champion') log(s, ev, ...(self ? ['youWin'] : ['wins', nm(s, s.res.winner)]))
+  else log(s, ev, ...(self ? ['youFool'] : ['isFool', nm(s, s.res.fool)]))
 }
 
 function endByLimit(s, ev) {
@@ -576,7 +580,7 @@ function endByLimit(s, ev) {
     const fool = tied[rint(s, tied.length)]
     for (const i of live.filter(i => i !== fool).sort((a, b) => key(b) - key(a))) { s.fin.push(i); s.pl[i].d = s.fin.length }
   }
-  log(s, ev, 'The round limit is reached')
+  log(s, ev, 'limit')
   gameOver(s, ev, { limit: true })
 }
 
@@ -587,7 +591,7 @@ function finish(s, pi, ev) {
   p.d = s.fin.length
   ev.push({ e: 'finish', p: pi, place: p.d })
   if (s.mode === 'champion') { gameOver(s, ev); return }
-  log(s, ev, `${p.n} finished in place ${p.d}`)
+  log(s, ev, 'finished', p.n, p.d)
   // a finished player leaves the board with their hand and effects; the swamps, portals and other
   // changes they made stay until their turns run out
   p.h = []; p.fx = {}
@@ -715,7 +719,7 @@ function rollAndMove(s, pi, value, ev, bonus) {
   delete fx.x; delete fx.cf; delete fx.gd; delete fx.hv; delete fx.pk
   if (pick) {
     ev.push({ e: 'roll', p: pi, dice, total: 0, chosen: false, slowed: false, bonus: !!bonus, pick: true })
-    log(s, ev, `${p.n} rolled ${dice.slice(0, -1).join(', ')} and ${dice[dice.length - 1]}`)
+    log(s, ev, 'rolledBoth', p.n, dice.slice(0, -1).join(', '), dice[dice.length - 1])
     // equal dice leave nothing to choose: the move goes on at once
     if (pi === s.cur && dice.some(d => d !== dice[0])) { s.ph = 'pick'; s.pick = { d: dice, b: !!bonus }; return }
     moveBy(s, pi, dice, ev, bonus, bestPick(s, pi, dice))
@@ -732,13 +736,16 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
   const slowed = total < raw, back = !!fx.bk
   const slow = CARD.H1.max
   delete fx.sl; delete fx.bk
+  const then = { then: [...(slowed ? [['slowed', slow]] : []), ...(back ? [['backwards']] : [])] }
   if (picked >= 0) {
     ev.push({ e: 'pick', p: pi, i: picked, dice, total, slowed, back })
-    log(s, ev, `${p.n} took the ${dice[picked]}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
+    log(s, ev, 'took', p.n, dice[picked], then)
   } else {
     ev.push({ e: 'roll', p: pi, dice, total, chosen, slowed, bonus: !!bonus, back })
-    const what = chosen ? `chose ${dice[0]}${dice.length > 1 ? ', rolled ' + dice.slice(1).join(' + ') : ''}` : `rolled ${dice.join(' + ')}`
-    log(s, ev, `${p.n} ${what}${dice.length > 1 ? ' = ' + raw : ''}${slowed ? ', slowed to ' + slow : ''}${back ? ', going backwards' : ''}`)
+    const sum = dice.length > 1 ? ` = ${raw}` : ''
+    if (!chosen) log(s, ev, 'rolled', p.n, dice.join(' + ') + sum, then)
+    else if (dice.length > 1) log(s, ev, 'choseRolled', p.n, dice[0], dice.slice(1).join(' + ') + sum, then)
+    else log(s, ev, 'chose', p.n, dice[0], then)
   }
   // step by step: a swamp on the way stops the move; going back stops on cell 1
   const path = [], waded = []
@@ -758,7 +765,7 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
   ev.push({ e: 'move', p: pi, path, ...(boots.length ? { boots } : {}) })
   trail(p, ['m', start, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
-  if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+  if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
   resolveLanding(s, pi, ev)
 }
 
@@ -784,14 +791,14 @@ function resolveLanding(s, pi, ev) {
       p.pos = el[2]; p.up = 1
       ev.push({ e: 'ladder', p: pi, from: c, to: p.pos, el: idx })
       trail(p, ['l', c, p.pos])
-      log(s, ev, `${p.n} climbed a ladder from ${c} to ${p.pos}`)
+      log(s, ev, 'ladder', p.n, c, p.pos)
       if (p.pos >= s.n) finish(s, pi, ev)
       return
     }
     if (p.fx.sh) {
       delete p.fx.sh
       ev.push({ e: 'shield', p: pi, c, el: idx })
-      log(s, ev, `${p.n}'s shield blocked a snake on ${c}`)
+      log(s, ev, 'shield', p.n, c)
       return
     }
     let fall = el[1] - el[2]
@@ -801,7 +808,7 @@ function resolveLanding(s, pi, ev) {
     p.pos = c - fall
     ev.push({ e: 'snake', p: pi, from: c, to: p.pos, el: idx, tail: el[2], para })
     trail(p, ['s', c, p.pos])
-    log(s, ev, `${p.n} slid down a snake from ${c} to ${p.pos}${para ? ' (parachute)' : ''}`)
+    log(s, ev, 'snake', p.n, c, p.pos, { then: para ? [['parachute']] : [] })
     return
   }
   const m = markerAt(s, c)
@@ -809,10 +816,10 @@ function resolveLanding(s, pi, ev) {
     p.pos = Math.min(s.n, c + CARD.B4.spaces); p.up = 1
     ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
     trail(p, ['t', c, p.pos])
-    log(s, ev, `${p.n} bounced on a trampoline to ${p.pos}`)
+    log(s, ev, 'trampoline', p.n, p.pos)
     if (p.pos >= s.n) { finish(s, pi, ev); return }
     // the cell it throws the piece onto takes effect too (always further on, so the chain ends)
-    if (!p.fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+    if (!p.fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
     resolveLanding(s, pi, ev)
     return
   }
@@ -820,7 +827,7 @@ function resolveLanding(s, pi, ev) {
     p.pos = m.c[0] === c ? m.c[1] : m.c[0]
     ev.push({ e: 'portal', p: pi, from: c, to: p.pos })
     trail(p, ['p', c, p.pos])
-    log(s, ev, `${p.n} went through a portal from ${c} to ${p.pos}`)
+    log(s, ev, 'portal', p.n, c, p.pos)
   }
 }
 
@@ -836,7 +843,7 @@ function jump(s, pi, to, ev, why) {
   trail(p, ['j', from, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (p.pos <= 0) return
-  if (!fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, `${p.n} is stuck in a swamp on ${p.pos}`); return }
+  if (!fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
   resolveLanding(s, pi, ev)
 }
 
@@ -975,22 +982,22 @@ export function playable(s, pi, cardId) {
 function hasPlayable(s, pi) {
   return canPlayCards(s, pi) && s.pl[pi].h.some(c => targetsFor(s, pi, c).length > 0)
 }
-/** Why a card cannot be played now, or null. */
+/** Why a card cannot be played now, or null: a key of locale.js, or [key, ...what goes in it]. */
 export function whyNot(s, pi, cardId) {
-  if (s.ph === 'over') return 'The game is over'
-  if (s.cur !== pi) return 'Not your turn'
-  if (s.ph === 'disc') return 'Choose a card to discard'
-  if (s.ph === 'pick') return 'Choose a die'
-  if (s.ph === 'take') return 'Choose a card'
-  if (s.frozen) return "You can't play cards this turn"
-  if (s.played) return 'One card per turn'
-  if (INSTEAD_OF_ROLL.has(cardId) && s.rolled) return 'Only instead of the roll'
+  if (s.ph === 'over') return 'gameOver'
+  if (s.cur !== pi) return 'notYourTurn'
+  if (s.ph === 'disc') return 'chooseDiscard'
+  if (s.ph === 'pick') return 'chooseDie'
+  if (s.ph === 'take') return 'chooseCard'
+  if (s.frozen) return 'cantPlay'
+  if (s.played) return 'oneCard'
+  if (INSTEAD_OF_ROLL.has(cardId) && s.rolled) return 'onlyInstead'
   if (!targetsFor(s, pi, cardId).length) {
-    if (cardId === 'M5') return 'No one ahead to tailgate'
-    if (cardId === 'C6') return s.pl.some(q => q.lc && q.lc !== 'C6') ? 'No card to echo can be played now' : 'No card to echo yet'
+    if (cardId === 'M5') return 'noOneAhead'
+    if (cardId === 'C6') return s.pl.some(q => q.lc && q.lc !== 'C6') ? 'noEchoNow' : 'noEchoYet'
     const held = onBoard(s).find(q => warded(s, pi, cardId, q))
-    if (held != null) return `${nm(s, held)} is protected by ${CARD.P4.name}`
-    return 'No valid targets'
+    if (held != null) return ['protectedBy', nm(s, held), { c: 'P4' }]
+    return 'noTargets'
   }
   return null
 }
@@ -1007,18 +1014,18 @@ export function apply(s, pi, a) {
   const ev = []
   const fail = err => ({ ok: false, err, ev: [] })
   if (!a || typeof a !== 'object') return fail('bad action')
-  if (s.ph === 'over') return fail('The game is over')
-  if (s.cur !== pi) return fail('Not your turn')
+  if (s.ph === 'over') return fail('gameOver')
+  if (s.cur !== pi) return fail('notYourTurn')
   const p = s.pl[pi]
   if (a.t === 'disc') {
-    if (s.ph !== 'disc') return fail('Nothing to discard')
+    if (s.ph !== 'disc') return fail('nothingDiscard')
     const i = a.i | 0
     if (i < 0 || i >= p.h.length) return fail('bad card')
     const [card] = p.h.splice(i, 1)
     ev.push({ e: 'discard', p: pi, card })
     if (p.h.length <= CFG.hand) endTurn(s, ev)
   } else if (a.t === 'pick') {
-    if (s.ph !== 'pick' || !s.pick) return fail('Nothing to pick')
+    if (s.ph !== 'pick' || !s.pick) return fail('nothingPick')
     const i = a.i | 0
     if (i < 0 || i >= s.pick.d.length) return fail('bad die')
     const { d, b } = s.pick
@@ -1026,26 +1033,26 @@ export function apply(s, pi, a) {
     moveBy(s, pi, d, ev, b, i)
     afterAction(s, pi, ev)
   } else if (a.t === 'take') {
-    if (s.ph !== 'take' || !s.offer) return fail('Nothing to take')
+    if (s.ph !== 'take' || !s.offer) return fail('nothingTake')
     const i = a.i | 0
     if (i < 0 || i >= s.offer.length) return fail('bad card')
     const card = s.offer[i]
     s.offer = null; s.ph = 'main'
     p.h.push(card)
     ev.push({ e: 'draw', p: pi, card, took: true })
-  } else if (s.ph !== 'main') return fail(s.ph === 'pick' ? 'Choose a die' : s.ph === 'take' ? 'Choose a card' : 'Choose a card to discard')
+  } else if (s.ph !== 'main') return fail(s.ph === 'pick' ? 'chooseDie' : s.ph === 'take' ? 'chooseCard' : 'chooseDiscard')
   else if (a.t === 'unpeek') {
     // the peeked hand is put away: the turn ends after the roll again, as without Peek
-    if (!s.peek || s.peek.by !== pi) return fail('Nothing to put away')
+    if (!s.peek || s.peek.by !== pi) return fail('nothingAway')
     s.peek = null
     afterAction(s, pi, ev)
   } else if (a.t === 'roll') {
-    if (s.rolled) return fail('Already rolled')
+    if (s.rolled) return fail('rolledAlready')
     // Double Move's roll comes first (with the value chosen for it); the turn's own roll is still to come
     if (s.bonus) { delete s.bonus; rollAndMove(s, pi, a.v, ev, true) } else { s.rolled = true; rollAndMove(s, pi, a.v, ev, false) }
     afterAction(s, pi, ev)
   } else if (a.t === 'end') {
-    if (!s.rolled) return fail('Roll first')
+    if (!s.rolled) return fail('rollFirst')
     finishTurn(s, ev)
   } else if (a.t === 'play') {
     const i = a.i | 0
@@ -1074,15 +1081,15 @@ function checkTarget(s, pi, cardId, tg) {
   const valid = targetsFor(s, pi, cardId)
   if (card.tgt === 'leader') {
     if (valid.length === 1) return { tg: valid[0] }
-    return valid.includes(tg) ? { tg } : { err: 'Choose a leader' }
+    return valid.includes(tg) ? { tg } : { err: 'chooseLeader' }
   }
   if (card.tgt === 'cell2') {
-    if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return { err: 'Choose two free cells' }
+    if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return { err: 'chooseFree' }
     return { tg }
   }
   if (card.tgt === 'board' || card.tgt === 'none') return { tg: null }
-  if (card.tgt === 'self') return valid.includes(pi) ? { tg: pi } : { err: 'No valid targets' }
-  return valid.includes(tg) ? { tg } : { err: 'Choose a valid target' }
+  if (card.tgt === 'self') return valid.includes(pi) ? { tg: pi } : { err: 'noTargets' }
+  return valid.includes(tg) ? { tg } : { err: 'chooseValid' }
 }
 const onPlayer = cardId => ['any', 'other', 'leader'].includes(CARD[cardId].tgt)
 
@@ -1095,7 +1102,7 @@ function playCard(s, pi, i, tg, ev) {
   const cardId = p.h[i]
   let eff = cardId, src = null, inner = tg
   if (cardId === 'C6') {
-    if (!Array.isArray(tg) || !targetsFor(s, pi, 'C6').includes(tg[0])) return 'Choose a player whose card to echo'
+    if (!Array.isArray(tg) || !targetsFor(s, pi, 'C6').includes(tg[0])) return 'chooseEcho'
     src = tg[0]; eff = s.pl[src].lc; inner = tg[1]
   }
   const chk = checkTarget(s, pi, eff, inner)
@@ -1105,13 +1112,13 @@ function playCard(s, pi, i, tg, ev) {
   p.h.splice(i, 1)
   s.played = true
   const who = typeof target === 'number' && onPlayer(eff) ? s.pl[target] : null
-  const onWho = who ? (target === pi ? ' on themselves' : ` on ${who.n}`) : ''
+  const onWho = { then: who ? [target === pi ? ['onSelf'] : ['on', who.n]] : [] }
   if (src != null) {
     ev.push({ e: 'play', p: pi, card: cardId, tg: src, echo: eff, etg: target })
-    log(s, ev, `${p.n} played Echo: ${src === pi ? 'their own' : s.pl[src].n + "'s"} ${CARD[eff].name}${onWho}`)
+    log(s, ev, ...(src === pi ? ['echoOwn', p.n] : ['echoOf', p.n, s.pl[src].n]), { c: eff }, onWho)
   } else {
     ev.push({ e: 'play', p: pi, card: cardId, tg: target })
-    log(s, ev, `${p.n} played ${CARD[cardId].name}${onWho}`)
+    log(s, ev, 'played', p.n, { c: cardId }, onWho)
   }
   if (cardEffect(s, pi, eff, target, ev) !== false) p.lc = cardId
   return null
@@ -1141,7 +1148,7 @@ function cardEffect(s, pi, cardId, target, ev) {
       ev.push({ e: 'rewind', p: target, from, to: who.pos, tr: trailOf(back.tr) })
       // the moves are undone: the piece starts over from here
       who.st = who.pos; who.tr = ''; delete who.ps; delete who.ptr
-      log(s, ev, `${who.n} rewound from ${from <= 0 ? 'the start' : from} to ${who.pos <= 0 ? 'the start' : who.pos}`)
+      log(s, ev, 'rewound', who.n, Math.max(0, from), Math.max(0, who.pos))
       break
     }
     case 'M3': {
@@ -1179,7 +1186,7 @@ function cardEffect(s, pi, cardId, target, ev) {
       const gone = Object.keys(who.fx).filter(k => FX[k] && k !== 'gr')
       who.fx = { gr: { t: Math.max(1, card.rounds | 0) } }
       ev.push({ e: 'grail', p: target, gone })
-      if (gone.length) log(s, ev, `${who.n}'s effects are gone: ${gone.map(k => FX[k].name).join(', ')}`)
+      if (gone.length) log(s, ev, 'effectsGone', who.n, { cards: gone.map(k => FX[k].card) })
       break
     }
     case 'B1':

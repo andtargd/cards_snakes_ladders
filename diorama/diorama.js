@@ -8,7 +8,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import * as P from '../experience/paper.js'
 import * as G from '../experience/board3d.js'
-import { CARD, mulberry32 } from '../experience/rules.js'
+import { mulberry32 } from '../experience/rules.js'
+import { cardName, cardText } from '../experience/strings.js'
 
 export const LOT = { width: 12, depth: 19, height: 12 }
 export const NUM_FONT = '"Nunito", "Trebuchet MS", sans-serif'
@@ -509,7 +510,7 @@ function cardCanvas(id) {
 }
 /** The Parachute card in a blue protection frame, with a big parachute picture. */
 function drawParachute(g, w, h) {
-  const k = w / 256, card = CARD.P1
+  const k = w / 256
   g.fillStyle = '#ffffff'; P.roundRect(g, 0, 0, w, h, 18 * k); g.fill()
   g.fillStyle = BLUE; P.roundRect(g, 4 * k, 4 * k, w - 8 * k, h - 8 * k, 16 * k); g.fill()
   g.fillStyle = '#ffffff'; P.roundRect(g, 11 * k, 11 * k, w - 22 * k, h - 22 * k, 11 * k); g.fill()
@@ -518,7 +519,7 @@ function drawParachute(g, w, h) {
   g.fillStyle = BLUE; g.beginPath(); g.arc(42 * k, 44 * k, 18 * k, 0, Math.PI * 2); g.fill()
   P.drawIcon(g, 'cat-P', 42 * k, 44 * k, 26 * k, '#ffffff')
   g.fillStyle = P.INK; g.textAlign = 'left'; g.textBaseline = 'middle'
-  g.font = `bold ${25 * k}px ${P.FONT}`; g.fillText(card.name, 68 * k, 38 * k)
+  g.font = `bold ${25 * k}px ${P.FONT}`; g.fillText(cardName('P1'), 68 * k, 38 * k)
   g.font = `bold ${11.5 * k}px ${P.FONT}`; g.fillStyle = BLUE; g.fillText('PROTECTION', 68 * k, 60 * k)
   // the picture: sky, clouds and a blue parachute carrying a pawn down gently
   const px = 26 * k, py = 76 * k, pw = w - 52 * k, ph = 132 * k
@@ -550,7 +551,7 @@ function drawParachute(g, w, h) {
   g.strokeStyle = BLUE; g.lineWidth = 2.5 * k; P.roundRect(g, px, py, pw, ph, 12 * k); g.stroke()
   // the rule and the footer
   g.fillStyle = P.INK; g.font = `${16.5 * k}px ${P.FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
-  P.wrapText(g, card.text, w - 56 * k).slice(0, 4).forEach((l, i) => g.fillText(l, w / 2, (234 + i * 20) * k))
+  P.wrapText(g, cardText('P1'), w - 56 * k).slice(0, 4).forEach((l, i) => g.fillText(l, w / 2, (234 + i * 20) * k))
   g.fillStyle = BLUE; g.font = `bold ${12 * k}px ${P.FONT}`; g.fillText('PROTECTION CARD', w / 2, h - 30 * k)
   P.drawIcon(g, 'P3', w / 2, h - 50 * k, 18 * k, BLUE)
 }

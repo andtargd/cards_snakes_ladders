@@ -5,6 +5,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import * as P from './paper.js'
 import * as G from './board3d.js'
 import { effectiveElements, FX, CFG, CARD } from './rules.js'
+import { T, who, cardPopup } from './strings.js'
 
 const SLOTS = [[0, 0], [-0.24, -0.2], [0.24, -0.2], [-0.24, 0.22], [0.24, 0.22], [0, -0.38]]
 const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2)
@@ -12,7 +13,7 @@ const easeOut = t => 1 - Math.pow(1 - t, 3)
 /** What the tray says under a roll: the sum of two dice, a total cut by Slow Down, a move backwards. */
 const rollLabel = (raw, total, sum, slowed, back) => {
   const t = slowed ? `${raw} → ${total}` : sum ? `= ${total}` : ''
-  return back ? `${t ? t + ' ' : ''}← back` : t
+  return back ? `${t ? t + ' ' : ''}${T.rollBack}` : t
 }
 /** Where die i of n rests in the tray: one in the middle, two side by side, three in a shallow arc. */
 const trayRest = (i, n) => new THREE.Vector3(
@@ -183,9 +184,7 @@ export class View {
     this.size = n
     G.setBoardSize(n)
     for (const m of this.frame) { m.geometry.dispose(); this.root.remove(m) }
-    this.mat.numbers.map?.dispose()
-    this.mat.numbers.map = P.texture(P.atlasCanvas(1024, n))
-    this.mat.numbers.needsUpdate = true
+    this.paintNumbers()
     this.frame = [
       new THREE.Mesh(G.buildTiers({ lot: this.p0.lot }), this.mat.paper),
       new THREE.Mesh(G.buildTiles(), this.mat.numbers),
@@ -194,6 +193,14 @@ export class View {
     ]
     for (const m of this.frame) this.root.add(m)
     this.boardKey = null
+  }
+
+  /** The cells' numbers and the board's own words (again when the language changes). */
+  paintNumbers() {
+    if (!this.size) return
+    this.mat.numbers.map?.dispose()
+    this.mat.numbers.map = P.texture(P.atlasCanvas(1024, this.size))
+    this.mat.numbers.needsUpdate = true
   }
 
   // ---------- state ----------
@@ -372,14 +379,14 @@ export class View {
       if (!t) return
       const fx = Object.keys(p.fx).filter(k => FX[k])
       const on = cur === i
-      const key = JSON.stringify([p.n, fx.map(k => [k, p.fx[k].t ?? 0]), on])
+      const name = who(p.n), key = JSON.stringify([name, fx.map(k => [k, p.fx[k].t ?? 0]), on])
       if (key === t.labelKey) return
       t.labelKey = key
       t.labelOn = on
       const W = 320, H = 128
       const { c, g } = P.canvas(W, H)
       g.font = `bold 34px ${P.FONT}`
-      const w = Math.min(W - 8, g.measureText(p.n).width + 40)
+      const w = Math.min(W - 8, g.measureText(name).width + 40)
       g.fillStyle = on ? t.color : 'rgba(255,255,255,0.88)'
       P.roundRect(g, (W - w) / 2, 4, w, 50, 25); g.fill()
       g.strokeStyle = on ? '#ffffff' : t.color; g.lineWidth = on ? 5 : 4; g.stroke()
@@ -388,7 +395,7 @@ export class View {
         g.fillStyle = t.color; g.beginPath(); g.moveTo(W / 2 - 21, 46); g.lineTo(W / 2 + 21, 46); g.lineTo(W / 2, 72); g.closePath(); g.fill()
       }
       g.fillStyle = on ? P.inkOn(t.color) : P.INK; g.textAlign = 'center'; g.textBaseline = 'middle'
-      g.fillText(p.n, W / 2, 31, W - 30)
+      g.fillText(name, W / 2, 31, W - 30)
       const n = fx.length
       fx.forEach((k, j) => {
         const x = W / 2 + (j - (n - 1) / 2) * 50, y = 92
@@ -518,13 +525,13 @@ export class View {
 
   /** The word a card's effect pops up over a piece (cards.config.js), in the card's category colour unless it gives one. */
   cardPopup(p, cardId, sound) {
-    const c = CARD[cardId], pop = c.popup || {}
-    this.popupTask(p, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat], sound)
+    const c = CARD[cardId]
+    this.popupTask(p, cardPopup(cardId), c.popup?.color || P.CAT_COLORS[c.cat], sound)
   }
   /** The same word, now and over a given point, not in its own turn of the queue (it pops up as a piece moves on). */
   cardPopupNow(pos, cardId, sound) {
-    const c = CARD[cardId], pop = c.popup || {}
-    this.popup(pos, String(pop.text ?? c.name), pop.color || P.CAT_COLORS[c.cat])
+    const c = CARD[cardId]
+    this.popup(pos, cardPopup(cardId), c.popup?.color || P.CAT_COLORS[c.cat])
     if (sound) this.sfx(sound)
   }
   popupTask(p, text, color, sound) {

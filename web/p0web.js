@@ -7,6 +7,7 @@ import { Net, cleanCode } from './net.js'
 import { relayServer } from './relaypeer.js'
 import { safeName } from './names.js'
 import { onlineControl, shareRoom } from './online.js'
+import { T } from '../experience/strings.js'
 import { editText } from './textfield.js'
 import { platform, hooks, mute, roomLink, roomLinks, siteInvites, ready } from './platform.js'
 import { every } from './clock.js'
@@ -19,6 +20,7 @@ const canvas = document.getElementById('c')
 const loadEl = document.getElementById('loading')
 const barEl = document.getElementById('bar')
 const labelEl = document.getElementById('label')
+const nameEl = document.getElementById('gameName')
 
 const listeners = new Map()
 const on = (ev, fn) => { if (!listeners.has(ev)) listeners.set(ev, new Set()); listeners.get(ev).add(fn); return () => off(ev, fn) }
@@ -272,7 +274,7 @@ const p0 = {
   loop: fn => on('frame', fn),
   asset: path => new URL(String(path).replace(/^\/+/, ''), entry).href,
   hud() {},
-  loading(f, label) { barEl.style.width = Math.round(f * 100) + '%'; if (label) labelEl.textContent = label },
+  loading(f, label, title) { barEl.style.width = Math.round(f * 100) + '%'; if (label) labelEl.textContent = label; if (title && nameEl) nameEl.textContent = title },
   sound: {
     play(path, o = {}) {
       if (mute.on && !o.loop) return 0
@@ -484,6 +486,6 @@ async function boot() {
 }
 boot().catch(e => {
   console.error(e)
-  labelEl.textContent = 'The game could not start: ' + (e?.message || e)
+  labelEl.textContent = T.couldNotStart + (e?.message || e)
   loadEl.classList.add('error')
 })

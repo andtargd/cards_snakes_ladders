@@ -8,8 +8,8 @@
   Saves the game's screens at the CrazyGames QA sizes (and phone ones) as PNGs at DPR 1, to check that
   the text reads and nothing is cut off or covered. Needs tools/server.py (it saves through /save/).
   tools/shots.html?out=tmp/shots/now&sizes=821x462,390x844&screens=menu,game&dpr=1&safe=0,44,0,44
-  sizes, screens: lists (default: all); dpr: the game's pixel ratio (default 1); safe: safe-area insets
-  top,right,bottom,left in px to pretend (a phone's notch); src: the page to shoot, relative to this one
+  sizes, screens: lists (default: all); dpr: the game's pixel ratio (default 1); lang: the language to shoot
+  it in; safe: safe-area insets top,right,bottom,left in px to pretend (a phone's notch); src: the page to shoot, relative to this one
   (default ../index.html; ../dist/crazygames/index.html for the CrazyGames build). Results: window.results, await window.done.
 -->
 <style>
@@ -37,7 +37,7 @@ async function waitFor(fn, ms, what) {
 }
 
 // ---------- the screens ----------
-const LOG = ['31. Pip rolls 4 and climbs a ladder to 38.', '32. Juniper plays Slow Down on Lucky Ladder.', '33. Mossy rolls 6.', '34. Bramble falls down a snake to 12.', '35. Clover draws a card.', '35. Fennel plays Swamp on cell 44.', '36. Lucky Ladder rolls 3.', '37. Pip plays Swap Places with Mossy.']
+const LOG = [[31, 'rolled', 'Pip', 4], [31, 'ladder', 'Pip', 9, 38], [32, 'played', 'Juniper', { c: 'H1' }, { then: [['on', 'Lucky Ladder']] }], [33, 'rolled', 'Mossy', 6], [34, 'snake', 'Bramble', 27, 12], [35, 'played', 'Fennel', { c: 'B1' }], [36, 'rolled', 'Lucky Ladder', 3], [37, 'played', 'Pip', { c: 'M3' }, { then: [['on', 'Mossy']] }]]
 /** A game of six on the board of 100: my turn, four cards in my hand, the others spread up the board; `mutate(s)` changes it. */
 function game(app, mutate) {
   if (app.screen !== 'game' || !app.table?.s || app.table.cfg?.bots !== 5 || app.table.s.n !== 100) app.startLocal({ mode: 'champion', humans: 1, names: [], bots: 5, level: 2, size: 100 })
@@ -114,6 +114,7 @@ async function shoot(size) {
   holder.append(f)
   const p = new URLSearchParams({ dpr })
   if (q.get('safe')) p.set('safe', q.get('safe'))
+  if (q.get('lang')) p.set('lang', q.get('lang'))
   f.src = (q.get('src') || '../index.html') + '?' + p
   const w = await waitFor(() => f.contentWindow.__csl && f.contentDocument.getElementById('loading')?.classList.contains('done') !== false && f.contentWindow, 40000, size + ' loaded')
   const app = w.__csl

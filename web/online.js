@@ -3,6 +3,7 @@
 // game to show. The game draws all of it; this only runs it (p0web.js hands it over as p0.web).
 import { cleanCode } from './net.js'
 import { cleanName, isClean, randomName } from './names.js'
+import { T } from '../experience/strings.js'
 
 const NAME_KEY = 'csl-name'
 const load = k => { try { return localStorage.getItem(k) } catch { return null } }
@@ -10,15 +11,15 @@ const save = (k, v) => { try { localStorage.setItem(k, v) } catch { /* private m
 
 function messageFor(e) {
   switch (e?.type) {
-    case 'not-found': return 'There is no room with this code. Check it, or create a new room.'
-    case 'deny': return e.why === 'full' ? 'That room is full.' : e.why === 'playing' ? 'That table has just started. Try again.' : e.why === 'other' ? 'That is a Quick Match table of another site. Use Quick Match here instead.' : 'Could not join that room.'
-    case 'timeout': case 'closed': return 'The room did not answer. Its host should keep the game open on screen (on a phone too), then try again.'
-    case 'unreachable': return 'Could not get through to the room from this network. Try another connection (Wi-Fi or mobile data), or without a VPN.'
-    case 'busy': return 'All quick tables are busy right now. Create a room instead.'
-    case 'browser-incompatible': return 'This browser cannot open rooms (WebRTC is turned off). You can still join a friend\'s room with its code.'
-    case 'lib': return 'Online play could not load. Check your connection (or an ad blocker) and try again.'
-    case 'code': return 'Type the room code your friend sent you.'
-    default: return 'Could not reach the game server. Check your connection and try again.'
+    case 'not-found': return T.netNotFound
+    case 'deny': return e.why === 'full' ? T.netFull : e.why === 'playing' ? T.netPlaying : e.why === 'other' ? T.netOther : T.netDenied
+    case 'timeout': case 'closed': return T.netTimeout
+    case 'unreachable': return T.netUnreachable
+    case 'busy': return T.netBusy
+    case 'browser-incompatible': return T.netNoRtc
+    case 'lib': return T.netLib
+    case 'code': return T.netCode
+    default: return T.netServer
   }
 }
 /** What the attempt saw, small under the message: for telling someone what went wrong. */
@@ -41,7 +42,7 @@ export function onlineControl({ net, me, siteName = () => null, nameless = () =>
   function setName(v) {
     const n = cleanName(v)
     let note = ''
-    if (n && !isClean(n)) { me.name = randomName(); note = 'That name is not allowed here, so you got a random one.' }
+    if (n && !isClean(n)) { me.name = randomName(); note = T.nameNotAllowed }
     else me.name = n || randomName()
     save(NAME_KEY, me.name)
     changed()
@@ -74,17 +75,17 @@ export function onlineControl({ net, me, siteName = () => null, nameless = () =>
     get invited() { return invited },
     /** A room's link brought the player: the Online screen shows its code to join. */
     invite(code) { invited = cleanCode(code) || null; changed() },
-    quick: (mode, size) => go('quick', 'Looking for a table…', () => net.quickMatch(mode, size)),
-    create: () => go('create', 'Opening a room…', () => net.create()),
+    quick: (mode, size) => go('quick', T.netQuick, () => net.quickMatch(mode, size)),
+    create: () => go('create', T.netCreate, () => net.create()),
     join(code) {
       code = cleanCode(code)
       if (code.length < 3) { set({ error: messageFor({ type: 'code' }), detail: '', kind: 'join' }); return Promise.resolve(false) }
-      return go('join', `Joining room ${code}…`, () => net.join(code))
+      return go('join', T.netJoin(code), () => net.join(code))
     },
     /** The site's own room for the player (Discord's channel): in at once, the first one there opens it. */
-    enter: code => go('channel', 'Taking a seat at the table…', () => net.enter(cleanCode(code))),
+    enter: code => go('channel', T.netEnter, () => net.enter(cleanCode(code))),
     /** Coming back to a room after a reload: shown like any other attempt. */
-    resume: (code, fn) => go('resume', `Coming back to room ${cleanCode(code)}…`, fn),
+    resume: (code, fn) => go('resume', T.netResume(cleanCode(code)), fn),
     cancel() { if (!status?.busy) return; net.cancel(); set(null) },
     /** Puts the message of an attempt that failed away. */
     dismiss() { if (status && !status.busy) set(null) },
@@ -100,9 +101,9 @@ export function onlineControl({ net, me, siteName = () => null, nameless = () =>
  */
 export async function shareRoom(room) {
   if (!room) return 'none'
-  const text = room.link ? `Join my table in Cards, Snakes & Ladders: room ${room.code}` : `Join my table in Cards, Snakes & Ladders: Online, room code ${room.code}`
+  const text = room.link ? T.shareText(room.code) : T.shareTextCode(room.code)
   if (navigator.share && matchMedia('(pointer: coarse)').matches) {
-    try { await navigator.share(room.link ? { title: 'Cards, Snakes & Ladders', text, url: room.link } : { title: 'Cards, Snakes & Ladders', text }); return 'shared' } catch (e) { if (e?.name === 'AbortError') return 'cancelled' }
+    try { await navigator.share(room.link ? { title: T.title, text, url: room.link } : { title: T.title, text }); return 'shared' } catch (e) { if (e?.name === 'AbortError') return 'cancelled' }
   }
   // only the code goes on the clipboard: it fits the code field as it is
   return (await copyText(room.link || room.code)) ? 'copied' : 'failed'

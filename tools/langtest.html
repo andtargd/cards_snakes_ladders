@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Languages test</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 24px; color: #2b2622; }
+  h2 { margin: 18px 0 4px; font-size: 17px; }
+  .ok { color: #1f7a55; } .bad { color: #c9473a; }
+  li { margin: 2px 0; }
+  canvas { margin: 3px; border-radius: 8px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/build/three.module.js", "three/addons/": "../vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<h1>Languages</h1>
+<div id="out"></div>
+<script type="module">
+// Checks locale.js in every language: what is missing, a function that takes other arguments than English's,
+// words left unfilled, every line a whole game logs, every reason the rules give, and which cards shrink
+// their text to fit. ?faces=ru shows that language's card faces. Results in window.results, await window.done.
+import { LANGS, T, setLang, cardName, cardPopup, cardText, logText, errText, who } from '../experience/strings.js'
+import * as R from '../experience/rules.js'
+import * as P from '../experience/paper.js'
+
+const q = new URLSearchParams(location.search), out = document.getElementById('out')
+const results = window.results = {}
+const EN = LANGS[0].words
+const plain = v => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** What differs from English's table, as `key: what` lines. */
+function compare(en, own, path, bad) {
+  for (const k of Object.keys(en)) {
+    const at = path ? `${path}.${k}` : k, a = en[k], b = own[k]
+    if (b === undefined) bad.push(`${at}: missing`)
+    else if (typeof a !== typeof b || Array.isArray(a) !== Array.isArray(b)) bad.push(`${at}: ${typeof b} where English has ${typeof a}`)
+    else if (typeof a === 'function' && a.length !== b.length) bad.push(`${at}: takes ${b.length} arguments, English ${a.length}`)
+    else if (Array.isArray(a) && a.length !== b.length && k !== 'logo') bad.push(`${at}: ${b.length} items, English ${a.length}`)
+    else if (plain(a)) compare(a, b, at, bad)
+  }
+  for (const k of Object.keys(own)) if (!(k in en)) bad.push(`${path ? path + '.' : ''}${k}: not in English`)
+}
+/** Calls everything in a table with sample values: a word left unfilled shows here. */
+function fill(table, path, bad) {
+  const look = (at, t) => { if (typeof t !== 'string' || !t.trim() || /undefined|NaN|\[object|\{\w/.test(t)) bad.push(`${at}: ${JSON.stringify(t)}`) }
+  for (const [k, v] of Object.entries(table)) {
+    const at = path ? `${path}.${k}` : k
+    if (k === 'cards') continue
+    if (typeof v === 'function') {
+      const r = path === 'fxHint' ? v(R.CARD[R.FX[k].card]) : k === 'presenceGame' || k === 'quickMatchSub' ? v('Mode', 50) : v(...[3, 3, 3].slice(0, Math.max(v.length, 1)))
+      if (Array.isArray(r)) r.flat().forEach(t => look(at, t)); else look(at, r)
+      // every number has its form: 1, 2 and 5 take different words in Ukrainian and Russian
+      for (const n of [1, 2, 5, 21]) if (v.length === 1 && path !== 'fxHint') look(at, String(v(n)))
+    } else if (Array.isArray(v)) v.flat().forEach(t => look(at, t))
+    else if (plain(v)) fill(v, at, bad)
+    else if (typeof v !== 'number') look(at, v)
+  }
+}
+/** Bot games to the end: every line they log, read in this language. */
+function logged() {
+  const lines = []
+  for (let g = 0; g < 30; g++) {
+    const mode = g % 2 ? 'fool' : 'champion'
+    const s = R.createGame({ seed: 1000 + g, mode, cells: 50, players: [{ n: R.SELF, b: 2, c: 0 }, ...[1, 2, 3].map(i => ({ n: 'Bot' + i, b: 2, c: i }))] })
+    for (let i = 0; i < 6000 && s.ph !== 'over'; i++) {
+      const r = R.apply(s, s.cur, R.botAction(s, s.cur))
+      if (!r.ok) throw new Error(`game ${g}: ${r.err}`)
+      for (const e of r.ev) if (e.e === 'log') lines.push(e.text)
+    }
+  }
+  return lines
+}
+/** The keys the rules give as reasons (read from their source: most never come up in a bot's game). */
+async function reasons() {
+  const src = await (await fetch('../experience/rules.js')).text()
+  const keys = new Set()
+  for (const line of src.split('\n')) if (/\breturn\b|fail\(|err: /.test(line) && !line.includes('log(s, ev')) for (const m of line.matchAll(/'([a-z]+[A-Z]\w*)'/g)) keys.add(m[1])
+  return [...keys]
+}
+
+const { c, g } = P.canvas(288, 403)
+window.done = (async () => {
+  const lines = logged(), why = await reasons()
+  const keys = new Set(lines.map(l => l[1]))
+  for (const l of LANGS) {
+    setLang(l.id)
+    const bad = [], small = []
+    if (l.words !== EN) compare(EN, l.words, '', bad)
+    fill(l.words, '', bad)
+    if (l.words.logo.flat().length !== 4) bad.push('logo: the name has four words, one colour each')
+    for (const id of Object.keys(R.CARD)) {
+      if (!l.words.cards[id]) continue
+      const t = cardText(id)
+      if (!cardName(id) || !cardPopup(id) || /[{}|]/.test(t)) bad.push(`card ${id}: ${t}`)
+      // Pawn Parade's text is the tighter of the two: 4 lines at 15.5 px of the card's 256 wide
+      for (const [name, width, size] of [['pawn', 210, 15.5], ['minimal', 204, 16.5]]) {
+        const fit = P.fitCardText(g, t, width, size)
+        if (P.wrapText(g, t, width).length > 4) bad.push(`card ${id} (${name}): does not fit: ${t}`)
+        else if (fit.k < 1) small.push(`${id} ${cardName(id)} (${name}): ${Math.round(fit.k * 100)}%`)
+      }
+    }
+    for (const k of keys) if (!l.words.logLine[k]) bad.push(`logLine.${k}: missing`)
+    for (const line of lines.slice(0, 4000)) { const t = logText(line); if (/undefined|NaN|\[object/.test(t)) bad.push(`log: ${t}`) }
+    for (const k of why) if (T[k] === undefined) bad.push(`reason ${k}: missing`)
+    if (who(R.SELF) !== T.you || errText(['protectedBy', 'Pip', { c: 'P4' }]).includes('undefined')) bad.push('who / errText')
+    results[l.id] = { bad: [...new Set(bad)], small }
+  }
+  results.logKeys = [...keys]
+  results.reasons = why
+  setLang(q.get('faces') || 'en')
+  for (const l of LANGS) {
+    const r = results[l.id]
+    out.insertAdjacentHTML('beforeend', `<h2>${l.name}</h2><div class="${r.bad.length ? 'bad' : 'ok'}">${r.bad.length ? r.bad.length + ' problems' : 'all there'}</div>
+      <ul>${r.bad.map(t => `<li class="bad">${t}</li>`).join('')}${r.small.map(t => `<li>smaller text: ${t}</li>`).join('')}</ul>`)
+  }
+  if (q.get('faces')) for (const card of R.CARDS) {
+    const f = document.createElement('canvas'); f.width = 288; f.height = 403; f.style.width = '216px'
+    P.drawCard(f.getContext('2d'), card.id, 288, 403)
+    out.appendChild(f)
+  }
+  return results
+})()
+</script>
+</body>
+</html>

@@ -2,11 +2,11 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORY, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, CFG, SIZES, SELF } from './rules.js'
-import { T } from './strings.js'
+import { CARD, CARDS, CATEGORIES, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, tierOf, CFG, SIZES, SELF } from './rules.js'
+import { T, LANGS, getLang, who, myName, winsText, foolText, cardName, logText, errText } from './strings.js'
 
 /** The cards page of How to Play: by category, and within one from Common to Legendary. */
-const CATALOG = [...CARDS].sort((a, b) => Object.keys(CATEGORY).indexOf(a.cat) - Object.keys(CATEGORY).indexOf(b.cat) || 'CURL'.indexOf(a.rar) - 'CURL'.indexOf(b.rar))
+const CATALOG = [...CARDS].sort((a, b) => CATEGORIES.indexOf(a.cat) - CATEGORIES.indexOf(b.cat) || 'CURL'.indexOf(a.rar) - 'CURL'.indexOf(b.rar))
 /** How long a played card stays in the middle: Echo longer, while it turns over to the card it plays again. */
 const flyerLife = fl => (fl.echo ? 2.0 : 1.25)
 /** How a card's target is picked on the screen. */
@@ -71,8 +71,8 @@ const BURN_SECS = 0.8
 const MIN_TEXT = 12
 // on a touch screen a button takes a tap this close to it (CSS px across), however small it is drawn
 const TOUCH_HIT = 40
-// the game's name on the menu, in the covers' three lines and colours, and how tall it stands (units)
-const LOGO = [[{ t: 'Cards,', c: '#ffcf4a' }], [{ t: 'Snakes', c: '#7ed46a' }, { t: '&', c: '#fffdf8' }], [{ t: 'Ladders', c: '#f39a4f' }]]
+// the game's name on the menu: the colours of the covers' four words (T.logo has the words), and how tall it stands (units)
+const LOGO = ['#ffcf4a', '#7ed46a', '#fffdf8', '#f39a4f']
 const LOGO_H = 150
 // a card this wide (CSS px) shows its text 12.5 px tall (paper.js draws it 16.5 / 256 of the card's width):
 // a card held up to read is at least this big
@@ -128,6 +128,7 @@ export class UI {
     this.selected = -1
     this.fxOpen = null // a player's effects shown as their cards: { gid, p, keys, x, y } (openFx)
     this.helpPage = 0
+    this.langOpen = false // the main menu's list of languages is open
     this.picker = false // the Shared Table's invite list is open
     this.rows = new Map() // the players panel: where each player's row stands now, sliding to its place
     this.rowRect = []
@@ -320,28 +321,31 @@ export class UI {
     // "Your turn" once at the start of each of my turns, when the board has settled
     if (app.screen === 'game' && s && me >= 0 && s.cur === me && s.ph !== 'over' && app.curtain() < 0 && !app.view.busy) {
       const key = `${s.gid}:${s.turnNo}:${me}`
-      if (key !== b.turnKey) { b.turnKey = key; b.turn = 1.8; b.turnText = app.hotseat() ? T.turnOf(s.pl[me].n) : T.yourTurn }
+      if (key !== b.turnKey) { b.turnKey = key; b.turn = 1.8; b.turnText = app.hotseat() ? T.turnOf(who(s.pl[me].n)) : T.yourTurn }
     }
     b.turn = Math.max(0, b.turn - dt)
     let text = null, sub = null
     const discard = inGame && me >= 0 && s.cur === me && s.ph === 'disc' && app.curtain() < 0 && !app.view.busy
     if (inGame && this.target) {
       const t = this.target
-      if (t.echo && t.echo.card) { text = T.chooseWhat(CARD[t.echo.card].tgt); sub = T.echoing(CARD[t.echo.card].name, T.targetHint(t.kind)) }
-      else { text = T.chooseWhat(CARD[t.card].tgt); sub = T.targetHint(t.echo ? 'echo' : t.kind) }
+      if (t.echo && t.echo.card) { text = T.chooseWhat[CARD[t.echo.card].tgt] || T.chooseTarget; sub = T.echoing(cardName(t.echo.card), T.targetHint[t.kind]) }
+      else { text = T.chooseWhat[CARD[t.card].tgt] || T.chooseTarget; sub = T.targetHint[t.echo ? 'echo' : t.kind] }
     }
-    else if (discard) { text = T.discardTitle; sub = T.discardHint(s.pl[me].h.length - CFG.hand) }
+    else if (discard) { text = T.discardTitle; sub = T.discardHint(s.pl[me].h.length - CFG.hand, CFG.hand) }
     else if (inGame && b.turn > 0) text = b.turnText
     if (text && (text !== b.text || sub !== b.sub)) { this.drawBanner(text, sub); b.text = text; b.sub = sub; b.pop = 0 }
     const want = text ? 1 : 0
     b.op += (want - b.op) * (1 - Math.exp(-(want ? 12 : 5) * dt))
     b.pop = Math.min(1, b.pop + dt * 4)
-    const k = Math.max(this.u * 32 / 64, MIN_TEXT / 28) // the 64 px letters show about 32 px tall (the 28 px line under them no smaller than MIN_TEXT)
+    // the 64 px letters show about 32 px tall (the 28 px line under them no smaller than MIN_TEXT); long words
+    // show smaller, then run over the buttons at the side, and never past the screen
+    const left = this.gameLeft || 0, right = this.W - 60 * this.u, bw = b.w || 600
+    const k = Math.min(Math.max(Math.min(this.u * 32 / 64, (right - left - 8 * this.u) / bw), MIN_TEXT / 28), (this.W - 8 * this.u) / bw)
     const sc = 1024 * k * (0.9 + 0.1 * (1 - Math.pow(1 - b.pop, 3))) * (this.target || discard ? 1 + 0.012 * Math.sin(this.time * 3) : 1)
     b.mesh.scale.set(sc, sc, 1)
     // at the top, under the status and beside the players, so the board and its pieces stay clear to click
-    const half = (b.w || 600) / 2 * k, left = this.gameLeft || 0, right = this.W - 60 * this.u
-    const cx = left + half <= right - half ? THREE.MathUtils.clamp(this.W / 2, left + half, right - half) : (left + right) / 2
+    const half = bw / 2 * k, edge = 4 * this.u
+    const cx = THREE.MathUtils.clamp(left + half <= right - half ? THREE.MathUtils.clamp(this.W / 2, left + half, right - half) : (left + right) / 2, half + edge, this.W - half - edge)
     b.mesh.position.set(cx, this.H - this.bannerTop() - (b.h || 106) / 2 * k, 1)
     b.mesh.material.opacity = b.op * 0.95
     b.mesh.visible = b.op > 0.01
@@ -625,6 +629,9 @@ export class UI {
     if (ov.used) g.clearRect(-this.ox, -this.oy, this.FW, this.FH)
     if (app.screen === 'game' && !this.tiny) this.drawGameWindows()
     if (!this.tiny) this.drawTip()
+    this.langShown = app.screen === 'menu' && !this.tiny
+    if (this.langShown) this.drawLang(u0)
+    else this.langOpen = false
     if (this.picker && !this.tiny) this.drawPicker()
     if (app.invite && !this.tiny) this.drawInvite()
     const st = this.p0.web?.status
@@ -638,7 +645,7 @@ export class UI {
       this.panel((W - w) / 2, ty, w, 40 * this.u, { fill: 'rgba(43,38,34,0.88)', stroke: null, r: 18 })
       this.text(t.text, W / 2, ty + 20 * this.u, { color: '#ffffff', align: 'center' })
     }
-    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect || this.veiled || this.fxTip
+    const used = this.modal || !!this.toast || !!this.peekRect || !!this.offerRect || this.veiled || this.fxTip || this.langShown
     if (used || ov.used) ov.tex.needsUpdate = true
     ov.used = used
     this.g = this.base.g
@@ -647,22 +654,24 @@ export class UI {
 
   /**
    * The game's name as on the covers (tools/cover.js): thick letters in the cards' gold, the snakes' green
-   * and the ladders' wood, a navy rim and a paper-thick edge under them, in three lines. `y` is its top;
-   * it is LOGO_H units tall.
+   * and the ladders' wood, a navy rim and a paper-thick edge under them, in its language's lines. `y` is its
+   * top; it is LOGO_H units tall.
    */
   drawLogo(cx, y, scale = 1) {
     const g = this.g, u = this.u * scale
-    const size = 50 * u, lead = size * 1.02, rim = size * 0.15, depth = Math.max(3, size * 0.09)
+    const size = T.logoSize * u, lead = T.logoLead * u, rim = size * 0.15, depth = Math.max(3, size * 0.09)
     g.save()
     g.font = `900 ${size}px "Arial Black", "Segoe UI Black", ${P.FONT}`
     g.textAlign = 'left'; g.textBaseline = 'alphabetic'
     g.lineJoin = 'round'; g.miterLimit = 2
     const space = g.measureText(' ').width * 0.9
-    LOGO.forEach((line, li) => {
+    let word = 0
+    T.logo.forEach((words, li) => {
+      const line = words.map(t => ({ t, c: LOGO[word++] }))
       const widths = line.map(w => g.measureText(w.t).width)
       let x = cx - (widths.reduce((a, b) => a + b, 0) + space * (line.length - 1)) / 2
       const at = line.map((w, i) => { const x0 = x; x += widths[i] + space; return x0 })
-      const by = y + size * 0.78 + li * lead
+      const by = y + 141 * u - (T.logo.length - 1 - li) * lead
       // the edge: the rim pushed down a few times; then the rim, then the letters
       g.fillStyle = g.strokeStyle = '#1f2850'; g.lineWidth = rim
       for (let d = depth; d > 0; d -= Math.max(1, depth / 8)) line.forEach((w, i) => { g.strokeText(w.t, at[i], by + d); g.fillText(w.t, at[i], by + d) })
@@ -762,6 +771,30 @@ export class UI {
       })
     }
     this.soundControl()
+  }
+
+  /**
+   * The main menu's language: a button in the corner, over the first time's veil (who can't read the menu
+   * needs it most), and while open the list of languages, each under its own name. `u0` is the screen's
+   * unit: the menus' own is bigger on a phone.
+   */
+  drawLang(u0) {
+    const W = this.W, H = this.H
+    if (!this.menuWide) this.u = Math.max(u0, Math.min(W / 440, H / 760, 1.2))
+    const u = this.u, x = 14 * u, y = 14 * u, h = 36 * u, s = 18 * u, pad = 12 * u, lift = this.hover === 'lang' ? 2 * u : 0
+    const lang = getLang(), bw = this.measure(LANGS.find(l => l.id === lang).name, 14) + s + pad * 2 + 6 * u
+    if (this.langOpen) this.hits.push({ key: 'langclose', x: -this.ox, y: -this.oy, w: this.FW, h: this.FH, action: () => { this.langOpen = false } })
+    this.button('lang', '', x, y, bw, h, () => { this.langOpen = !this.langOpen }, { size: 14 })
+    this.glyph('globe', x + pad + s / 2, y + h / 2 - lift, s, P.INK)
+    this.text(LANGS.find(l => l.id === lang).name, x + pad + s + 6 * u, y + h / 2 + 1 - lift, { size: 14 })
+    if (this.langOpen) {
+      // (a long list of languages gets lower rows, not a list past the screen's edge)
+      const top = y + h + 6 * u, gap = 4 * u, n = LANGS.length, rh = Math.min(38 * u, (H - top - 8 * u - 12 * u) / n - gap)
+      const lw = Math.max(bw, ...LANGS.map(l => this.measure(l.name, 15) + 44 * u))
+      this.panel(x, top, lw, n * (rh + gap) - gap + 12 * u, { fill: 'rgba(255,253,248,0.98)' })
+      LANGS.forEach((l, i) => this.button('lang:' + l.id, l.name, x + 6 * u, top + 6 * u + i * (rh + gap), lw - 12 * u, rh, () => { this.langOpen = false; if (l.id !== lang) this.app.setLanguage(l.id) }, { size: 15, selected: l.id === lang }))
+    }
+    this.u = u0
   }
 
   /**
@@ -1183,7 +1216,7 @@ export class UI {
   }
   /** A quiet note centred on `cx`, `w` wide, whose last word is a link; from `y` down. Returns its height (`draw` false only measures). */
   linkNote(key, text, link, cx, y, w, action, draw = true) {
-    const size = 11.5, lh = this.lineH(size, 15), lines = this.wrap(text + ' ' + link, size, w, false)
+    const size = 11.5, lh = this.lineH(size, 15), lines = this.wrap(text + ' ' + link, size, w, false, link)
     if (draw) lines.forEach((l, i) => {
       const ly = y + lh / 2 + i * lh
       if (i < lines.length - 1) { this.text(l, cx, ly, { size, align: 'center', bold: false, color: '#7a7268', max: w }); return }
@@ -1393,9 +1426,13 @@ export class UI {
     const pw = Math.min(W - 20 * u, 780 * u), ph = Math.min(H - 20 * u, 600 * u)
     const x = (W - pw) / 2, y = (H - ph) / 2
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.96)' })
-    this.text(this.helpPage === 0 ? T.howToPlay : T.theCards, W / 2, y + 30 * u, { size: 22, align: 'center' })
-    // the web build's privacy policy and terms, quietly in the corner (they open in a new tab)
-    if (this.helpPage === 0 && this.p0.web?.privacy) {
+    // the web build's privacy policy and terms, quietly in the corner (they open in a new tab): a title that
+    // would run into them stands aside
+    const web = this.helpPage === 0 && this.p0.web?.privacy ? this.p0.web : null, title = this.helpPage === 0 ? T.howToPlay : T.theCards
+    const links = web ? this.measure(T.privacy, 12) + (web.terms ? 16 * u + this.measure(T.terms, 12) : 0) : 0
+    const aside = this.measure(title, 22) / 2 + 12 * u > pw / 2 - 24 * u - links
+    this.text(title, aside ? x + 24 * u : W / 2, y + 30 * u, { size: 22, align: aside ? 'left' : 'center' })
+    if (web) {
       const lw = this.link('privacy', T.privacy, x + pw - 24 * u, y + 30 * u, () => this.p0.web.openPrivacy(), { size: 12, align: 'right' })
       if (this.p0.web.terms) this.link('terms', T.terms, x + pw - 40 * u - lw, y + 30 * u, () => this.p0.web.openTerms(), { size: 12, align: 'right' })
     }
@@ -1404,7 +1441,7 @@ export class UI {
     if (this.helpPage === 0) {
       const g = this.g
       let yy = y + 74 * u
-      for (const [head, para] of T.rules) {
+      for (const [head, para] of T.rules(CFG.hand)) {
         this.text(head, x + 30 * u, yy, { size: 16, color: '#e8743b' }); yy += this.lineH(16, 23)
         g.font = this.font(15 * u, false)
         const lines = P.wrapText(g, para, pw - 60 * u)
@@ -1606,15 +1643,15 @@ export class UI {
     const app = this.app, me = app.mySeat(), curtain = app.curtain(), hot = app.hotseat()
     const myTurn = me >= 0 && s.cur === me && s.ph !== 'over'
     let status
-    if (s.ph === 'over') status = s.mode === 'champion' ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
-    else if (curtain >= 0) status = T.passTo(s.pl[curtain].n)
+    if (s.ph === 'over') status = s.mode === 'champion' ? winsText(s.pl[s.res.winner].n) : foolText(s.pl[s.res.fool].n)
+    else if (curtain >= 0) status = T.passTo(who(s.pl[curtain].n))
     else if (this.target) status = this.target.kind === 'cell2' ? T.chooseTwoCells : T.chooseTarget
     else if (myTurn && s.ph === 'disc') status = T.chooseDiscard
     else if (myTurn && s.ph === 'pick') status = T.chooseDie
     else if (myTurn && s.ph === 'take') status = T.chooseCard
     else if (myTurn && s.frozen && !s.rolled) status = T.cantPlay
-    else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(s.pl[me].n) : T.yourTurn
-    else status = T.waitingFor(s.pl[s.cur].n)
+    else if (myTurn) status = s.rolled ? T.playOrEnd : hot ? T.turnOf(who(s.pl[me].n)) : T.yourTurn
+    else status = T.waitingFor(who(s.pl[s.cur].n))
     return status
   }
 
@@ -1686,16 +1723,19 @@ export class UI {
       else {
         g.fillStyle = P.PLAYER_COLORS[p.c % 6]
         g.beginPath(); g.arc(cx + rowH / 2, cy + rowH / 2, rowH * 0.32, 0, Math.PI * 2); g.fill()
-        this.initial(p.n, cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
+        this.initial(who(p.n), cx + rowH / 2, cy + rowH / 2 + 1, this.narrow ? 13 : 16)
       }
       const nx = cx + rowH * 0.95
-      const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos)
+      const sub = p.d ? T.place(p.d) : p.pos <= 0 ? T.atStart : T.cellTier(p.pos, tierOf(p.pos) + 1)
       if (this.narrow) {
-        this.text(p.n + (i === me && !hot ? ' ★' : ''), nx, cy + rowH * 0.32, { size: 13.5, max: colW - rowH - 34 * u })
-        this.text(sub, nx, cy + rowH * 0.71, { size: 11.5, bold: false, color: '#5b544c', max: colW - rowH - 34 * u })
+        this.text(who(p.n) + (i === me && !hot ? ' ★' : ''), nx, cy + rowH * 0.32, { size: 13.5, max: colW - rowH - 34 * u })
+        // (only the cell where a long word would run into the count of effects)
+        const room = colW - rowH - (Object.keys(p.fx).some(k => FX[k]) ? 56 : 34) * u
+        g.font = this.font(11.5 * u, false)
+        this.text(g.measureText(sub).width <= room || p.d || p.pos <= 0 ? sub : T.cellShort(p.pos), nx, cy + rowH * 0.71, { size: 11.5, bold: false, color: '#5b544c', max: room })
       } else {
         // (a Quick Match table's bots, keeping their seats for players, sit there as players do)
-        this.text((i === me && !hot ? T.mine(p.n) : p.n) + (p.b && !p.f ? ' · bot' : ''), nx, cy + rowH / 3, { size: 14.5, max: colW - rowH - 50 * u })
+        this.text((i === me && !hot ? myName(p.n) : who(p.n)) + (p.b && !p.f ? ` · ${T.botShort}` : ''), nx, cy + rowH / 3, { size: 14.5, max: colW - rowH - 50 * u })
         // the cell and tier, or only the cell where the text (kept big on a small screen) would run into the effects
         const nfx = Math.min(5, Object.keys(p.fx).filter(k => FX[k]).length)
         const room = cx + colW - 26 * u - (nfx ? 34 * u + (nfx - 1) * 20 * u : 12 * u) - 4 * u - nx
@@ -1740,8 +1780,8 @@ export class UI {
     this.panel(sx, sy, sw, 40 * u, { fill: myTurn ? '#2d3a6b' : 'rgba(255,255,255,0.93)', r: 20 })
     this.statusRect = { x: sx, y: sy, w: sw, h: 40 * u }
     this.text(status, sx + sw / 2, sy + 21 * u, { size: 17, align: 'center', color: myTurn ? '#ffffff' : P.INK, max: sw - 20 * u })
-    if (!this.narrow) this.text(T.round(s.round, CFG.roundLimit) + (s.mode === 'fool' ? ' · Fool' : ' · Champion'), sx + sw / 2, sy + 52 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c' })
-    if (app.turnLeft != null && myTurn) this.text(`${Math.ceil(app.turnLeft)} s`, sx + sw - 30 * u, sy + 21 * u, { size: 14, align: 'center', color: app.turnLeft < 10 ? '#ffb4a8' : '#ffffff' })
+    if (!this.narrow) this.text(`${T.round(s.round, CFG.roundLimit)} · ${s.mode === 'fool' ? T.fool : T.champion}`, sx + sw / 2, sy + 52 * u, { size: 11.5, align: 'center', bold: false, color: '#5b544c' })
+    if (app.turnLeft != null && myTurn) this.text(T.seconds(Math.ceil(app.turnLeft)), sx + sw - 30 * u, sy + 21 * u, { size: 14, align: 'center', color: app.turnLeft < 10 ? '#ffb4a8' : '#ffffff' })
     // corner buttons: menu, speed, sound, zoom
     this.button('menu', '☰', rx, 10 * u, cb, cb, () => app.openGameMenu(), { size: 18 })
     this.button('speed', `${app.speedLabel()}`, rx - cb - 18 * u, 10 * u, cb + 10 * u, cb, () => app.cycleSpeed(), { size: 14 })
@@ -1771,9 +1811,10 @@ export class UI {
       // labels go under the tray, or over it on a phone where the hand is under it
       const ly = this.narrow ? ty - 22 * u : ty + th + 18 * u
       const pill = label => {
-        const lw = this.measure(label, 14) + 30 * u
-        this.panel(tx + tw / 2 - lw / 2, ly - 13 * u, lw, 26 * u, { fill: '#2d3a6b', stroke: null, r: 13 })
-        this.text(label, tx + tw / 2, ly + 1, { size: 14, align: 'center', color: '#ffffff' })
+        // (a phone's tray stands at the screen's edge: a long prompt stays on the screen)
+        const lw = Math.min(this.measure(label, 14) + 30 * u, this.W - 8 * u), lx = THREE.MathUtils.clamp(tx + tw / 2, lw / 2 + 4 * u, this.W - lw / 2 - 4 * u)
+        this.panel(lx - lw / 2, ly - 13 * u, lw, 26 * u, { fill: '#2d3a6b', stroke: null, r: 13 })
+        this.text(label, lx, ly + 1, { size: 14, align: 'center', color: '#ffffff', max: lw - 16 * u })
       }
       const hit = action => this.hits.push({ key: 'tray', x: tx - 10 * u, y: ty - 10 * u, w: tw + 20 * u, h: th + 20 * u, action })
       if (mode === 'roll') {
@@ -1926,7 +1967,7 @@ export class UI {
     if (this.peekRect && s.peek) {
       const r = this.peekRect
       this.panel(r.x - 12 * u, r.y - 34 * u, r.w + 24 * u, r.h + 46 * u, { fill: 'rgba(255,253,248,0.96)', stroke: 'rgba(43,38,34,0.25)' })
-      this.text(T.handOf(s.pl[s.peek.tg].n), r.x + r.w / 2, r.y - 17 * u, { size: 15, align: 'center' })
+      this.text(T.handOf(who(s.pl[s.peek.tg].n)), r.x + r.w / 2, r.y - 17 * u, { size: 15, align: 'center' })
       if (r.empty) this.text(T.noCards, r.x + r.w / 2, r.y + r.h / 2, { size: 14, align: 'center', bold: false, color: '#5b544c' })
       const cb = 34 * u
       this.button('peekx', '✕', r.x + r.w + 12 * u - cb - 2 * u, r.y - 34 * u + 2 * u, cb, cb, () => this.closePeek(), { size: 15 })
@@ -1969,7 +2010,7 @@ export class UI {
       this.panel(mx, my, mw, mh, { fill: 'rgba(255,253,248,0.97)' })
       this.text(T.menuTitle, W / 2, my + 30 * u, { size: 20, align: 'center' })
       this.button('resume', T.resume, bx, my + 60 * u, bw, 44 * u, () => app.openGameMenu(), { primary: true })
-      this.button('speed2', `Speed: ${app.speedLabel()}`, bx, my + 112 * u, bw, 40 * u, () => app.cycleSpeed(), { size: 15 })
+      this.button('speed2', T.speed(app.speedLabel()), bx, my + 112 * u, bw, 40 * u, () => app.cycleSpeed(), { size: 15 })
       // sound: the speaker mutes, the slider sets the volume
       this.soundButton('snd2', bx, my + 160 * u, 40 * u)
       this.volumeSlider('vol2', bx + 58 * u, my + 160 * u, bw - 68 * u, 40 * u)
@@ -1989,7 +2030,7 @@ export class UI {
     this.panel(x, y, w, h, { fill: 'rgba(255,253,248,0.97)', stroke: 'rgba(43,38,34,0.25)' })
     this.hits.push({ key: 'block', x, y, w, h, action: () => {} }) // (a click on the window itself leaves it open)
     const cb = 34 * u
-    this.text(T.effectsOf(s.pl[r.p].n, r.notes.length), x + w / 2, y + r.head / 2, { size: 16, align: 'center', max: w - 2 * cb - 16 * u })
+    this.text(T.effectsOf(who(s.pl[r.p].n), r.notes.length), x + w / 2, y + r.head / 2, { size: 16, align: 'center', max: w - 2 * cb - 16 * u })
     r.notes.forEach((t, k) => {
       const cx = r.x + r.pw / 2 + k * r.pw * r.gap
       let ly = r.y + r.h + 10 * u + r.lh / 2
@@ -2014,7 +2055,7 @@ export class UI {
     this.panel(tx, ty, tw, th, { fill: 'rgba(255,253,248,0.98)', stroke: P.CAT_COLORS[card.id[0]], lw: 2, r: 10 })
     let y = ty + pad + this.lineH(14.5, 19) / 2
     P.drawIcon(this.g, card.id, tx + pad + 8 * u, y, 16 * u, P.CAT_COLORS[card.id[0]])
-    this.text(card.name, tx + pad + 22 * u, y, { size: 14.5, max: tw - 2 * pad - 22 * u })
+    this.text(cardName(card.id), tx + pad + 22 * u, y, { size: 14.5, max: tw - 2 * pad - 22 * u })
     y += this.lineH(14.5, 19) / 2 + lh / 2
     for (const l of lines) { this.text(l, tx + pad, y, { size: 12.5, bold: false, color: P.INK }); y += lh }
     if (left) { this.text(left, tx + pad, y, { size: 12.5, color: '#7b5ce0' }); y += lh }
@@ -2033,8 +2074,8 @@ export class UI {
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.98)', stroke: color, lw: 3.5 })
     g.fillStyle = color
     g.beginPath(); g.arc(W / 2, y + 40 * u, 20 * u, 0, Math.PI * 2); g.fill()
-    this.initial(p.n, W / 2, y + 41 * u, 20)
-    this.text(T.passTo(p.n), W / 2, y + 82 * u, { size: 22, align: 'center', max: pw - 30 * u })
+    this.initial(who(p.n), W / 2, y + 41 * u, 20)
+    this.text(T.passTo(who(p.n)), W / 2, y + 82 * u, { size: 22, align: 'center', max: pw - 30 * u })
     this.text(T.passHint, W / 2, y + 108 * u, { size: 13.5, align: 'center', bold: false, color: '#5b544c', max: pw - 30 * u })
     this.button('reveal', T.showCards, x + 40 * u, y + ph - 62 * u, pw - 80 * u, 46 * u, () => this.app.reveal(), { primary: true, color, size: 18 })
   }
@@ -2086,7 +2127,7 @@ export class UI {
 
   measure(t, size) { this.g.font = this.font(size * this.u); return this.g.measureText(t).width }
   /** Text of a size broken into lines `w` wide. */
-  wrap(t, size, w, bold = true) { this.g.font = this.font(size * this.u, bold); return P.wrapText(this.g, t, w) }
+  wrap(t, size, w, bold = true, whole = null) { this.g.font = this.font(size * this.u, bold); return P.wrapText(this.g, t, w, whole) }
   handHeight() { return this.cardW() * 1.4 * 0.86 + 14 * this.u - this.handSink() }
   /** How much lower my hand rests on a short screen on its side (a phone's): the cards' text shows as one rises to read. */
   handSink() { return !this.narrow && this.H < 440 ? this.cardW() * 0.4 : 0 }
@@ -2171,7 +2212,7 @@ export class UI {
     // scrolled back, the lines that many before the newest
     const lines = this.logLines, more = lines.length - fit
     const back = this.logScroll = THREE.MathUtils.clamp(this.logScroll, 0, Math.max(0, more))
-    const shown = lines.slice(lines.length - fit - back, lines.length - back).map(l => /^(\d+)\. (.*)$/.exec(l) || [l, '', l])
+    const shown = lines.slice(lines.length - fit - back, lines.length - back).map(logText).map(l => /^(\d+)\. (.*)$/.exec(l) || [l, '', l])
     const h = shown.length * lh + 16 * u
     const y = compact ? top : bottom - h
     this.panel(x, y, w, h, { fill: compact ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.82)', r: 10 })
@@ -2214,7 +2255,7 @@ export class UI {
     const x = (W - pw) / 2, y = Math.max(10 * u, (H - ph) / 2 - 40 * u)
     this.panel(x, y, pw, ph, { fill: 'rgba(255,253,248,0.97)' })
     const champ = s.mode === 'champion'
-    const title = champ ? T.wins(s.pl[s.res.winner].n) : T.isFool(s.pl[s.res.fool].n)
+    const title = champ ? winsText(s.pl[s.res.winner].n) : foolText(s.pl[s.res.fool].n)
     // (a title that already speaks to this screen's player, "You win!", needs no line under it: it takes that line's place too)
     const toMe = me >= 0 && (champ ? s.res.winner : s.res.fool) === me && s.pl[me].n === SELF
     this.text(title, W / 2, y + (toMe ? 50 : 34) * u, { size: 24, align: 'center', color: champ ? '#c99400' : '#d64545', max: pw - 30 * u })
@@ -2225,9 +2266,9 @@ export class UI {
       const p = s.pl[i], ry = y + 106 * u + k * 34 * u
       this.g.fillStyle = P.PLAYER_COLORS[p.c % 6]
       this.g.beginPath(); this.g.arc(x + 34 * u, ry + 14 * u, 9 * u, 0, Math.PI * 2); this.g.fill()
-      const place = !champ && s.res.fool === i ? 'Fool' : `#${s.res.places[i]}`
+      const place = !champ && s.res.fool === i ? T.fool : `#${s.res.places[i]}`
       this.text(place, x + 54 * u, ry + 14 * u, { size: 15 })
-      this.text(i === me ? T.mine(p.n) : p.n, x + 110 * u, ry + 14 * u, { size: 15, bold: i === me, max: pw - 220 * u })
+      this.text(i === me ? myName(p.n) : who(p.n), x + 110 * u, ry + 14 * u, { size: 15, bold: i === me, max: pw - 220 * u })
       this.text(p.d && !champ ? T.finished : p.pos >= (s.n || 100) ? String(s.n || 100) : T.cellShort(p.pos), x + pw - 30 * u, ry + 14 * u, { size: 13, align: 'right', bold: false })
     })
     let yy = y + 106 * u + s.pl.length * 34 * u + 6 * u
@@ -2556,7 +2597,7 @@ export class UI {
     }
     if (this.target && this.target.i === c.i) { this.cancelTarget(); return }
     const why = whyNot(s, me, c.id)
-    if (why) { this.cancelTarget(); this.say(why); return }
+    if (why) { this.cancelTarget(); this.say(errText(why)); return }
     const def = CARD[c.id]
     const all = targetsFor(s, me, c.id), list = app.tut ? app.tut.targets(c.id, all) : all
     if (def.tgt === 'self') { this.play(c.i, me); return }
@@ -2655,7 +2696,7 @@ export class UI {
     if (!t || !s || t.kind !== 'player' || (t.echo && !t.echo.card) || t.list.includes(i)) return false
     return warded(s, t.seat, t.echo?.card || t.card, i)
   }
-  sayWarded(i) { this.say(T.protectedBy(this.app.view.state.pl[i].n, CARD.P4.name)) }
+  sayWarded(i) { this.say(T.protectedBy(who(this.app.view.state.pl[i].n), cardName('P4'))) }
   cancelTarget() { this.target = null; this.selected = -1; this.syncHighlight(); this.dirty = true }
   /** A card being aimed is put back once it can no longer be played: the turn moved on, the hand changed. */
   checkTarget() {
