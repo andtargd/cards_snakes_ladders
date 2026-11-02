@@ -25,6 +25,13 @@ export default {
   // one over this is burnt)
   hand: 3,
 
+  // a card the player holds and got lately comes up less often in their draws, so a hand fills up with the
+  // same card less: its chance drops by getSameCardChance (0.8 = 80% less, 0 turns it off), the rest of the
+  // deck sharing what it gives up, for the next getSameCardCooldown turns of that player (the turn they got
+  // it in does not count). Any card got counts: drawn, chosen, stolen or swapped in
+  getSameCardChance: 0.8,
+  getSameCardCooldown: 2,
+
   // a draw first picks a rarity by these weights (out of their sum), then a card of that rarity
   rarity: {
     C: { weight: 55 },
@@ -118,6 +125,8 @@ export default {
     B6: {
       rarity: 'L', weight: 1, enabled: true,
       shift: 2, // each end of every snake and ladder moves 1 to this many cells, for the rest of the game
+      spaces: 5, // then every other player moves this many spaces back (never past cell 1); not one under
+      //            the Holy Grail
     },
 
     // ---------- Hinder ----------
@@ -167,10 +176,10 @@ export default {
     P4: {
       rarity: 'L', weight: 1, enabled: true,
       target: 'current_player',
-      // every effect on the player goes; then, for this many rounds (until their own turn comes again), no
-      // other player can play on them the Hinder cards, Dash, Setback, Swap Places, Rewind, Steal or Swap
-      // Hands (fix the texts if you change it)
-      rounds: 1,
+      // every effect on the player goes; then, for this many rounds (until their own turn has come again
+      // this many times), no other player can play on them the Hinder cards, Dash, Setback, Swap Places,
+      // Rewind, Steal or Swap Hands, and an Earthquake does not throw them back
+      rounds: 2,
       popup: { color: '#c99400' }, // over the player as it clears their effects
     },
 

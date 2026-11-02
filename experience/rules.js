@@ -9,6 +9,8 @@ import FIELD from './board.config.js'
 export const CFG = {
   cells: 100, tiers: 10, perTier: 10,
   hand: Math.max(1, DECK.hand | 0 || 3), fxTurns: 3, roundLimit: 150,
+  // a card the player holds and got lately comes up this much less often in their draws, for so many turns
+  sameCut: Math.min(1, Math.max(0, +DECK.getSameCardChance || 0)), sameTurns: Math.max(0, DECK.getSameCardCooldown | 0),
   minLen: FIELD.minLen, maxEndsPerTier: FIELD.perTier.ends, balance: FIELD.balance,
   simRuns: 1000,
   // how snakes and ladders may cross: a few crossings each, and only steeply
@@ -411,7 +413,7 @@ export function createGame({ seed, mode = 'champion', players, cells = CFG.cells
   }
   const order = players.map((p, i) => i)
   for (let i = order.length - 1; i > 0; i--) { const j = rint(s, i + 1); [order[i], order[j]] = [order[j], order[i]] }
-  s.pl = order.map(i => ({ n: String(players[i].n).slice(0, 14).replace(/[\ud800-\udbff]$/, ''), b: players[i].b | 0, id: players[i].id ?? null, c: players[i].c ?? i, pos: 0, h: [], d: 0, fx: {} }))
+  s.pl = order.map(i => ({ n: String(players[i].n).slice(0, 14).replace(/[\ud800-\udbff]$/, ''), b: players[i].b | 0, id: players[i].id ?? null, c: players[i].c ?? i, pos: 0, h: [], d: 0, fx: {}, got: {} }))
   const ev = []
   beginTurn(s, ev)
   s.ev0 = ev
@@ -438,23 +440,41 @@ const nm = (s, i) => s.pl[i].n
 /** The name of the player at this screen who gave none (Solo Play, the First Match): it shows as "You" in the language chosen. */
 export const SELF = 'You'
 
-/** A rarity by its weight (rarities without cards in the deck left out), then a card of it by the cards' weights. */
-function drawCard(s) {
+/** Whether a card comes up less often for player p: they hold it and got it lately (cards.config.js getSameCardChance). */
+const repeat = (p, id) => p?.got?.[id] > 0 && p.h.includes(id)
+/** Player p got a card: for their next `sameTurns` turns (the turn they got it in does not count) it comes up less often. */
+function gotCard(p, id) {
+  if (!CFG.sameTurns) return
+  if (!p.got) p.got = {}
+  p.got[id] = CFG.sameTurns + 1 // a turn of theirs less as each begins, this one's included
+}
+
+/**
+ * A card for player p: a rarity by its weight (rarities without cards in the deck left out), then a card of
+ * it by the cards' weights. A card p holds and got lately weighs `sameCut` less, its rarity by as much as it
+ * gives up, so the rest of the deck shares its chance.
+ */
+function drawCard(s, p = null) {
+  const cw = id => CARD[id].w * (repeat(p, id) ? 1 - CFG.sameCut : 1)
+  const sum = (list, w) => list.reduce((a, id) => a + w(id), 0)
+  // [rarity, weight]: exactly the rarity's own weight when none of its cards is cut
   const rars = ['C', 'U', 'R', 'L'].filter(k => BY_RARITY[k].length && RARITY[k]?.weight > 0)
-  let w = rnd(s) * rars.reduce((a, k) => a + RARITY[k].weight, 0), rar = rars[rars.length - 1]
-  for (const k of rars) { w -= RARITY[k].weight; if (w < 0) { rar = k; break } }
+    .map(k => [k, RARITY[k].weight * (sum(BY_RARITY[k], cw) / sum(BY_RARITY[k], id => CARD[id].w))]).filter(([, w]) => w > 0)
+  if (!rars.length && p) return drawCard(s) // every card there is cut to nothing: as if none were
+  let w = rnd(s) * rars.reduce((a, [, rw]) => a + rw, 0), rar = rars[rars.length - 1][0]
+  for (const [k, rw] of rars) { w -= rw; if (w < 0) { rar = k; break } }
   const list = BY_RARITY[rar]
-  let v = rnd(s) * list.reduce((a, id) => a + CARD[id].w, 0)
-  for (const id of list) { v -= CARD[id].w; if (v < 0) return id }
+  let v = rnd(s) * sum(list, cw)
+  for (const id of list) { v -= cw(id); if (v < 0) return id }
   return list[list.length - 1]
 }
 
-/** The cards Choose Your Card offers: as many as the card says, different ones while the deck allows. */
-function drawOffer(s) {
+/** The cards Choose Your Card offers player p: as many as the card says, different ones while the deck allows. */
+function drawOffer(s, p) {
   const n = Math.max(1, Math.min(5, CARD.C5.draw | 0)), out = []
   for (let k = 0; k < n; k++) {
-    let id = drawCard(s)
-    for (let tries = 0; tries < 8 && out.includes(id); tries++) id = drawCard(s)
+    let id = drawCard(s, p)
+    for (let tries = 0; tries < 8 && out.includes(id); tries++) id = drawCard(s, p)
     out.push(id)
   }
   return out
@@ -470,6 +490,8 @@ function beginTurn(s, ev) {
     p.st = p.pos; p.tr = ''; delete p.up
     // the Holy Grail's rounds are counted at the start of its player's turns: the others have had theirs
     if (p.fx.gr && --p.fx.gr.t <= 0) delete p.fx.gr
+    // and so are the turns a card the player got lately comes up less often
+    for (const id in p.got) if (--p.got[id] <= 0) delete p.got[id]
     s.turnNo++
     s.rolled = false; s.played = false; s.frozen = false; s.peek = null; s.pick = null; s.offer = null; s.ph = 'main'
     delete s.bonus
@@ -485,13 +507,14 @@ function beginTurn(s, ev) {
     if (p.fx.fz) { delete p.fx.fz; s.frozen = true; ev.push({ e: 'frozen', p: pi }) }
     if (p.fx.cc) { // Choose Your Card: several cards are offered, the player keeps one
       delete p.fx.cc
-      s.offer = drawOffer(s)
+      s.offer = drawOffer(s, p)
       s.ph = 'take'
       ev.push({ e: 'offer', p: pi, n: s.offer.length })
       return
     }
-    const card = drawCard(s)
+    const card = drawCard(s, p)
     p.h.push(card)
+    gotCard(p, card)
     ev.push({ e: 'draw', p: pi, card })
     return
   }
@@ -1039,6 +1062,7 @@ export function apply(s, pi, a) {
     const card = s.offer[i]
     s.offer = null; s.ph = 'main'
     p.h.push(card)
+    gotCard(p, card)
     ev.push({ e: 'draw', p: pi, card, took: true })
   } else if (s.ph !== 'main') return fail(s.ph === 'pick' ? 'chooseDie' : s.ph === 'take' ? 'chooseCard' : 'chooseDiscard')
   else if (a.t === 'unpeek') {
@@ -1182,7 +1206,8 @@ function cardEffect(s, pi, cardId, target, ev) {
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
     case 'P4': {
-      // every effect on the player goes, good or bad; the Grail's own ward stays until their turn comes again
+      // every effect on the player goes, good or bad; the Grail's own ward stays until their turn has come
+      // again `rounds` times
       const gone = Object.keys(who.fx).filter(k => FX[k] && k !== 'gr')
       who.fx = { gr: { t: Math.max(1, card.rounds | 0) } }
       ev.push({ e: 'grail', p: target, gone })
@@ -1206,15 +1231,23 @@ function cardEffect(s, pi, cardId, target, ev) {
       s.mods.push({ i: target, o: pi, t: card.turns, f: 1 })
       ev.push({ ...boardEvent(s, 'flip'), flip: target })
       break
-    case 'B6':
+    case 'B6': {
       s.quake = { els: quakeElements(s) }
       ev.push(boardEvent(s, 'quake'))
+      // then it throws everyone else back on the new board, never past cell 1; the Holy Grail keeps it off
+      for (let k = 1; k < s.pl.length && card.spaces > 0; k++) {
+        const q = (pi + k) % s.pl.length, o = s.pl[q]
+        if (o.d || o.pos <= 1 || o.fx.gr) continue
+        jump(s, q, Math.max(1, o.pos - card.spaces), ev, 'quake')
+        if (s.ph === 'over') break
+      }
       break
+    }
     case 'C1': {
       const n = p.h.length
       p.h = []
       const draw = Math.min(CFG.hand, n + card.extra)
-      for (let k = 0; k < draw; k++) p.h.push(drawCard(s))
+      for (let k = 0; k < draw; k++) { const c = drawCard(s, p); p.h.push(c); gotCard(p, c) }
       ev.push({ e: 'redraw', p: pi, n: draw })
       break
     }
@@ -1224,12 +1257,15 @@ function cardEffect(s, pi, cardId, target, ev) {
       const k = rint(s, who.h.length)
       const [c] = who.h.splice(k, 1)
       p.h.push(c)
+      gotCard(p, c)
       ev.push({ e: 'steal', p: pi, tg: target })
       break
     }
     case 'C4': {
       const h = p.h
       p.h = who.h; who.h = h
+      for (const c of p.h) gotCard(p, c)
+      for (const c of who.h) gotCard(who, c)
       ev.push({ e: 'swaphands', p: pi, tg: target })
       break
     }
@@ -1280,7 +1316,7 @@ function standingValue(s, q, els) {
   if (p.fx.pa) v += 1.5 * (p.fx.pa.t || 1) / 2
   if (p.fx.bo) v += 0.4
   if (p.fx.fz) v -= 0.6
-  if (p.fx.gr) v += 1.5 // the others' attacks kept off for a round
+  if (p.fx.gr) v += 1.5 * (p.fx.gr.t || 1) // the others' attacks kept off, for each round left
   v += 0.6 * handValue(p.h)
   return v
 }

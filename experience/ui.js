@@ -2046,7 +2046,7 @@ export class UI {
     const card = CARD[FX[k].card], pad = 10 * u
     const tw = Math.min(this.W - 12 * u, 240 * u)
     const lines = this.wrap(T.fxHint[k](card), 12.5, tw - 2 * pad, false), lh = this.lineH(12.5, 16)
-    const left = v.t && k !== 'gr' ? T.turnsLeft(v.t) : null
+    const left = v.t ? (k === 'gr' ? T.roundsLeft : T.turnsLeft)(v.t) : null
     const th = pad * 2 + this.lineH(14.5, 19) + (lines.length + (left ? 1 : 0)) * lh + this.lineH(11.5, 16) + 4 * u
     // under the icon, kept on the screen; over it where there is no room under it
     const tx = THREE.MathUtils.clamp(h.x + h.w / 2 - tw / 2, 6 * u, this.W - tw - 6 * u)
@@ -2425,8 +2425,8 @@ export class UI {
       const p = s.pl[fxOn.p]
       const notes = fxOn.keys.map(k => ({
         lines: this.wrap(T.fxHint[k](CARD[FX[k].card]), 13, pw * 1.04, false),
-        // (the Grail's ward says itself how long it lasts)
-        left: !p.fx[k] ? T.fxGone : p.fx[k].t && k !== 'gr' ? T.turnsLeft(p.fx[k].t) : null,
+        // (the Grail's ward counts rounds)
+        left: !p.fx[k] ? T.fxGone : p.fx[k].t ? (k === 'gr' ? T.roundsLeft : T.turnsLeft)(p.fx[k].t) : null,
         gone: !p.fx[k],
       }))
       const foot = Math.max(...notes.map(t => t.lines.length + (t.left ? 1 : 0))) * lh + 20 * u
