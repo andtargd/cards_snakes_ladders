@@ -656,15 +656,17 @@ export const choiceMax = fx => (fx.gd ? CARD.D4.max : fx.cf ? CARD.D2.max : 0)
  */
 export function landing(s, pi, pos, total, els = effectiveElements(s)) {
   const p = s.pl[pi], back = !!p.fx.bk
-  let c = pos, stopped = false
+  let c = pos, stopped = false, tramp = false
   for (let k = 0; k < total; k++) {
     if (back && c <= 1) break
     c += back ? -1 : 1
     if (c >= s.n) return { pos: s.n, finished: true }
     if (!p.fx.bo && markerAt(s, c, 'sw')) { stopped = true; break }
+    if (markerAt(s, c, 'tr')) { tramp = true; break }
   }
   if (stopped || c === pos) return { pos: c, finished: false }
-  // the cell takes effect; a trampoline throws the piece on, and the cell it lands on takes effect in turn
+  // the cell takes effect; a trampoline on the way throws the piece on by its run-up, and the cell it lands
+  // on takes effect in turn
   const settle = (c, bounced) => {
     if (bounced && !p.fx.bo && markerAt(s, c, 'sw')) return { pos: c, finished: false }
     const el = els.find(e => e[1] === c)
@@ -676,14 +678,12 @@ export function landing(s, pi, pos, total, els = effectiveElements(s)) {
       return { pos: c - fall, finished: false }
     }
     const m = markerAt(s, c)
-    if (m && m.k === 'tr') {
-      const to = c + CARD.B4.spaces
-      return to >= s.n ? { pos: s.n, finished: true } : settle(to, true)
-    }
     if (m && m.k === 'po') return { pos: m.c[0] === c ? m.c[1] : m.c[0], finished: false }
     return { pos: c, finished: false }
   }
-  return settle(c, false)
+  if (!tramp) return settle(c, false)
+  const to = Math.max(1, 2 * c - pos)
+  return to >= s.n ? { pos: s.n, finished: true } : settle(to, true)
 }
 
 const parachute = fall => Math.max(0, Math.min(fall, Math.floor(fall * CARD.P1.slide)))
@@ -770,16 +770,17 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
     else if (dice.length > 1) log(s, ev, 'choseRolled', p.n, dice[0], dice.slice(1).join(' + ') + sum, then)
     else log(s, ev, 'chose', p.n, dice[0], then)
   }
-  // step by step: a swamp on the way stops the move; going back stops on cell 1
+  // step by step: a swamp on the way stops the move, a trampoline throws the piece on; going back stops on cell 1
   const path = [], waded = []
   const start = p.pos
-  let c = p.pos, stopped = false
+  let c = p.pos, stopped = false, tramp = false
   for (let k = 0; k < total; k++) {
     if (back && c <= 1) break
     c += back ? -1 : 1
     path.push(Math.min(c, s.n))
     if (c >= s.n) break
     if (markerAt(s, c, 'sw')) { if (!fx.bo) { stopped = true; break } waded.push(c) }
+    if (markerAt(s, c, 'tr')) { tramp = true; break }
   }
   if (!path.length) return
   p.pos = Math.min(c, s.n)
@@ -789,6 +790,7 @@ function moveBy(s, pi, dice, ev, bonus, picked = -1, chosen = false) {
   trail(p, ['m', start, p.pos])
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (stopped) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
+  if (tramp) { bounce(s, pi, p.pos - start, ev); return }
   resolveLanding(s, pi, ev)
 }
 
@@ -803,7 +805,10 @@ export function trailOf(tr) {
   return String(tr || '').split(';').filter(Boolean).map(x => [x[0], ...x.slice(1).split(',').map(Number)])
 }
 
-/** The cell a piece stops on takes effect: a ladder, a snake, a trampoline or a portal. */
+/**
+ * The cell a piece stops on takes effect: a ladder, a snake or a portal. (A trampoline works as the piece
+ * reaches it on a move, see bounce; landing on one any other way does nothing.)
+ */
 function resolveLanding(s, pi, ev) {
   const p = s.pl[pi], c = p.pos
   const els = effectiveElements(s)
@@ -835,17 +840,6 @@ function resolveLanding(s, pi, ev) {
     return
   }
   const m = markerAt(s, c)
-  if (m && m.k === 'tr') {
-    p.pos = Math.min(s.n, c + CARD.B4.spaces); p.up = 1
-    ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
-    trail(p, ['t', c, p.pos])
-    log(s, ev, 'trampoline', p.n, p.pos)
-    if (p.pos >= s.n) { finish(s, pi, ev); return }
-    // the cell it throws the piece onto takes effect too (always further on, so the chain ends)
-    if (!p.fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
-    resolveLanding(s, pi, ev)
-    return
-  }
   if (m && m.k === 'po') {
     p.pos = m.c[0] === c ? m.c[1] : m.c[0]
     ev.push({ e: 'portal', p: pi, from: c, to: p.pos })
@@ -855,15 +849,42 @@ function resolveLanding(s, pi, ev) {
 }
 
 /**
- * Moves from cards (Dash, Setback, Dethrone): the piece jumps, then the cell it lands on works as after a
- * roll (ladder, snake, trampoline, portal). A jump goes over swamps on the way; only landing in one stops it.
+ * A trampoline the piece reached on a move throws it on by its run-up, the cells it came to it (by the dice
+ * or by a card's count), the way it was going; back never past cell 1. The throw ends the move: the cell it
+ * lands on takes effect, but a trampoline there does not throw it again, with no run-up.
+ */
+function bounce(s, pi, run, ev) {
+  const p = s.pl[pi], c = p.pos
+  p.pos = Math.max(1, Math.min(s.n, c + run))
+  if (run > 0) p.up = 1
+  ev.push({ e: 'tramp', p: pi, from: c, to: p.pos })
+  trail(p, ['t', c, p.pos])
+  log(s, ev, 'trampoline', p.n, p.pos)
+  if (p.pos >= s.n) { finish(s, pi, ev); return }
+  if (!p.fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }
+  resolveLanding(s, pi, ev)
+}
+/** The first trampoline a move from one cell to another reaches (the cell it starts on left out), or -1. */
+function trampOnWay(s, from, to) {
+  const d = Math.sign(to - from)
+  for (let c = from + d; d && c !== to + d; c += d) if (markerAt(s, c, 'tr')) return c
+  return -1
+}
+
+/**
+ * Moves from cards (Dash, Setback, Dethrone, an Earthquake's throw back, Tailgate's leap): the piece jumps,
+ * then the cell it lands on works as after a roll (ladder, snake, portal). A jump goes over swamps on the
+ * way; only landing in one stops it. A trampoline on the way throws it on (bounce), but a leap goes over it.
  */
 function jump(s, pi, to, ev, why) {
   const p = s.pl[pi], fx = p.fx
   const from = p.pos
-  p.pos = Math.max(0, Math.min(s.n, to))
+  to = Math.max(0, Math.min(s.n, to))
+  const tr = why === 'leap' ? -1 : trampOnWay(s, from, to)
+  p.pos = tr >= 0 ? tr : to
   ev.push({ e: 'jump', p: pi, from, to: p.pos, why })
   trail(p, ['j', from, p.pos])
+  if (tr >= 0) { bounce(s, pi, tr - from, ev); return }
   if (p.pos >= s.n) { finish(s, pi, ev); return }
   if (p.pos <= 0) return
   if (!fx.bo && markerAt(s, p.pos, 'sw')) { ev.push({ e: 'swamp', p: pi, c: p.pos }); log(s, ev, 'swamp', p.n, p.pos); return }

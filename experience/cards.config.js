@@ -115,7 +115,9 @@ export default {
     },
     B4: {
       rarity: 'U', weight: 1, enabled: true,
-      spaces: 3, // spaces forward for whoever lands on it
+      // whoever reaches it on a move (a roll, Going Backwards, Dash, Setback, Dethrone, an Earthquake's
+      // throw back) flies on the way they were going by their run-up, the cells they came to it, and the
+      // move ends where they land (fix the texts if you change it)
       turns: 3,
     },
     B5: {
