@@ -2,7 +2,7 @@
 // cards as textured planes so they can slide, lift and fly without redrawing the canvas.
 import * as THREE from 'three'
 import * as P from './paper.js'
-import { CARD, CARDS, CATEGORIES, FX, targetsFor, whyNot, warded, choiceMax, diceThrown, tierOf, CFG, SIZES, SELF } from './rules.js'
+import { CARD, CARDS, CATEGORIES, FX, targetsFor, whyNot, warded, autoTarget, choiceMax, diceThrown, tierOf, CFG, SIZES, SELF } from './rules.js'
 import { T, LANGS, getLang, who, myName, winsText, foolText, cardName, logText, errText } from './strings.js'
 
 /** The cards page of How to Play: by category, and within one from Common to Legendary. */
@@ -2601,7 +2601,9 @@ export class UI {
     const def = CARD[c.id]
     const all = targetsFor(s, me, c.id), list = app.tut ? app.tut.targets(c.id, all) : all
     if (def.tgt === 'self') { this.play(c.i, me); return }
-    if (def.tgt === 'none' || def.tgt === 'board' || (def.tgt === 'leader' && list.length === 1)) { this.play(c.i, def.tgt === 'leader' ? list[0] : null, def.tgt === 'leader'); return }
+    if (def.tgt === 'none' || def.tgt === 'board') { this.play(c.i, null); return }
+    // Dethrone, Lasso: at once on the only player they can go to
+    if (autoTarget(c.id) && list.length === 1) { this.play(c.i, list[0], true); return }
     const kind = kindOf(def.tgt)
     // Echo: first the player whose last card it plays again (shown by their names), then that card's target
     this.target = { i: c.i, card: c.id, seat: me, kind, list, sel: kind === 'cell2' ? [] : null, echo: def.tgt === 'echo' ? {} : null }
@@ -2668,7 +2670,7 @@ export class UI {
     const id = s.pl[src].lc, def = CARD[id], list = targetsFor(s, me, id)
     if (def.tgt === 'none' || def.tgt === 'board') { this.play(t.i, [src, null]); return true }
     if (def.tgt === 'self') { this.play(t.i, [src, me]); return true }
-    if (def.tgt === 'leader' && list.length === 1) { this.play(t.i, [src, list[0]], true); return true }
+    if (autoTarget(id) && list.length === 1) { this.play(t.i, [src, list[0]], true); return true }
     const kind = kindOf(def.tgt)
     this.target = { ...t, kind, list, sel: kind === 'cell2' ? [] : null, hov: null, echo: { src, card: id } }
     app.view.pointAt(null)

@@ -229,9 +229,9 @@ def pawn(uid, pal, transform, *, face_kind='happy', look='right', tuft='up', fee
 
 
 def ghost(transform, fill, opacity=1, tuft='up'):
-    """The pawn's flat silhouette: an after-image where it has just been."""
+    """The pawn's flat silhouette: an after-image where it has just been (tuft=None: a bald one's)."""
     return (f'<g transform="{transform}" fill="{fill}" opacity="{opacity}" stroke="none">'
-            f'<path d="{TUFTS[tuft][0]}"/><path d="{BODY}"/><path d="{BASE}"/>'
+            + (f'<path d="{TUFTS[tuft][0]}"/>' if tuft else '') + f'<path d="{BODY}"/><path d="{BASE}"/>'
             f'<ellipse cx="200" cy="258" rx="58" ry="15"/><circle cx="200" cy="168" r="84"/></g>')
 
 
@@ -915,6 +915,44 @@ def dethrone():
     ])
 
 
+ROPE, ROPE_SHADE = '#d9a55b', '#a8783a'
+
+
+def rope(d, w=1.0):
+    """A rope along path d: an inked outline, the hemp, its twist as short dashes."""
+    return (f'<path d="{d}" fill="none" stroke-width="{12 * w:.1f}"/>'
+            f'<path d="{d}" fill="none" stroke="{ROPE}" stroke-width="{6 * w:.1f}"/>'
+            f'<path d="{d}" fill="none" stroke="{ROPE_SHADE}" stroke-width="{2.5 * w:.1f}" stroke-dasharray="3 7"/>')
+
+
+def lasso():
+    """H6 Lasso: the red pawn hauls on the rope, the pale pawn caught in its loop is dragged back to it."""
+    p, o = PALETTES['H'], other('H')
+    me, him = (88, 236, 0.42, -12), (284, 238, 0.4, -16)  # the puller, the one caught: place()'s x, y, s, lean
+    # the loop round the caught pawn's middle, in its own frame: the far half behind it, the near half in front
+    loop_back, loop_front = 'M152 314 A48 13 0 0 1 248 314', 'M152 314 A48 13 0 0 0 248 314'
+    kx, ky = at(*him, 148, 316)  # the knot, where the rope leaves the loop
+    fx, fy = at(*me, 326, 288)  # the puller's leading fist
+    tx, ty = at(*me, 278, 312)  # and the other one, nearer, the rope running on behind it
+    bx, by = tx - (fx - tx) * 0.5, ty - (fy - ty) * 0.5
+    return '\n'.join([
+        shadow(92, 240, 36, 5),
+        shadow(282, 242, 38),
+        ghost(place(352, 236, 0.4, 0), p['ghost'], 0.45, None),
+        dust((318, 230, 7), (338, 225, 11), (360, 231, 7)),
+        rope(f'M{bx:.0f} {by:.0f} L{fx:.0f} {fy:.0f} Q{(fx + kx) / 2:.0f} {(fy + ky) / 2 + 6:.0f} {kx:.0f} {ky:.0f}'),
+        pawn('h6', p, place(*me), face_kind='determined', tuft='up',
+             arms=arm('M222 298 C256 300 290 296 316 290', p['body']) + fist(326, 288)
+             + arm('M178 300 C200 330 240 330 270 316', p['body']),
+             front=fist(278, 312)),
+        pawn('h6b', o, place(*him), face_kind='shock', tuft=None, feet='skid',
+             arms=arm('M178 300 C150 290 130 262 124 232', o['body']) + glove(120, 214, -20)
+             + arm('M222 298 C262 290 290 262 300 232', o['body']) + glove(302, 214, 20) + rope(loop_back, 2.4),
+             front=rope(loop_front, 2.4) + f'<circle cx="148" cy="316" r="12" fill="{ROPE}" stroke-width="6"/>'
+             + drop(306, 112, 40)),
+    ])
+
+
 # The Protection cards: the blue pawn and the thing that keeps it safe.
 
 RUBBER = dict(body=TUFT_FILL, shade=TUFT_LINE, light='#fbe08f')  # yellow rubber boots
@@ -1347,6 +1385,7 @@ CARDS = {  # id: (name, category, seed, drawing)
     'H3': ('Skip Turn', 'H', 43, skip_turn),
     'H4': ('Moonwalk', 'H', 45, moonwalk),
     'H5': ('Dethrone', 'H', 47, dethrone),
+    'H6': ('Lasso', 'H', 69, lasso),
     'P1': ('Parachute', 'P', 49, parachute),
     'P2': ('Swamp Boots', 'P', 51, swamp_boots),
     'P3': ('Shield', 'P', 53, shield_card),

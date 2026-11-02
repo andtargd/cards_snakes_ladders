@@ -443,7 +443,7 @@ export class View {
       case 'play': {
         // Echo shows the card it plays again (its card turns over) before that card's target lights up
         const id = e.echo || e.card, tg = e.echo ? e.etg : e.tg
-        const aim = () => { if (typeof tg === 'number' && ['any', 'other', 'leader'].includes(CARD[id].tgt)) { this.focusOn(tg); this.pointAt(tg, 1.6); this.sfx('target') } }
+        const aim = () => { if (typeof tg === 'number' && ['any', 'other', 'leader', 'ahead'].includes(CARD[id].tgt)) { this.focusOn(tg); this.pointAt(tg, 1.6); this.sfx('target') } }
         if (!e.echo) { this.tasks.push({ dur: 1.25, start: () => { this.emit('play', e); aim() } }); break }
         this.tasks.push({ dur: 1.0, start: () => this.emit('play', e) })
         this.tasks.push({ dur: 1.0, start: aim })
@@ -507,6 +507,7 @@ export class View {
       }
       case 'tramp': case 'jump':
         if (e.why === 'leap') { this.arcTask(e.p, e.from, e.to, null, 'jump'); this.cardPopup(e.p, 'M5', 'leap'); break }
+        if (e.why === 'lasso' && e.by != null) { this.lassoTask(e); break }
         this.arcTask(e.p, e.from, e.to, e.e === 'tramp' ? 1.2 : 0.7, e.e === 'tramp' ? 'tramp' : 'jump'); break
       case 'rewind': this.cardPopup(e.p, 'M6', 'rewound'); this.rewindTask(e); break
       case 'portal': this.teleportTask([[e.p, e.to]]); break
@@ -549,6 +550,44 @@ export class View {
       },
       update: k => { const t = this.tokens[p]; t.group.position.lerpVectors(a, b, ease(k)); t.group.position.y += Math.sin(k * Math.PI) * h; this.follow(t.group.position) },
       end: () => { const t = this.tokens[p]; t.pos = to; t.anim = null; this.layoutTokens() },
+    })
+  }
+  /**
+   * Lasso: a rope flies from the player who played it to the piece, catches it, and drags it back in low hops
+   * to the cell in front of them; the rope goes as the piece lands.
+   */
+  lassoTask(e) {
+    let rope = null, a, b
+    const mat = new THREE.MeshStandardMaterial({ color: '#b8864b', roughness: 0.85 })
+    const hand = () => this.tokens[e.by].group.position.clone().add(new THREE.Vector3(0, 0.55, 0))
+    const neck = () => this.tokens[e.p].group.position.clone().add(new THREE.Vector3(0, 0.5, 0))
+    // the rope from one end to the other, bowed up by `lift` (a sag below 0)
+    const draw = (from, to, lift) => {
+      const mid = from.clone().lerp(to, 0.5)
+      mid.y += lift
+      const geo = new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(from, mid, to), 24, 0.03, 6, false)
+      if (rope) { rope.geometry.dispose(); rope.geometry = geo } else { rope = new THREE.Mesh(geo, mat); this.root.add(rope) }
+    }
+    this.tasks.push({
+      dur: 0.45,
+      start: () => { this.focusOn(e.p); this.sfx('jump') },
+      update: k => { const f = hand(), to = f.clone().lerp(neck(), easeOut(k)); draw(f, to, 0.6 * Math.sin(k * Math.PI) + 0.1) },
+    })
+    this.cardPopup(e.p, 'H6', 'caught')
+    this.tasks.push({
+      dur: 0.75,
+      start: () => { const t = this.tokens[e.p]; t.anim = true; a = t.group.position.clone(); b = G.cellPos(e.to); this.sfx('lasso') },
+      update: k => {
+        const t = this.tokens[e.p]
+        t.group.position.lerpVectors(a, b, ease(k))
+        t.group.position.y += Math.abs(Math.sin(k * Math.PI * 3)) * 0.18 * (1 - k)
+        draw(hand(), neck(), -0.08)
+        this.follow(t.group.position)
+      },
+      end: () => {
+        const t = this.tokens[e.p]; t.pos = e.to; t.anim = null; this.layoutTokens()
+        this.root.remove(rope); rope.geometry.dispose(); mat.dispose()
+      },
     })
   }
   /**

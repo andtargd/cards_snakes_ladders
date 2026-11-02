@@ -34,13 +34,13 @@ export const CATEGORIES = ['M', 'D', 'B', 'H', 'P', 'C']
 // How each card works: its category and what it targets. Rarity and numbers come from cards.config.js,
 // and so does the target of a card played on a player (its `target`); names and texts are in locale.js. tgt: any (any
 // player on the board, self included), other (another player), self (automatic), leader (automatic),
-// cell, cell2 (two cells), ladder, snake, board, none, echo (a player whose last card is played again,
-// then that card's own target)
+// ahead (a player ahead within the card's range; automatic when there is one), cell, cell2 (two cells),
+// ladder, snake, board, none, echo (a player whose last card is played again, then that card's own target)
 const KINDS = {
   M1: ['M', 'any'], M2: ['M', 'any'], M3: ['M', 'other'], M4: ['M', 'any'], M5: ['M', 'self'], M6: ['M', 'any'],
   D1: ['D', 'any'], D2: ['D', 'any'], D3: ['D', 'any'], D4: ['D', 'any'], D5: ['D', 'any'],
   B1: ['B', 'cell'], B2: ['B', 'ladder'], B3: ['B', 'snake'], B4: ['B', 'cell'], B5: ['B', 'cell2'], B6: ['B', 'board'],
-  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'], H5: ['H', 'leader'],
+  H1: ['H', 'any'], H2: ['H', 'any'], H3: ['H', 'any'], H4: ['H', 'any'], H5: ['H', 'leader'], H6: ['H', 'ahead'],
   P1: ['P', 'any'], P2: ['P', 'any'], P3: ['P', 'any'], P4: ['P', 'any'],
   C1: ['C', 'none'], C2: ['C', 'other'], C3: ['C', 'other'], C4: ['C', 'other'], C5: ['C', 'none'], C6: ['C', 'echo'],
 }
@@ -50,8 +50,8 @@ const TARGETS = { any_player: 'any', not_current_player: 'other', current_player
 const NOT_SELF = new Set(['M3', 'C2', 'C3', 'C4'])
 // what no one else can play on a player under the Holy Grail: the Hinder cards, the cards that move them
 // (Dash, Setback, Swap Places, Rewind) and those that take their cards (Steal, Swap Hands)
-const WARDED = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'M1', 'M2', 'M3', 'M6', 'C3', 'C4'])
-const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3, rounds: 1 }
+const WARDED = new Set(['H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'M1', 'M2', 'M3', 'M6', 'C3', 'C4'])
+const DEFAULTS = { spaces: 0, dice: 2, max: 6, min: 1, turns: CFG.fxTurns, shift: 2, slide: 0.5, extra: 1, draw: 3, rounds: 1, range: 5 }
 /** Every card with its settings: { id, cat, rar, tgt, w, on, ...numbers }. */
 const ALL = Object.entries(KINDS).map(([id, [cat, kind]]) => {
   const c = { ...DEFAULTS, ...DECK.cards[id] }
@@ -872,17 +872,18 @@ function trampOnWay(s, from, to) {
 }
 
 /**
- * Moves from cards (Dash, Setback, Dethrone, an Earthquake's throw back, Tailgate's leap): the piece jumps,
- * then the cell it lands on works as after a roll (ladder, snake, portal). A jump goes over swamps on the
- * way; only landing in one stops it. A trampoline on the way throws it on (bounce), but a leap goes over it.
+ * Moves from cards (Dash, Setback, Dethrone, an Earthquake's throw back, Tailgate's leap, Lasso's pull): the
+ * piece jumps, then the cell it lands on works as after a roll (ladder, snake, portal). A jump goes over
+ * swamps on the way; only landing in one stops it. A trampoline on the way throws it on (bounce), but a leap
+ * goes over it. by: the player who pulls it (Lasso).
  */
-function jump(s, pi, to, ev, why) {
+function jump(s, pi, to, ev, why, by = null) {
   const p = s.pl[pi], fx = p.fx
   const from = p.pos
   to = Math.max(0, Math.min(s.n, to))
   const tr = why === 'leap' ? -1 : trampOnWay(s, from, to)
   p.pos = tr >= 0 ? tr : to
-  ev.push({ e: 'jump', p: pi, from, to: p.pos, why })
+  ev.push({ e: 'jump', p: pi, from, to: p.pos, why, ...(by != null ? { by } : {}) })
   trail(p, ['j', from, p.pos])
   if (tr >= 0) { bounce(s, pi, tr - from, ev); return }
   if (p.pos >= s.n) { finish(s, pi, ev); return }
@@ -951,6 +952,7 @@ export function targetsFor(s, pi, cardId) {
       return list.filter(q => fitsPlayer(s, pi, cardId, q))
     }
     case 'echo': return live.filter(i => echoable(s, pi, s.pl[i].lc))
+    case 'ahead': return inReach(s, pi, cardId).filter(q => !warded(s, pi, cardId, q))
     case 'leader': {
       // (a leader under the Holy Grail stays the leader: Dethrone goes to no one else)
       const best = Math.max(...live.map(i => s.pl[i].pos))
@@ -1012,6 +1014,14 @@ export function tailgateCell(s, pi) {
   const c = Math.min(...ahead) - 1
   return c > me ? c : null
 }
+/**
+ * Lasso: the other players ahead of player pi by no more than the card's range, the Holy Grail aside; not one
+ * on the very next cell, the one it pulls them to.
+ */
+function inReach(s, pi, cardId) {
+  const me = s.pl[pi].pos
+  return onBoard(s).filter(q => q !== pi && s.pl[q].pos > me + 1 && s.pl[q].pos - me <= CARD[cardId].range)
+}
 /** Echo can play this card again now: one that was played, not an Echo, with a target right now. */
 function echoable(s, pi, cardId) {
   return !!cardId && cardId !== 'C6' && !!CARD[cardId] && targetsFor(s, pi, cardId).length > 0
@@ -1039,7 +1049,8 @@ export function whyNot(s, pi, cardId) {
   if (!targetsFor(s, pi, cardId).length) {
     if (cardId === 'M5') return 'noOneAhead'
     if (cardId === 'C6') return s.pl.some(q => q.lc && q.lc !== 'C6') ? 'noEchoNow' : 'noEchoYet'
-    const held = onBoard(s).find(q => warded(s, pi, cardId, q))
+    const held = (CARD[cardId].tgt === 'ahead' ? inReach(s, pi, cardId) : onBoard(s)).find(q => warded(s, pi, cardId, q))
+    if (held == null && CARD[cardId].tgt === 'ahead') return ['noOneInReach', CARD[cardId].range]
     if (held != null) return ['protectedBy', nm(s, held), { c: 'P4' }]
     return 'noTargets'
   }
@@ -1124,9 +1135,9 @@ function afterAction(s, pi, ev) {
 function checkTarget(s, pi, cardId, tg) {
   const card = CARD[cardId]
   const valid = targetsFor(s, pi, cardId)
-  if (card.tgt === 'leader') {
+  if (card.tgt === 'leader' || card.tgt === 'ahead') {
     if (valid.length === 1) return { tg: valid[0] }
-    return valid.includes(tg) ? { tg } : { err: 'chooseLeader' }
+    return valid.includes(tg) ? { tg } : { err: card.tgt === 'leader' ? 'chooseLeader' : 'chooseValid' }
   }
   if (card.tgt === 'cell2') {
     if (!Array.isArray(tg) || tg.length !== 2 || tg[0] === tg[1] || !valid.includes(tg[0]) || !valid.includes(tg[1])) return { err: 'chooseFree' }
@@ -1136,7 +1147,9 @@ function checkTarget(s, pi, cardId, tg) {
   if (card.tgt === 'self') return valid.includes(pi) ? { tg: pi } : { err: 'noTargets' }
   return valid.includes(tg) ? { tg } : { err: 'chooseValid' }
 }
-const onPlayer = cardId => ['any', 'other', 'leader'].includes(CARD[cardId].tgt)
+const onPlayer = cardId => ['any', 'other', 'leader', 'ahead'].includes(CARD[cardId].tgt)
+/** Played on a player chosen for the card, without asking when there is only one (Dethrone, Lasso). */
+export const autoTarget = cardId => ['leader', 'ahead'].includes(CARD[cardId].tgt)
 
 /**
  * Plays card i of the player's hand on tg. Echo's tg is [player whose last card it plays again, that
@@ -1223,6 +1236,8 @@ function cardEffect(s, pi, cardId, target, ev) {
     case 'H3': setFx('sk'); break
     case 'H4': setFx('bk'); break
     case 'H5': if (who.pos <= 1) return false; jump(s, target, Math.max(1, who.pos - card.spaces), ev, 'dethrone'); break
+    // pulled back to the cell just in front of the player: it takes effect, a trampoline on the way throws them on
+    case 'H6': jump(s, target, p.pos + 1, ev, 'lasso', pi); break
     case 'P1': timed('pa'); break
     case 'P2': timed('bo'); break
     case 'P3': timed('sh'); break
@@ -1466,7 +1481,7 @@ function sensible(s, pi, i, tg) {
     // Rewind: myself when it takes me further on (after a snake or a Setback), another player when they
     // have just gone up a ladder or a trampoline
     case 'M6': { const q = s.pl[tg], b = rewindOf(q); return !!b && (self ? b.to > q.pos : b.to < q.pos && (!!q.up || /[lt]/.test(b.tr))) }
-    case 'M1': case 'M2': case 'H5': { // where the piece ends up, snakes, ladders and shields included
+    case 'M1': case 'M2': case 'H5': case 'H6': { // where the piece ends up, snakes, ladders and shields included
       const c = clone(s)
       c.rolled = false
       if (!apply(c, pi, { t: 'play', i, tg }).ok) return false
@@ -1484,6 +1499,8 @@ function sensible(s, pi, i, tg) {
 
 // (the Holy Grail too: it lifts a Slow Down or a Moonwalk off this turn's roll)
 const ROLL_CARDS = new Set(['D1', 'D2', 'D3', 'D4', 'D5', 'M4', 'P4'])
+// Lasso pulls a player to the cell in front of the one playing it: before the roll that cell is further back
+const BEFORE_ROLL = new Set(['H6'])
 /** The card a bot keeps of those Choose Your Card offers. */
 function bestOffer(s, pi, level) {
   const offer = s.offer || []
@@ -1530,8 +1547,8 @@ export function botAction(s, pi) {
   const hold = (o) => level >= 3 && CARD[o.card].rar === 'L' && o.gain < 2.5 && p.h.length < CFG.hand && !s.pl.some(q => !q.d && q.pos >= s.n * 0.7)
   if (!s.rolled) {
     if (canPlay) {
-      // cards that shape this turn's roll go before it
-      const o = bestOption(s, pi, level, (c, tg) => ROLL_CARDS.has(c) || INSTEAD_OF_ROLL.has(c) ? CARD[c].tgt !== 'any' || tg === pi : false)
+      // cards that shape this turn's roll go before it, and those that do more then
+      const o = bestOption(s, pi, level, (c, tg) => ROLL_CARDS.has(c) || INSTEAD_OF_ROLL.has(c) ? CARD[c].tgt !== 'any' || tg === pi : BEFORE_ROLL.has(c))
       if (o && o.gain > threshold && !hold(o)) return { t: 'play', i: o.i, tg: o.tg }
     }
     return rollAction()

@@ -26,6 +26,7 @@ export default {
   tramp: 0.5, //                                 a trampoline throws a piece up
   portal: 0.5, //                                through a portal; Swap Places
   rewind: { sound: 'portal', volume: 0.4 }, //   Rewind: a piece goes back the way it came
+  lasso: { sound: 'jump', volume: 0.4 }, //      Lasso: the rope pulls a piece back
   boardChange: { sound: 'fold', volume: 0.5 }, // snakes and ladders change on the board (a card)
   quake: 0.5, //                                 Earthquake: the whole board shifts
   win: 0.6, //                                   a player reaches the last cell
@@ -37,6 +38,7 @@ export default {
   shield: 0.5, //                                a shield stops a card
   leap: { sound: 'select', volume: 0.5 }, //     Leap
   rewound: { sound: 'fold', volume: 0.5 }, //    Rewind's word over the piece
+  caught: { sound: 'select', volume: 0.5 }, //   Lasso: the rope catches the piece
 
   // ── cards
   draw: 0.4, //                                  I draw a card

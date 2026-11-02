@@ -115,9 +115,9 @@ export default {
     },
     B4: {
       rarity: 'U', weight: 1, enabled: true,
-      // whoever reaches it on a move (a roll, Going Backwards, Dash, Setback, Dethrone, an Earthquake's
-      // throw back) flies on the way they were going by their run-up, the cells they came to it, and the
-      // move ends where they land (fix the texts if you change it)
+      // whoever reaches it on a move (a roll, Going Backwards, Dash, Setback, Dethrone, Lasso, an
+      // Earthquake's throw back) flies on the way they were going by their run-up, the cells they came to
+      // it, and the move ends where they land (fix the texts if you change it)
       turns: 3,
     },
     B5: {
@@ -155,6 +155,14 @@ export default {
     H5: {
       rarity: 'L', weight: 1, enabled: true,
       spaces: 10, // spaces back for the leader (never past cell 1)
+    },
+    H6: {
+      rarity: 'R', weight: 1, enabled: true,
+      // pulls another player ahead, by no more than this many cells, back to the cell just in front of the
+      // one playing it (chosen by itself when only one is in reach); that cell takes effect (fix the texts if
+      // you change it)
+      range: 8,
+      popup: { color: '#d64545' }, // over the player as the lasso catches them
     },
 
     // ---------- Protection ----------

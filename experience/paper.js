@@ -344,6 +344,32 @@ export function drawIcon(g, id, x, y, s, col = INK) {
       g.closePath(); g.fill()
       arrow(g, x, y + s * 0.04, x, y + s * 0.38, w)
       break
+    case 'H6': { // lasso: a wide loop, the knot on its left, the rope trailing down from it
+      const P = (u, v) => [x + u * s, y + v * s]
+      const cx = x + s * 0.03, cy = y - s * 0.26, rx = s * 0.41, ry = s * 0.16, tilt = -0.1
+      const kx = cx + Math.cos(tilt) * rx * Math.cos(2.5) - Math.sin(tilt) * ry * Math.sin(2.5) // the knot: a point
+      const ky = cy + Math.sin(tilt) * rx * Math.cos(2.5) + Math.cos(tilt) * ry * Math.sin(2.5) // low on the loop's left
+      const tail = () => {
+        g.beginPath(); g.moveTo(kx, ky)
+        g.bezierCurveTo(...P(-0.37, -0.1), ...P(-0.46, -0.1), ...P(-0.42, -0.03))
+        g.bezierCurveTo(...P(-0.39, 0.04), ...P(0.06, 0.05), ...P(0.26, 0.13))
+        g.bezierCurveTo(...P(0.44, 0.2), ...P(0.38, 0.31), ...P(0.18, 0.35))
+        g.bezierCurveTo(...P(0.06, 0.37), ...P(-0.03, 0.38), ...P(-0.02, 0.43))
+      }
+      g.lineWidth = w * 0.9
+      tail(); g.stroke()
+      g.beginPath(); g.ellipse(cx, cy, rx, ry, tilt, 0, Math.PI * 2); g.stroke()
+      // a light along the top of the loop and down the rope
+      g.strokeStyle = '#ffffff'; g.lineWidth = w * 0.22; g.globalAlpha = 0.8
+      g.beginPath(); g.ellipse(cx, cy, rx, ry, tilt, Math.PI * 1.12, Math.PI * 1.55); g.stroke()
+      g.beginPath(); g.moveTo(...P(-0.16, 0.04)); g.bezierCurveTo(...P(-0.02, 0.06), ...P(0.12, 0.08), ...P(0.24, 0.13)); g.stroke()
+      g.globalAlpha = 1
+      // the knot the loop runs through, rimmed in white to stand off the rope, a band round it
+      g.lineWidth = w * 0.3
+      g.beginPath(); g.arc(kx, ky, s * 0.08, 0, Math.PI * 2); g.fill(); g.stroke()
+      g.beginPath(); g.arc(kx + s * 0.04, ky - s * 0.01, s * 0.055, Math.PI * 0.7, Math.PI * 1.3); g.stroke()
+      break
+    }
     case 'M4': // double move
       g.font = `bold ${s * 0.42}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
       g.fillText('x2', x - s * 0.08, y + s * 0.02)
